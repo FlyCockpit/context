@@ -89,14 +89,14 @@ catalog:
   "@orpc/zod": ^1.16.1
   # Exact pins: the 1.7.x family must stay aligned so @better-auth/core and
   # plugin types resolve to a single copy. Bump the whole family together.
-  better-auth: 1.7.17
-  "@better-auth/oauth-provider": 1.7.17
-  "@better-auth/mcp": 1.7.17
-  "@better-auth/cimd": 1.7.17
+  better-auth: 1.7.18
+  "@better-auth/oauth-provider": 1.7.18
+  "@better-auth/mcp": 1.7.18
+  "@better-auth/cimd": 1.7.18
   # MCP SDK v2 (server transport), matching ws-model-proxy. Exact pin: the
   # handler/auth-adapter API surface is versioned with the protocol.
   "@modelcontextprotocol/server": 2.4.0
-  lucide-react: 1.68.0
+  lucide-react: 1.69.0
   next-themes: ^0.4.6
   # Web/UI React.
   react: ^19.3.1
@@ -120,15 +120,15 @@ catalog:
   # and re-run `pnpm run lsp:smoke`.
   typescript: ^7.0.2
   pyright: 1.1.414
-  vite: ^8.3.5
+  vite: ^8.3.6
   "@vitejs/plugin-react": 6.2.1
   postcss: ^8.5.32
-  "@tanstack/ai": 1.1.0
-  "@tanstack/ai-anthropic": 1.1.0
-  "@tanstack/ai-openrouter": 1.1.0
+  "@tanstack/ai": 1.2.0
+  "@tanstack/ai-anthropic": 1.1.1
+  "@tanstack/ai-openrouter": 1.1.1
   "@tanstack/react-form": ^1.33.5
-  "@tanstack/react-query": 5.106.0
-  "@tanstack/react-query-devtools": 5.106.0
+  "@tanstack/react-query": 5.106.1
+  "@tanstack/react-query-devtools": 5.106.1
   "@tanstack/react-router": ^1.170.46
   "@tanstack/react-router-devtools": ^1.167.2
   "@tanstack/react-router-ssr-query": ^1.167.3
@@ -141,10 +141,10 @@ catalog:
   "@types/nodemailer": ^8.0.2
   tsdown: 0.23.5
   "@aws-sdk/client-s3": 3.1162.0
-  i18next: 26.7.1
-  react-i18next: 17.1.12
+  i18next: 26.7.2
+  react-i18next: 17.1.13
   i18next-browser-languagedetector: 8.3.0
-  openai: 7.50.0
+  openai: 7.51.0
   "@anthropic-ai/sdk": 1.5.0
   "qrcode.react": ^4.2.0
   "@fontsource-variable/roboto": ^5.3.0
