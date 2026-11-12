@@ -1,0 +1,218 @@
+# Manual, versioned app container and GitHub releases.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer version to publish, for example 1.0.0 (optional v prefix).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      image_tag: ${{ steps.release.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - id: release
+        name: Require a stable SemVer version and main branch
+        env:
+          RELEASE_INPUT: ${{ inputs.version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          if (process.env.GITHUB_REF !== 'refs/heads/main') {
+            throw new Error('Run releases from main.');
+          }
+          const version = process.env.RELEASE_INPUT.replace(/^v/, '');
+          // Stable releases only: this workflow always moves the `latest` image
+          // tag and publishes a normal GitHub release, so a prerelease or
+          // build-metadata version is refused rather than promoted.
+          const number = '(?:0|[1-9][0-9]*)';
+          if (!new RegExp(`^${number}\\.${number}\\.${number}$`).test(version)) {
+            throw new Error('Use a stable MAJOR.MINOR.PATCH version such as 1.0.0.');
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=v${version}\nversion=${version}\nimage_tag=${version}\n`);
+          NODE
+      - name: Require CHANGELOG notes and an unused tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Checked before any image is pushed: a failed or repeated release must
+          # never move an already-published version or `latest`.
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const version = process.env.RELEASE_VERSION;
+          const lines = readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/);
+          const start = lines.findIndex(line => {
+            const match = /^##\s+(?:\[([^\]]+)\]|(\S+))(?:\s|$)/.exec(line);
+            return match && (match[1] ?? match[2]) === version;
+          });
+          if (start === -1) throw new Error(`Missing CHANGELOG.md section for ${version}.`);
+          let end = start + 1;
+          while (end < lines.length && !/^##\s/.test(lines[end])) end++;
+          if (!lines.slice(start + 1, end).join('\n').trim()) {
+            throw new Error(`Empty CHANGELOG.md section for ${version}.`);
+          }
+          NODE
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_TAG already exists; bump the version instead of republishing."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $RELEASE_TAG already exists; bump the version instead of republishing."
+            exit 1
+          fi
+
+  node-checks:
+    name: Node checks
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify && pnpm verify:tooling
+      - run: pnpm audit --audit-level=high
+
+  publish-container:
+    name: Publish app container
+    needs: [validate, node-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Compute apt cache-bust date
+        id: apt-date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - name: Build app image for scan
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: cockpit-context-release-scan:${{ github.sha }}
+          build-args: |
+            BUILD_VERSION=${{ github.sha }}
+            IMAGE_VERSION=${{ needs.validate.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            APT_CACHE_DATE=${{ steps.apt-date.outputs.date }}
+          cache-from: type=gha,scope=release-app
+          cache-to: type=gha,mode=max,scope=release-app
+          provenance: false
+      - name: Reclaim ephemeral Buildx cache before Trivy
+        run: |
+          set -euo pipefail
+          docker buildx prune -f --max-used-space 512MB || docker builder prune -f
+      - name: Scan app image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: cockpit-context-release-scan:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          format: table
+          # Security release: updates vulnerable scanner dependencies.
+          version: v0.76.2
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      - name: Build and push app image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/flycockpit/cockpit-context:${{ needs.validate.outputs.image_tag }}
+            ghcr.io/flycockpit/cockpit-context:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/FlyCockpit/cockpit-context
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.validate.outputs.version }}
+          build-args: |
+            BUILD_VERSION=${{ github.sha }}
+            IMAGE_VERSION=${{ needs.validate.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            APT_CACHE_DATE=${{ steps.apt-date.outputs.date }}
+          cache-from: type=gha,scope=release-app
+          cache-to: type=gha,mode=max,scope=release-app
+          provenance: false
+
+  github-release:
+    name: Publish GitHub release
+    needs: [validate, publish-container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const version = process.env.RELEASE_VERSION;
+          const lines = readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/);
+          const start = lines.findIndex(line => {
+            const match = /^##\s+(?:\[([^\]]+)\]|(\S+))(?:\s|$)/.exec(line);
+            return match && (match[1] ?? match[2]) === version;
+          });
+          if (start === -1) throw new Error(`Missing CHANGELOG.md section for ${version}.`);
+          let end = start + 1;
+          while (end < lines.length && !/^##\s/.test(lines[end])) end++;
+          const notes = lines.slice(start + 1, end).join('\n').trim();
+          if (!notes) throw new Error(`Empty CHANGELOG.md section for ${version}.`);
+          writeFileSync('release-notes.md', `${notes}\n`);
+          NODE
+      - name: Create versioned GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: gh release create "$RELEASE_TAG" --target "$RELEASE_SHA" --title "$RELEASE_TAG" --notes-file release-notes.md

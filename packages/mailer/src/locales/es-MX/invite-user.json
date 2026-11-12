@@ -1,0 +1,9 @@
+{
+  "body": "Hola {{name}}, un administrador ha creado una cuenta para ti. Usa el botón de abajo para elegir tu contraseña y después inicia sesión con este correo electrónico.",
+  "cta": "Establecer tu contraseña",
+  "emailLabel": "Correo electrónico",
+  "heading": "Has sido invitado",
+  "ignoreFooter": "Si no esperabas esta invitación, puedes ignorar este correo de forma segura.",
+  "linkNote": "Este enlace funciona una sola vez y expira en {{days}} días.",
+  "subject": "Has sido invitado"
+}

@@ -1,0 +1,117 @@
+// Packages and agent proposals — docs/product.md.
+//
+// A Package is one entry in ONE user's dependency list. Packages are never
+// shared between users; only the on-disk public clone behind them is
+// (repositories.prisma). Every query is scoped by `ownerId`.
+
+/// Package ecosystems an identifier can name (`<ecosystem>:<name>`). `GIT` is a
+/// repository with no registry (`git:owner/repo`).
+enum PackageEcosystem {
+  NPM
+  PYPI
+  CARGO
+  GO
+  GIT
+}
+
+model Package {
+  id           String           @id @default(cuid(2))
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @default(now()) @updatedAt
+  ownerId      String
+  Owner        User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// `<ecosystem>:<name>`, e.g. `npm:@tanstack/react-query`. What agents pass to
+  /// the MCP tools. Unique per owner.
+  identifier   String
+  ecosystem    PackageEcosystem
+  /// The registry name without the ecosystem prefix (`@tanstack/react-query`).
+  /// Used for monorepo tag candidates (`<name>@<version>`).
+  name         String
+  displayName  String
+  /// `https://…` or an SSH form, validated by the git layer before saving.
+  gitUrl       String
+  /// One-time SSH clone: never automatically fetched or evicted.
+  isSnapshot   Boolean          @default(false)
+  /// Required for non-snapshot SSH packages; must be one of the owner's keys. NoAction
+  /// (not Restrict): the app refuses to delete a key still in use, while a
+  /// user deletion — which cascades to both this row and the key in the same
+  /// statement — still succeeds because NO ACTION is checked at statement end.
+  sshKeyId     String?
+  SshKey       SshKey?          @relation(fields: [sshKeyId], references: [id], onDelete: NoAction)
+  /// The clone currently serving this package. Null until first resolved, and
+  /// again after the repository is pruned; the package re-clones on demand.
+  repositoryId String?
+  Repository   Repository?      @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  /// Optional monorepo package path, e.g. `packages/react-query`.
+  subdirectory String?
+  /// Optional tag template tried first when resolving a version, e.g.
+  /// `@tanstack/react-query@{version}`.
+  tagPattern   String?
+  /// Ref used when an agent gives neither version nor ref. Null = the remote's
+  /// default branch.
+  defaultRef   String?
+  /// User-written context injected into every investigation of this package.
+  notes        String?
+  lastUsedAt   DateTime?
+
+  Proposals     PackageProposal[]
+  Conversations Conversation[]
+
+  @@unique([ownerId, identifier])
+  @@index([ownerId, lastUsedAt])
+  @@index([sshKeyId])
+  @@index([repositoryId])
+  @@map("package")
+}
+
+enum PackageProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// An MCP agent's request to add a package (`propose_dependency`). Pending until
+/// the owner approves (which creates the Package) or rejects it, unless the
+/// proposing connection auto-approves.
+model PackageProposal {
+  id              String                @id @default(cuid(2))
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @default(now()) @updatedAt
+  ownerId         String
+  Owner           User                  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  status          PackageProposalStatus @default(PENDING)
+  ecosystem       PackageEcosystem
+  name            String
+  /// `<ecosystem>:<name>`, the identifier the package would get. Used for the
+  /// duplicate checks (existing package, existing pending proposal).
+  identifier      String
+  /// Registry-lookup suggestions (or the agent's input); the owner can edit
+  /// them in the approve dialog.
+  displayName     String?
+  gitUrl          String?
+  subdirectory    String?
+  version         String?
+  /// Why the agent wants it. Untrusted agent text: render as plain text.
+  reason          String
+  /// Optional owner-written reason, returned to the agent by `get_proposal`.
+  rejectionReason String?
+  decidedAt       DateTime?
+  /// The package an approval created. SetNull if that package is deleted later.
+  packageId       String?
+  Package         Package?              @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  /// The proposing connection: exactly one of these two is set at creation.
+  /// SetNull on revoke-and-delete so the proposal history survives.
+  mcpAgentTokenId String?
+  McpAgentToken   McpAgentToken?        @relation(fields: [mcpAgentTokenId], references: [id], onDelete: SetNull)
+  mcpGrantId      String?
+  McpGrant        McpGrant?             @relation(fields: [mcpGrantId], references: [id], onDelete: SetNull)
+  /// Snapshot of the connection's display name (token name or OAuth client name).
+  connectionLabel String
+
+  @@index([ownerId, status, createdAt])
+  @@index([ownerId, identifier, status])
+  @@index([packageId])
+  @@index([mcpAgentTokenId])
+  @@index([mcpGrantId])
+  @@map("package_proposal")
+}

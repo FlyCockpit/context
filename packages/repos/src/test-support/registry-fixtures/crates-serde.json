@@ -1,0 +1,26 @@
+{
+  "crate": {
+    "id": "serde",
+    "name": "serde",
+    "description": "A generic serialization/deserialization framework",
+    "homepage": "https://serde.rs",
+    "documentation": "https://docs.rs/serde",
+    "repository": "https://github.com/serde-rs/serde",
+    "max_version": "1.0.229",
+    "max_stable_version": "1.0.229",
+    "newest_version": "1.0.229",
+    "updated_at": "2026-07-18T23:05:13.266456Z"
+  },
+  "versions": [
+    {
+      "num": "1.0.229",
+      "yanked": false,
+      "created_at": "2026-07-18T23:05:13.266456Z"
+    },
+    {
+      "num": "1.0.228",
+      "yanked": false,
+      "created_at": "2025-09-27T16:51:35.265429Z"
+    }
+  ]
+}

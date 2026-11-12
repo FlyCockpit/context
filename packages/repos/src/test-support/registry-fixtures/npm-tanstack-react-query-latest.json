@@ -1,0 +1,12 @@
+{
+  "name": "@tanstack/react-query",
+  "version": "5.104.5",
+  "description": "Hooks for managing, caching and syncing asynchronous and remote data in React",
+  "repository": {
+    "url": "git+https://github.com/TanStack/query.git",
+    "type": "git",
+    "directory": "packages/react-query"
+  },
+  "homepage": "https://tanstack.com/query",
+  "license": "MIT"
+}

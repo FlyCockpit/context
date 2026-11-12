@@ -1,0 +1,41 @@
+{
+  "name": "@cockpit-context/runs",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./jobs": {
+      "default": "./src/job-definitions.ts"
+    },
+    "./errors": {
+      "default": "./src/errors.ts"
+    },
+    "./answer-reuse": {
+      "default": "./src/answer-reuse.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@cockpit-context/agent-runtime": "workspace:*",
+    "@cockpit-context/db": "workspace:*",
+    "@cockpit-context/env": "workspace:*",
+    "@cockpit-context/explore": "workspace:*",
+    "@cockpit-context/jobs": "workspace:*",
+    "@cockpit-context/repos": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:"
+  }
+}

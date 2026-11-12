@@ -1,0 +1,224 @@
+{
+  "meta": {
+    "title": "Privacy notice"
+  },
+  "title": "Privacy notice",
+  "updated": "Last updated October 25, 2026",
+  "intro": "Cockpit Context is self-hosted software. This notice describes what this Cockpit Context server stores, why, and which outside services receive any of it. The person or organization that runs this server (the operator) is responsible for that data.",
+  "footerLink": "Privacy",
+  "signupNotice": "Before you sign up, read what this server stores and who receives it:",
+  "signupLink": "privacy notice",
+  "settingsTitle": "Privacy",
+  "settingsDescription": "What this server stores about you, who receives it, and how to delete it.",
+  "sections": {
+    "operator": {
+      "title": "Who runs this server",
+      "body": "This Cockpit Context server is run by its operator, not by the Cockpit Context project. The operator decides who may sign up, which AI model answers questions, and whether email and backups are set up.",
+      "contact": {
+        "loadFailed": "Couldn’t load the operator’s contact details.",
+        "named": "Operator: {{name}}",
+        "contactLabel": "Contact for privacy questions:",
+        "noEmail": "The operator has not published a contact address. Contact the administrator who gave you access.",
+        "unpublished": "The operator of this Cockpit Context instance has not published contact details. Contact the administrator who gave you access."
+      }
+    },
+    "collected": {
+      "title": "What this server stores",
+      "intro": "Everything below is kept in this server’s database or on its data disk, and is used only to run Cockpit Context.",
+      "items": {
+        "account": {
+          "term": "Account",
+          "detail": "Your name, email address, role and preferred language. Your password is stored only as a salted hash."
+        },
+        "twoFactor": {
+          "term": "Two-factor authentication",
+          "detail": "If you turn it on, the authenticator secret and your backup codes, both stored encrypted."
+        },
+        "sessions": {
+          "term": "Sign-in sessions",
+          "detail": "A session token, the IP address and browser (user agent) you signed in from, and when the session expires."
+        },
+        "sshKeys": {
+          "term": "SSH keys",
+          "detail": "SSH keys you choose to save are encrypted at rest with the server’s encryption key; public keys and fingerprints are not. A key used once is held only for that operation, with a private temporary file removed afterwards. Passphrases are used in memory and never stored. Snapshot repository copies remain until you delete them; keep your key to restore or update them."
+        },
+        "knownHosts": {
+          "term": "Known hosts",
+          "detail": "The host names, ports and SSH host-key fingerprints you confirm."
+        },
+        "connections": {
+          "term": "Agent connections",
+          "detail": "API tokens are stored only as a keyed hash, and OAuth access and refresh tokens only as hashes. Each connection keeps its name, its settings and when it was last used."
+        },
+        "packages": {
+          "term": "Packages and proposals",
+          "detail": "The dependencies in your list (identifier, git URL, version settings and your notes) and the packages your coding agents propose, with the reason they gave."
+        },
+        "conversations": {
+          "term": "Conversations",
+          "detail": "The questions you or your coding agents ask, which can include code or details about your project; your steering and follow-up messages; every step the investigation agent takes, including the source code it reads; the answers; and the tokens and cost each run used."
+        },
+        "repositories": {
+          "term": "Repository copies",
+          "detail": "Clones and checkouts of the git repositories your packages point to, with an AI-written overview of each checked-out version. Clones of public repositories and their AI-written overviews are shared on disk by every user of this server; private clones belong to one user. If you edit an overview, your edited version is stored for you alone: only you see it and only your investigations use it."
+        },
+        "logs": {
+          "term": "Background jobs and logs",
+          "detail": "Records of clone, fetch, checkout, overview and cleanup jobs, and a server log line per request with its method, path, status and duration. The log leaves out IP addresses, query strings and request bodies."
+        },
+        "browser": {
+          "term": "In your browser",
+          "detail": "The cookies that keep you signed in, and local settings such as theme, language and sidebar state. The section “Cookies and browser storage” lists each one."
+        }
+      }
+    },
+    "recipients": {
+      "title": "Who else receives data",
+      "intro": "This server sends data to outside services only to do what you or your coding agents ask:",
+      "items": {
+        "openrouter": {
+          "term": "OpenRouter and the AI model provider",
+          "detail": "When an investigation or an overview runs, the question, the conversation so far, your notes on the package, your edited overview if you wrote one, and the source code the agent reads are sent to OpenRouter, which passes them to the provider of the model the operator chose. Your name and email address are not sent. Their own terms and privacy policies decide how long they keep it."
+        },
+        "gitHosts": {
+          "term": "Git hosts",
+          "detail": "The server clones and fetches each package’s git URL (for example on GitHub), using your SSH key for private repositories. Checking a host key connects to the host you enter."
+        },
+        "registries": {
+          "term": "Package registries",
+          "detail": "Looking up a git URL or a version sends the package name, and sometimes the version, to npm, PyPI, crates.io or the Go module proxy."
+        },
+        "agentApps": {
+          "term": "Agent apps",
+          "detail": "When a coding agent connects with OAuth and identifies itself with a web address, the server fetches that address to read the app’s name."
+        },
+        "email": {
+          "term": "Email provider (if set up)",
+          "detail": "If the operator set up email, their email provider receives your address and the message: account verification, password reset, sign-in codes, invitations and, for administrators, operational alerts."
+        },
+        "backups": {
+          "term": "Backup storage (if set up)",
+          "detail": "If the operator turned on backups, copies of the database, which contain everything above, are stored in the operator’s S3-compatible storage."
+        },
+        "hosting": {
+          "term": "Hosting provider",
+          "detail": "The server and its database run on infrastructure the operator chooses."
+        }
+      },
+      "note": "Nothing is sold, and Cockpit Context includes no analytics, advertising or tracking services."
+    },
+    "access": {
+      "title": "Who can see your data",
+      "items": {
+        "owner": {
+          "term": "You",
+          "detail": "In the app, only you can see your packages, conversations, SSH keys, tokens and connections."
+        },
+        "admins": {
+          "term": "Administrators",
+          "detail": "Administrators see the list of accounts (name, email, role and status), the background jobs, and on the storage page every repository’s URL and size, with the owner’s email for private ones. They can change your role, archive your account or delete it, and send you a one-time link to choose a new password. On a server with email that link goes only to your address; without email the administrator receives it to pass on to you, so they could use it to set your password themselves. An administrator's account never receives such a link. Every such link is recorded in the server log, and using it changes your password, so you would notice. Otherwise this server gives them no way to sign in as you, set your password or change your email address, so they cannot open your packages, conversations, keys or tokens in the app."
+        },
+        "operator": {
+          "term": "The operator",
+          "detail": "Whoever runs the server can reach its database and data disk directly, as with any self-hosted service."
+        }
+      }
+    },
+    "ai": {
+      "title": "AI-generated answers",
+      "body": "Every answer in Cockpit Context is written by an AI model reading the dependency’s source code. Answers can be wrong or incomplete, so check them against the code before relying on them. The web app labels answers as AI-generated, and the tools Cockpit Context offers coding agents say so too."
+    },
+    "retention": {
+      "title": "How long data is kept",
+      "items": {
+        "conversations": {
+          "term": "Conversations",
+          "detailAfterDays_one": "Deleted automatically once nothing has happened in them for {{count}} day, the period this server’s operator set. A conversation with a question still running is never deleted. You can also delete one yourself from its page once nothing in it is running. Either way it is removed from the database with every step it saved, and it cannot be recovered except from a database backup until that backup expires.",
+          "detailAfterDays_other": "Deleted automatically once nothing has happened in them for {{count}} days, the period this server’s operator set. A conversation with a question still running is never deleted. You can also delete one yourself from its page once nothing in it is running. Either way it is removed from the database with every step it saved, and it cannot be recovered except from a database backup until that backup expires.",
+          "detailKept": "Kept until you delete them: this server’s operator turned automatic deletion off. You can delete one yourself from its page once nothing in it is running. It is then removed from the database with every step it saved, and it cannot be recovered except from a database backup until that backup expires.",
+          "loadFailed": "This server’s retention period couldn’t be loaded."
+        },
+        "packages": {
+          "term": "Packages, SSH keys and known hosts",
+          "detail": "Kept until you delete them."
+        },
+        "connections": {
+          "term": "Tokens and connections",
+          "detail": "A revoked token or connection stops working at once. Expired OAuth tokens are deleted automatically."
+        },
+        "sessions": {
+          "term": "Sessions and one-time codes",
+          "detail": "They expire on their own, and expired ones are deleted daily."
+        },
+        "repositories": {
+          "term": "Repository copies",
+          "detail": "Checkouts and normal clones are removed automatically, least recently used first, above the storage limit, or by an administrator. Snapshot clones are excluded from automatic cleanup and remain until you delete their package or an administrator deletes the clone. Restoring them requires your SSH key."
+        },
+        "account": {
+          "term": "Your account",
+          "detail": "There is no self-service account deletion yet; ask an administrator. Deleting an account deletes its packages, keys, tokens, connections, conversations and sessions."
+        },
+        "backups": {
+          "term": "Backups",
+          "detail": "If the operator turned on backups, copies of the database are kept for as long as the retention the operator configured on the backup storage, then deleted by it. Until a copy expires, anything deleted in Cockpit Context after that copy was taken, such as a conversation or an account, is still in it."
+        },
+        "elsewhere": {
+          "term": "Copies outside Cockpit Context",
+          "detail": "Deleting something in Cockpit Context does not delete what an outside service already received, such as OpenRouter, the model provider or a backup."
+        }
+      }
+    },
+    "requests": {
+      "title": "Your requests",
+      "body": "You can see and delete most of your data yourself in the app. To ask for a copy of your data, a correction or the deletion of your account, contact the operator.",
+      "contact": {
+        "loadFailed": "Couldn’t load the operator’s contact address.",
+        "contactLabel": "Send requests to:",
+        "unpublished": "The operator of this Cockpit Context instance has not published an address for requests. Contact the administrator who gave you access."
+      }
+    },
+    "cookies": {
+      "title": "Cookies and browser storage",
+      "body": "Cockpit Context sets only what it needs to work. All of it is first-party: it is set by this server and read only by this server or by the app in your browser. There is no analytics, advertising, session replay or other tracking, and no third-party cookies, so there is nothing optional to allow or refuse and no cookie banner.",
+      "items": {
+        "session": {
+          "term": "Sign-in cookies",
+          "detail": "Set by the sign-in system when you sign in: a session cookie that keeps you signed in for up to 30 days, and a signed copy of your session that expires after one minute so the server can skip a database lookup. Both are HTTP-only (scripts cannot read them) and are removed when you sign out."
+        },
+        "challenge": {
+          "term": "Short-lived sign-in step cookies",
+          "detail": "While a sign-in step is in progress, such as entering a two-factor code, a signed cookie remembers that step. It expires within minutes and is removed once the step is done."
+        },
+        "theme": {
+          "term": "Theme",
+          "detail": "Your light, dark or system theme choice, kept in your browser’s local storage (“cockpit-context-theme”). It never leaves your device."
+        },
+        "locale": {
+          "term": "Language",
+          "detail": "The language you picked, kept in local storage (“cockpit-context-locale”) so the next visit opens in it. When you are signed in, the same choice is also saved to your account."
+        },
+        "interface": {
+          "term": "Interface preferences",
+          "detail": "Whether the sidebar is collapsed, kept in local storage (“cockpit-context-ui-preferences”). It never leaves your device."
+        },
+        "offline": {
+          "term": "App files for offline use",
+          "detail": "The app’s own code, styles, fonts and an offline page, cached by your browser so Cockpit Context loads quickly and can show an offline screen. They contain no personal data."
+        },
+        "recovery": {
+          "term": "Update recovery (session storage)",
+          "detail": "cockpit-context:stale-build-reload-at: the time of the last automatic reload after a new version was deployed, so a broken page cannot reload in a loop. It is removed when you close the tab."
+        }
+      },
+      "note": "You can clear all of this at any time in your browser’s settings. Clearing the sign-in cookies signs you out; clearing the rest resets those preferences to their defaults."
+    },
+    "children": {
+      "title": "Children",
+      "body": "Cockpit Context is a tool for software developers and is not directed at children."
+    },
+    "changes": {
+      "title": "Changes to this notice",
+      "body": "When what this server stores or shares changes, this page is updated along with the date at the top."
+    }
+  }
+}

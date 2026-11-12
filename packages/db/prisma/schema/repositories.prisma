@@ -1,0 +1,214 @@
+// Repositories, checkouts, storage leases, SSH keys and known hosts —
+// docs/product.md.
+//
+// Disk layout (under COCKPIT_CONTEXT_DATA_DIR):
+//   repos/<repositoryId>.git           bare, blobless clone
+//   checkouts/<repositoryId>/<sha>/    detached worktree
+//
+// Byte counts are BigInt: a single clone can exceed Int's 2 GiB ceiling.
+
+/// PUBLIC rows are HTTPS clones shared on disk by every user whose package
+/// points at the remote (`ownerId` null). PRIVATE rows are SSH clones owned by
+/// one user and never reused for anyone else.
+enum RepositoryVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum RepositoryStatus {
+  PENDING
+  CLONING
+  READY
+  FAILED
+}
+
+model Repository {
+  id            String               @id @default(cuid(2))
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @default(now()) @updatedAt
+  /// The validated remote URL git is given.
+  remoteUrl     String
+  /// Normalized remote (lowercased host, no `.git`, no trailing slash) — the
+  /// dedupe key together with `ownerScope`.
+  remoteKey     String
+  visibility    RepositoryVisibility
+  /// Null for PUBLIC rows; the owning user for PRIVATE rows.
+  ownerId       String?
+  Owner         User?                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// Normal clones use `ownerId ?? ""`; snapshots use an isolated random scope.
+  /// Postgres treats NULLs as distinct in unique indexes, so
+  /// uniqueness on `(remoteKey, ownerId)` would allow duplicate public rows;
+  /// the app writes this alongside `ownerId`.
+  ownerScope    String               @default("")
+  /// One-time SSH clone: never automatically fetched or evicted.
+  isSnapshot    Boolean              @default(false)
+  /// The key used for the last clone/fetch of a PRIVATE row. SetNull when the
+  /// key is deleted; the next fetch uses the package's current key.
+  sshKeyId      String?
+  SshKey        SshKey?              @relation(fields: [sshKeyId], references: [id], onDelete: SetNull)
+  status        RepositoryStatus     @default(PENDING)
+  lastError     String?
+  defaultBranch String?
+  diskBytes     BigInt               @default(0)
+  lastFetchedAt DateTime?
+  lastUsedAt    DateTime?
+
+  Checkouts Checkout[]
+  Packages  Package[]
+
+  @@unique([remoteKey, ownerScope])
+  @@index([ownerId])
+  @@index([sshKeyId])
+  @@index([lastUsedAt])
+  @@map("repository")
+}
+
+enum CheckoutStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+/// Lifecycle of a checkout's model-written (generated) overview. A user's
+/// own edit is a CheckoutSummaryOverride row and never changes this status.
+enum CheckoutSummaryStatus {
+  NONE
+  PENDING
+  READY
+  FAILED
+}
+
+/// One detached worktree of a repository at one commit. The unit of pruning.
+model Checkout {
+  id                 String                @id @default(cuid(2))
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @default(now()) @updatedAt
+  repositoryId       String
+  Repository         Repository            @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  /// Full 40-hex commit SHA.
+  sha                String
+  /// How this commit was most recently resolved: `tag:v5.2.0`, `branch:main`,
+  /// `commit` or `npm-gitHead`. Display only.
+  resolvedFrom       String?
+  status             CheckoutStatus        @default(PENDING)
+  lastError          String?
+  diskBytes          BigInt                @default(0)
+  lastUsedAt         DateTime?
+  /// The deterministic repo map injected into every run's system prompt.
+  repoMap            Json?
+  /// The model-written overview, shared by every user who can reach the
+  /// checkout. Only the model writes it; user edits are overrides.
+  summary            String?
+  summaryStatus      CheckoutSummaryStatus @default(NONE)
+  summaryModel       String?
+  summaryGeneratedAt DateTime?
+
+  Leases           CheckoutLease[]
+  Conversations    Conversation[]
+  AgentRuns        AgentRun[]
+  SummaryOverrides CheckoutSummaryOverride[]
+
+  @@unique([repositoryId, sha])
+  @@index([lastUsedAt])
+  @@map("checkout")
+}
+
+/// One user's own edited overview of a checkout. Private to that user: only
+/// their views and their runs (main and helper) read it; the generated
+/// summary on the Checkout is never touched by it.
+model CheckoutSummaryOverride {
+  id         String   @id @default(cuid(2))
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+  checkoutId String
+  Checkout   Checkout @relation(fields: [checkoutId], references: [id], onDelete: Cascade)
+  userId     String
+  User       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Markdown written by the user (fenced as untrusted in prompts all the same).
+  body       String
+
+  @@unique([checkoutId, userId])
+  @@index([userId])
+  @@map("checkout_summary_override")
+}
+
+/// Held by every agent run while it reads a checkout; pruning skips checkouts
+/// with an unexpired lease. Released on every run exit path and on restart.
+model CheckoutLease {
+  id         String   @id @default(cuid(2))
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+  checkoutId String
+  Checkout   Checkout @relation(fields: [checkoutId], references: [id], onDelete: Cascade)
+  runId      String
+  AgentRun   AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// `now + COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS` at acquisition.
+  expiresAt  DateTime
+
+  @@unique([runId, checkoutId])
+  @@index([checkoutId, expiresAt])
+  @@index([expiresAt])
+  @@map("checkout_lease")
+}
+
+enum SshKeySource {
+  GENERATED
+  IMPORTED
+}
+
+/// A user's SSH key for cloning private repositories. The private half is
+/// AES-256-GCM encrypted under the COCKPIT_CONTEXT_ENCRYPTION_KEYS keyring with the owner
+/// and key ids bound as AAD. `keyVersion`, `nonce`, `authTag` and `ciphertext`
+/// must never appear in a select projection that leaves the server.
+model SshKey {
+  id          String       @id @default(cuid(2))
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @default(now()) @updatedAt
+  ownerId     String
+  Owner       User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  source      SshKeySource
+  /// OpenSSH key type, e.g. `ssh-ed25519`.
+  algorithm   String
+  /// OpenSSH one-line public key (`ssh-ed25519 AAAA… comment`).
+  publicKey   String
+  /// `SHA256:…` fingerprint of the public key.
+  fingerprint String
+  /// Keyring entry that encrypted the private key; rows on an older version
+  /// are re-encrypted lazily on use.
+  keyVersion  String
+  nonce       Bytes
+  authTag     Bytes
+  ciphertext  Bytes
+  lastUsedAt  DateTime?
+
+  Packages     Package[]
+  Repositories Repository[]
+
+  @@unique([ownerId, fingerprint])
+  @@index([ownerId, createdAt])
+  @@map("ssh_key")
+}
+
+/// A user-confirmed SSH host key for a git host that is not pinned in code
+/// (github.com, gitlab.com and bitbucket.org are).
+model KnownHost {
+  id          String   @id @default(cuid(2))
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  ownerId     String
+  Owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// Lowercased host name.
+  host        String
+  port        Int      @default(22)
+  /// e.g. `ssh-ed25519`.
+  keyType     String
+  /// Base64 key blob as `ssh-keyscan` prints it.
+  publicKey   String
+  /// `SHA256:…` fingerprint the user confirmed.
+  fingerprint String
+
+  @@unique([ownerId, host, port, fingerprint])
+  @@index([ownerId, host])
+  @@map("known_host")
+}

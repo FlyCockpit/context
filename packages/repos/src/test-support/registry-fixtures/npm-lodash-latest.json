@@ -1,0 +1,11 @@
+{
+  "name": "lodash",
+  "version": "4.18.1",
+  "description": "Lodash modular utilities.",
+  "repository": {
+    "url": "git+https://github.com/lodash/lodash.git",
+    "type": "git"
+  },
+  "homepage": "https://lodash.com/",
+  "license": "MIT"
+}

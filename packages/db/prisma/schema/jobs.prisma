@@ -1,0 +1,47 @@
+// Background jobs — the Postgres job table that replaced BullMQ + Redis.
+//
+// One row per unit of deferred work. `@cockpit-context/jobs` (packages/jobs) owns every
+// read and write: `enqueueJob()` inserts `queued` rows, the in-process runner
+// claims due rows with `FOR UPDATE SKIP LOCKED`, and finished rows are pruned
+// on a schedule. See docs/development.md.
+
+enum BackgroundJobStatus {
+  queued
+  running
+  succeeded
+  failed
+}
+
+model BackgroundJob {
+  id          String              @id @default(cuid(2))
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @default(now()) @updatedAt
+  // A registered job type (`defineJob("<type>", …)`), e.g. "auth.reap-expired-tokens".
+  type        String
+  // Validated against the job type's zod schema on enqueue AND again on claim,
+  // because a row can outlive the code version that wrote it.
+  payload     Json
+  status      BackgroundJobStatus @default(queued)
+  // Earliest time the runner may claim the row. Retries push it forward by
+  // the exponential backoff.
+  runAt       DateTime            @default(now())
+  // Claims so far, including the one in flight. Incremented at claim time, so a
+  // process that dies mid-job still spends the attempt.
+  attempts    Int                 @default(0)
+  maxAttempts Int                 @default(3)
+  // Set while `running`. The runner refreshes `lockedAt` for its in-flight jobs;
+  // a row whose lock stops moving is recovered as stale.
+  lockedAt    DateTime?
+  lockedBy    String?
+  lastError   String?
+  finishedAt  DateTime?
+  // Optional idempotency key. Periodic schedules use one per time slot, so a
+  // restart (or a second tick) never enqueues the same slot twice.
+  dedupeKey   String?
+
+  @@unique([dedupeKey])
+  @@index([status, runAt])
+  @@index([type, createdAt])
+  @@index([finishedAt])
+  @@map("background_job")
+}

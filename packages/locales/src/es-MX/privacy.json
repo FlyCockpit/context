@@ -1,0 +1,224 @@
+{
+  "meta": {
+    "title": "Aviso de privacidad"
+  },
+  "title": "Aviso de privacidad",
+  "updated": "Última actualización: 25 de octubre de 2026",
+  "intro": "Cockpit Context es software autoalojado. Este aviso describe qué guarda este servidor de Cockpit Context, para qué, y qué servicios externos reciben parte de esos datos. La persona u organización que opera este servidor (el operador) es responsable de esos datos.",
+  "footerLink": "Privacidad",
+  "signupNotice": "Antes de registrarte, lee qué guarda este servidor y quién lo recibe:",
+  "signupLink": "aviso de privacidad",
+  "settingsTitle": "Privacidad",
+  "settingsDescription": "Qué guarda este servidor sobre ti, quién lo recibe y cómo borrarlo.",
+  "sections": {
+    "operator": {
+      "title": "Quién opera este servidor",
+      "body": "Este servidor de Cockpit Context lo opera su operador, no el proyecto Cockpit Context. El operador decide quién puede registrarse, qué modelo de IA responde las preguntas y si se configuran el correo y los respaldos.",
+      "contact": {
+        "loadFailed": "No se pudieron cargar los datos de contacto del operador.",
+        "named": "Operador: {{name}}",
+        "contactLabel": "Contacto para temas de privacidad:",
+        "noEmail": "El operador no ha publicado una dirección de contacto. Contacta al administrador que te dio acceso.",
+        "unpublished": "El operador de esta instancia de Cockpit Context no ha publicado datos de contacto. Contacta al administrador que te dio acceso."
+      }
+    },
+    "collected": {
+      "title": "Qué guarda este servidor",
+      "intro": "Todo lo siguiente se guarda en la base de datos o en el disco de datos de este servidor, y solo se usa para que Cockpit Context funcione.",
+      "items": {
+        "account": {
+          "term": "Cuenta",
+          "detail": "Tu nombre, correo electrónico, rol e idioma preferido. Tu contraseña solo se guarda como un hash con sal."
+        },
+        "twoFactor": {
+          "term": "Autenticación de dos factores",
+          "detail": "Si la activas, el secreto del autenticador y tus códigos de respaldo, ambos cifrados."
+        },
+        "sessions": {
+          "term": "Sesiones",
+          "detail": "Un token de sesión, la dirección IP y el navegador (user agent) desde los que iniciaste sesión, y cuándo vence la sesión."
+        },
+        "sshKeys": {
+          "term": "Llaves SSH",
+          "detail": "Las llaves SSH que eliges guardar se cifran con la clave de cifrado del servidor; las llaves públicas y sus huellas no. Una llave de un solo uso se conserva únicamente durante esa operación, con un archivo temporal privado que se elimina al terminar. Las frases de contraseña se usan en memoria y nunca se guardan. Las copias de repositorios de instantáneas permanecen hasta que las elimines; conserva tu clave para restaurarlas o actualizarlas."
+        },
+        "knownHosts": {
+          "term": "Hosts conocidos",
+          "detail": "Los nombres de host, puertos y huellas de llaves de host SSH que confirmas."
+        },
+        "connections": {
+          "term": "Conexiones de agentes",
+          "detail": "Los tokens de API solo se guardan como un hash con llave, y los tokens de acceso y de actualización de OAuth solo como hashes. Cada conexión guarda su nombre, su configuración y cuándo se usó por última vez."
+        },
+        "packages": {
+          "term": "Paquetes y propuestas",
+          "detail": "Las dependencias de tu lista (identificador, URL de git, configuración de versión y tus notas) y los paquetes que proponen tus agentes de código, con el motivo que dieron."
+        },
+        "conversations": {
+          "term": "Conversaciones",
+          "detail": "Las preguntas que haces tú o tus agentes de código, que pueden incluir código o detalles de tu proyecto; tus mensajes de guía y de seguimiento; cada paso que da el agente de investigación, incluido el código fuente que lee; las respuestas; y los tokens y el costo de cada ejecución."
+        },
+        "repositories": {
+          "term": "Copias de repositorios",
+          "detail": "Clones y checkouts de los repositorios de git a los que apuntan tus paquetes, con un resumen escrito por IA de cada versión. Los clones de repositorios públicos y sus resúmenes escritos por IA se comparten en disco entre todos los usuarios de este servidor; los clones privados pertenecen a un solo usuario. Si editas un resumen, tu versión editada se guarda solo para ti: solo tú la ves y solo tus investigaciones la usan."
+        },
+        "logs": {
+          "term": "Trabajos en segundo plano y registros",
+          "detail": "Registros de los trabajos de clonado, actualización, checkout, resumen y limpieza, y una línea de registro del servidor por solicitud con su método, ruta, estado y duración. El registro no incluye direcciones IP, cadenas de consulta ni el contenido de las solicitudes."
+        },
+        "browser": {
+          "term": "En tu navegador",
+          "detail": "Las cookies que mantienen tu sesión iniciada, y preferencias locales como el tema, el idioma y el estado de la barra lateral. La sección “Cookies y almacenamiento del navegador” las enumera una por una."
+        }
+      }
+    },
+    "recipients": {
+      "title": "Quién más recibe datos",
+      "intro": "Este servidor envía datos a servicios externos solo para hacer lo que tú o tus agentes de código piden:",
+      "items": {
+        "openrouter": {
+          "term": "OpenRouter y el proveedor del modelo de IA",
+          "detail": "Cuando se ejecuta una investigación o un resumen, la pregunta, la conversación hasta ese momento, tus notas sobre el paquete, tu resumen editado si escribiste uno y el código fuente que lee el agente se envían a OpenRouter, que los pasa al proveedor del modelo que eligió el operador. Tu nombre y tu correo no se envían. Sus propios términos y políticas de privacidad deciden cuánto tiempo lo conservan."
+        },
+        "gitHosts": {
+          "term": "Hosts de git",
+          "detail": "El servidor clona y actualiza la URL de git de cada paquete (por ejemplo en GitHub), con tu llave SSH en los repositorios privados. Revisar una llave de host se conecta al host que escribes."
+        },
+        "registries": {
+          "term": "Registros de paquetes",
+          "detail": "Buscar una URL de git o una versión envía el nombre del paquete, y a veces la versión, a npm, PyPI, crates.io o el proxy de módulos de Go."
+        },
+        "agentApps": {
+          "term": "Apps de agentes",
+          "detail": "Cuando un agente de código se conecta con OAuth y se identifica con una dirección web, el servidor consulta esa dirección para leer el nombre de la app."
+        },
+        "email": {
+          "term": "Proveedor de correo (si está configurado)",
+          "detail": "Si el operador configuró el correo, su proveedor de correo recibe tu dirección y el mensaje: verificación de cuenta, restablecimiento de contraseña, códigos de inicio de sesión, invitaciones y, para administradores, alertas operativas."
+        },
+        "backups": {
+          "term": "Almacenamiento de respaldos (si está configurado)",
+          "detail": "Si el operador activó los respaldos, las copias de la base de datos, que contienen todo lo anterior, se guardan en el almacenamiento compatible con S3 del operador."
+        },
+        "hosting": {
+          "term": "Proveedor de hospedaje",
+          "detail": "El servidor y su base de datos corren en la infraestructura que elige el operador."
+        }
+      },
+      "note": "Nada se vende, y Cockpit Context no incluye servicios de analítica, publicidad ni rastreo."
+    },
+    "access": {
+      "title": "Quién puede ver tus datos",
+      "items": {
+        "owner": {
+          "term": "Tú",
+          "detail": "En la app, solo tú puedes ver tus paquetes, conversaciones, llaves SSH, tokens y conexiones."
+        },
+        "admins": {
+          "term": "Administradores",
+          "detail": "Los administradores ven la lista de cuentas (nombre, correo, rol y estado), los trabajos en segundo plano y, en la página de almacenamiento, la URL y el tamaño de cada repositorio, con el correo del dueño en los privados. Pueden cambiar tu rol, archivar tu cuenta o eliminarla, y enviarte un enlace de un solo uso para elegir una contraseña nueva. En un servidor con correo ese enlace va solo a tu dirección; sin correo lo recibe el administrador para pasártelo, así que podría usarlo para establecer tu contraseña por su cuenta. Una cuenta de administrador nunca recibe un enlace así. Cada enlace queda registrado en el log del servidor, y usarlo cambia tu contraseña, así que lo notarías. Fuera de eso, este servidor no les da ninguna forma de iniciar sesión como tú, cambiar tu contraseña ni cambiar tu correo, así que no pueden abrir en la app tus paquetes, conversaciones, llaves ni tokens."
+        },
+        "operator": {
+          "term": "El operador",
+          "detail": "Quien opera el servidor puede acceder directamente a su base de datos y a su disco de datos, como en cualquier servicio autoalojado."
+        }
+      }
+    },
+    "ai": {
+      "title": "Respuestas generadas por IA",
+      "body": "Cada respuesta en Cockpit Context la escribe un modelo de IA que lee el código fuente de la dependencia. Las respuestas pueden estar equivocadas o incompletas, así que compruébalas con el código antes de confiar en ellas. La app web marca las respuestas como generadas por IA, y las herramientas que Cockpit Context ofrece a los agentes de código también lo indican."
+    },
+    "retention": {
+      "title": "Cuánto tiempo se guardan los datos",
+      "items": {
+        "conversations": {
+          "term": "Conversaciones",
+          "detailAfterDays_one": "Se borran automáticamente cuando no ha pasado nada en ellas durante {{count}} día, el periodo que definió el operador de este servidor. Una conversación con una pregunta todavía en ejecución nunca se borra. También puedes borrar una tú mismo desde su página cuando no haya nada en ejecución. En ambos casos se elimina de la base de datos con cada paso que guardó, y no se puede recuperar, salvo desde un respaldo de la base de datos hasta que ese respaldo venza.",
+          "detailAfterDays_other": "Se borran automáticamente cuando no ha pasado nada en ellas durante {{count}} días, el periodo que definió el operador de este servidor. Una conversación con una pregunta todavía en ejecución nunca se borra. También puedes borrar una tú mismo desde su página cuando no haya nada en ejecución. En ambos casos se elimina de la base de datos con cada paso que guardó, y no se puede recuperar, salvo desde un respaldo de la base de datos hasta que ese respaldo venza.",
+          "detailKept": "Se guardan hasta que las borres: el operador de este servidor desactivó el borrado automático. Puedes borrar una tú mismo desde su página cuando no haya nada en ejecución. Entonces se elimina de la base de datos con cada paso que guardó, y no se puede recuperar, salvo desde un respaldo de la base de datos hasta que ese respaldo venza.",
+          "loadFailed": "No se pudo cargar el periodo de conservación de este servidor."
+        },
+        "packages": {
+          "term": "Paquetes, llaves SSH y hosts conocidos",
+          "detail": "Se guardan hasta que los borres."
+        },
+        "connections": {
+          "term": "Tokens y conexiones",
+          "detail": "Un token o una conexión revocados dejan de funcionar de inmediato. Los tokens de OAuth vencidos se borran automáticamente."
+        },
+        "sessions": {
+          "term": "Sesiones y códigos de un solo uso",
+          "detail": "Vencen solos, y los vencidos se borran a diario."
+        },
+        "repositories": {
+          "term": "Copias de repositorios",
+          "detail": "Los checkouts y clones normales se eliminan automáticamente, empezando por los menos usados, al superar el límite de almacenamiento, o por un administrador. Las instantáneas quedan fuera de la limpieza automática y permanecen hasta que elimines su paquete o un administrador elimine el clon. Para restaurarlas necesitas tu llave SSH."
+        },
+        "account": {
+          "term": "Tu cuenta",
+          "detail": "Todavía no puedes borrar tu cuenta por tu cuenta; pídeselo a un administrador. Borrar una cuenta borra sus paquetes, llaves, tokens, conexiones, conversaciones y sesiones."
+        },
+        "backups": {
+          "term": "Respaldos",
+          "detail": "Si el operador activó los respaldos, las copias de la base de datos se guardan durante el periodo de retención que el operador configuró en el almacenamiento de respaldos, y después ese almacenamiento las borra. Mientras una copia no venza, lo que se haya borrado en Cockpit Context después de hacerse esa copia, como una conversación o una cuenta, sigue en ella."
+        },
+        "elsewhere": {
+          "term": "Copias fuera de Cockpit Context",
+          "detail": "Borrar algo en Cockpit Context no borra lo que un servicio externo ya recibió, como OpenRouter, el proveedor del modelo o un respaldo."
+        }
+      }
+    },
+    "requests": {
+      "title": "Tus solicitudes",
+      "body": "Puedes ver y borrar la mayoría de tus datos tú mismo en la app. Para pedir una copia de tus datos, una corrección o que se borre tu cuenta, contacta al operador.",
+      "contact": {
+        "loadFailed": "No se pudo cargar la dirección de contacto del operador.",
+        "contactLabel": "Envía tus solicitudes a:",
+        "unpublished": "El operador de esta instancia de Cockpit Context no ha publicado una dirección para solicitudes. Contacta al administrador que te dio acceso."
+      }
+    },
+    "cookies": {
+      "title": "Cookies y almacenamiento del navegador",
+      "body": "Cockpit Context solo guarda lo que necesita para funcionar. Todo es propio: lo establece este servidor y solo lo leen este servidor o la app en tu navegador. No hay analítica, publicidad, grabación de sesiones ni ningún otro rastreo, ni cookies de terceros, así que no hay nada opcional que permitir o rechazar y no hay aviso de cookies.",
+      "items": {
+        "session": {
+          "term": "Cookies de inicio de sesión",
+          "detail": "Las establece el sistema de inicio de sesión cuando entras: una cookie de sesión que te mantiene con la sesión iniciada hasta 30 días, y una copia firmada de tu sesión que caduca al minuto para que el servidor no tenga que consultar la base de datos. Ambas son solo HTTP (los scripts no pueden leerlas) y se eliminan al cerrar sesión."
+        },
+        "challenge": {
+          "term": "Cookies breves de pasos de inicio de sesión",
+          "detail": "Mientras un paso del inicio de sesión está en curso, como escribir un código de dos factores, una cookie firmada recuerda ese paso. Caduca en minutos y se elimina al terminar el paso."
+        },
+        "theme": {
+          "term": "Tema",
+          "detail": "Tu elección de tema claro, oscuro o del sistema, guardada en el almacenamiento local de tu navegador (“cockpit-context-theme”). Nunca sale de tu dispositivo."
+        },
+        "locale": {
+          "term": "Idioma",
+          "detail": "El idioma que elegiste, guardado en el almacenamiento local (“cockpit-context-locale”) para que la próxima visita se abra en él. Si tienes la sesión iniciada, esa elección también se guarda en tu cuenta."
+        },
+        "interface": {
+          "term": "Preferencias de la interfaz",
+          "detail": "Si la barra lateral está contraída, guardado en el almacenamiento local (“cockpit-context-ui-preferences”). Nunca sale de tu dispositivo."
+        },
+        "offline": {
+          "term": "Archivos de la app para uso sin conexión",
+          "detail": "El código, los estilos y las fuentes de la app y una página sin conexión, guardados en caché por tu navegador para que Cockpit Context cargue rápido y pueda mostrar una pantalla sin conexión. No contienen datos personales."
+        },
+        "recovery": {
+          "term": "Recuperación de actualizaciones (almacenamiento de sesión)",
+          "detail": "cockpit-context:stale-build-reload-at: la hora de la última recarga automática después de que se publicó una nueva versión, para que una página rota no se recargue en bucle. Se elimina al cerrar la pestaña."
+        }
+      },
+      "note": "Puedes borrar todo esto cuando quieras desde la configuración de tu navegador. Borrar las cookies de inicio de sesión cierra tu sesión; borrar lo demás devuelve esas preferencias a sus valores predeterminados."
+    },
+    "children": {
+      "title": "Menores de edad",
+      "body": "Cockpit Context es una herramienta para desarrolladores de software y no está dirigida a menores de edad."
+    },
+    "changes": {
+      "title": "Cambios a este aviso",
+      "body": "Cuando cambie lo que este servidor guarda o comparte, esta página se actualiza junto con la fecha de arriba."
+    }
+  }
+}

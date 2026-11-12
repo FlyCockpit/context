@@ -1,0 +1,356 @@
+model User {
+  id                 String                    @id @default(cuid(2))
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @default(now()) @updatedAt
+  name               String
+  email              String
+  emailVerified      Boolean                   @default(false)
+  image              String?
+  // Better-Auth's admin plugin stores role as a string and supports arbitrary
+  // custom roles plus comma-separated multi-role values. Do not narrow this to
+  // a Prisma enum unless you also drop those Better-Auth capabilities.
+  role               String                    @default("user")
+  // Preferred UI locale (BCP 47 tag). Synced into the i18n detection chain
+  // ahead of localStorage / navigator so a signed-in user's choice follows
+  // them across devices. Stored as String (not enum) because the supported-
+  // locale set evolves outside the schema; new locales are added in
+  // apps/web/src/i18n/config.ts without a Prisma migration.
+  locale             String                    @default("en-US")
+  banned             Boolean?
+  banReason          String?
+  banExpires         DateTime?
+  twoFactorEnabled   Boolean?
+  operationalAlerts  Boolean                   @default(true)
+  sessions           Session[]
+  accounts           Account[]
+  twoFactors         TwoFactor[]
+  // Cockpit Context domain (packages / repositories / access / conversations .prisma).
+  Packages           Package[]
+  PackageProposals   PackageProposal[]
+  Repositories       Repository[]
+  SshKeys            SshKey[]
+  KnownHosts         KnownHost[]
+  McpAgentTokens     McpAgentToken[]
+  McpGrants          McpGrant[]
+  Conversations      Conversation[]
+  AgentRuns          AgentRun[]
+  SummaryOverrides   CheckoutSummaryOverride[]
+  // Better-Auth OAuth provider (MCP OAuth).
+  oauthClients       OauthClient[]
+  oauthRefreshTokens OauthRefreshToken[]
+  oauthAccessTokens  OauthAccessToken[]
+  oauthConsents      OauthConsent[]
+
+  @@unique([email])
+  @@index([role])
+  // Trigram GIN for the ILIKE substring filters in `users.list`
+  // (`email`/`name` contains). The btree from @@unique([email]) only serves
+  // exact/prefix matches. Needs the `pg_trgm` extension declared on the
+  // datasource in schema.prisma.
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@map("user")
+}
+
+model Session {
+  id                 String              @id @default(cuid(2))
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @default(now()) @updatedAt
+  expiresAt          DateTime
+  token              String
+  ipAddress          String?
+  userAgent          String?
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonatedBy     String?
+  oauthRefreshTokens OauthRefreshToken[]
+  oauthAccessTokens  OauthAccessToken[]
+
+  @@unique([token])
+  @@index([userId])
+  // Backs the daily expired-token sweep (`reap-expired-auth-tokens`), which
+  // selects id pages by `expiresAt < now`. Matches Verification.
+  @@index([expiresAt])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid(2))
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @default(now()) @updatedAt
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  // Better Auth scopes account identity by (issuer, accountId). Credential
+  // accounts use `local:credential`; OIDC/SSO accounts store the provider's
+  // trusted issuer.
+  issuer                String    @default("local:credential")
+
+  @@unique([issuer, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid(2))
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+  identifier String
+  value      String
+  expiresAt  DateTime
+
+  @@index([identifier])
+  @@index([expiresAt])
+  @@map("verification")
+}
+
+model TwoFactor {
+  id                      String    @id @default(cuid(2))
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @default(now()) @updatedAt
+  secret                  String
+  backupCodes             String
+  verified                Boolean   @default(true)
+  // Better Auth's account lockout (on by default): consecutive failed
+  // verifications, and the lock they trigger. Owned by the plugin.
+  failedVerificationCount Int       @default(0)
+  lockedUntil             DateTime?
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("two_factor")
+}
+
+// ---------------------------------------------------------------------------
+// Better-Auth OAuth provider / JWT models for the MCP server
+// (docs/mcp.md). Field shapes follow the installed 1.7.9 plugin
+// schemas (jwt, @better-auth/oauth-provider via @better-auth/mcp) — the same
+// source the Better-Auth CLI generator consumes; ported from ws-model-proxy.
+// Model keys must not be renamed: the prisma
+// adapter addresses these tables by these names. All tables are additive.
+// ---------------------------------------------------------------------------
+
+model OauthClient {
+  id                               String                @id @default(cuid(2))
+  clientId                         String                @unique
+  clientSecret                     String?
+  clientDiscoveryId                String?
+  disabled                         Boolean?              @default(false)
+  skipConsent                      Boolean?
+  enableEndSession                 Boolean?
+  subjectType                      String?
+  scopes                           String[]
+  clientCredentialsScopes          String[]              @default([])
+  userId                           String?
+  user                             User?                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt                        DateTime?             @default(now())
+  updatedAt                        DateTime?             @default(now()) @updatedAt
+  name                             String?
+  uri                              String?
+  icon                             String?
+  contacts                         String[]
+  tos                              String?
+  policy                           String?
+  softwareId                       String?
+  softwareVersion                  String?
+  softwareStatement                String?
+  redirectUris                     String[]
+  postLogoutRedirectUris           String[]
+  backchannelLogoutUri             String?
+  backchannelLogoutSessionRequired Boolean?
+  tokenEndpointAuthMethod          String?
+  applicationType                  String?
+  jwks                             String?
+  jwksUri                          String?
+  grantTypes                       String[]
+  responseTypes                    String[]
+  requirePKCE                      Boolean?
+  dpopBoundAccessTokens            Boolean?              @default(false)
+  referenceId                      String?
+  metadata                         Json?
+  clientResources                  OauthClientResource[]
+  oauthRefreshTokens               OauthRefreshToken[]
+  oauthAccessTokens                OauthAccessToken[]
+  oauthConsents                    OauthConsent[]
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("oauth_client")
+}
+
+model OauthResource {
+  id                            String                @id @default(cuid(2))
+  identifier                    String                @unique
+  name                          String
+  accessTokenTtl                Int?
+  refreshTokenTtl               Int?
+  signingAlgorithm              String?
+  signingKeyId                  String?
+  // Deliberate deviation from the Better-Auth Prisma generator output
+  // (which emits `allowedScopes String[]` for the optional string[] plugin
+  // field). The oauth-provider RUNTIME seeds null into this column in
+  // three code paths — fresh-resource seeding (introspect buildSeedRow
+  // `input.allowedScopes ?? null`), overwrite-mode reseed updates
+  // (buildSeedUpdate spreads buildSeedRow, so an omitted value writes null),
+  // and admin resource creation (authorize buildResourceRow
+  // `input.allowedScopes ?? null`) — an upstream generator/runtime
+  // inconsistency. Prisma cannot express a nullable native list (`String[]?`
+  // is invalid and `String?[]` still rejects a null list), so a non-nullable
+  // String[] crashes client validation on those null writes. Json? accepts
+  // both null and string arrays; the plugin's read path explicitly handles
+  // null/undefined before constructing a Set, and the prisma-adapter
+  // runtime schema check compares only column presence + unexpected-column
+  // nullability (never types), so the deviation is invisible to it. This is
+  // the ONLY list field with null writers — every other list column the
+  // plugins write is populated via toResourceList()/fallbacks from non-null
+  // columns. Asserted in packages/auth/src/auth-schema.test.ts.
+  allowedScopes                 Json?
+  customClaims                  Json?
+  dpopBoundAccessTokensRequired Boolean?              @default(false)
+  disabled                      Boolean?              @default(false)
+  createdAt                     DateTime?             @default(now())
+  updatedAt                     DateTime?             @default(now()) @updatedAt
+  policyVersion                 Int?                  @default(1)
+  metadata                      Json?
+  clientResources               OauthClientResource[]
+
+  @@map("oauth_resource")
+}
+
+model OauthClientResource {
+  id         String        @id @default(cuid(2))
+  clientId   String
+  client     OauthClient   @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  resourceId String
+  resource   OauthResource @relation(fields: [resourceId], references: [identifier], onDelete: Cascade)
+  metadata   Json?
+  createdAt  DateTime?     @default(now())
+
+  // Load-bearing per the oauth-provider schema: the per-client resource
+  // linkage check assumes one row per (client, resource) pair.
+  @@unique([clientId, resourceId])
+  @@index([clientId])
+  @@index([resourceId])
+  @@map("oauth_client_resource")
+}
+
+model OauthRefreshToken {
+  id                      String             @id @default(cuid(2))
+  token                   String             @unique
+  clientId                String
+  client                  OauthClient        @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionId               String?
+  session                 Session?           @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId                  String
+  user                    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId             String?
+  authorizationCodeId     String?
+  resources               String[]
+  requestedUserInfoClaims String[]
+  expiresAt               DateTime
+  createdAt               DateTime           @default(now())
+  revoked                 DateTime?
+  rotatedAt               DateTime?
+  rotationReplayResponse  String?
+  rotationReplayExpiresAt DateTime?
+  authTime                DateTime?
+  confirmation            Json?
+  scopes                  String[]
+  oauthAccessTokens       OauthAccessToken[]
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([authorizationCodeId])
+  @@index([expiresAt])
+  @@map("oauth_refresh_token")
+}
+
+model OauthAccessToken {
+  id                      String             @id @default(cuid(2))
+  token                   String             @unique
+  clientId                String
+  client                  OauthClient        @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionId               String?
+  session                 Session?           @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId                  String?
+  user                    User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId             String?
+  authorizationCodeId     String?
+  resources               String[]
+  requestedUserInfoClaims String[]
+  refreshId               String?
+  refresh                 OauthRefreshToken? @relation(fields: [refreshId], references: [id], onDelete: Cascade)
+  expiresAt               DateTime
+  createdAt               DateTime           @default(now())
+  revoked                 DateTime?
+  confirmation            Json?
+  scopes                  String[]
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([authorizationCodeId])
+  @@index([refreshId])
+  @@index([expiresAt])
+  @@map("oauth_access_token")
+}
+
+model OauthConsent {
+  id                      String      @id @default(cuid(2))
+  clientId                String
+  client                  OauthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId                  String?
+  user                    User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId             String?
+  resources               String[]
+  requestedUserInfoClaims String[]
+  scopes                  String[]
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @default(now()) @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauth_consent")
+}
+
+model OauthClientAssertion {
+  id        String   @id @default(cuid(2))
+  expiresAt DateTime
+
+  @@index([expiresAt])
+  @@map("oauth_client_assertion")
+}
+
+model Jwks {
+  id         String    @id @default(cuid(2))
+  publicKey  String
+  privateKey String
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime?
+  alg        String?
+  crv        String?
+
+  @@map("jwks")
+}
+
+model AppSetting {
+  // `key` is the natural primary key — every read/write looks rows up by it,
+  // so a separate cuid `id` would be dead weight. Deliberately deviates from
+  // the repo's "every model has an id" rule for this single-column lookup table.
+  key       String   @id
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  value     String
+
+  @@map("app_setting")
+}

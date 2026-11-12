@@ -1,0 +1,4 @@
+# Loopback HTTP for a host reverse proxy such as Caddy.
+services:
+  app:
+    ports: ["127.0.0.1:${COCKPIT_CONTEXT_HTTP_PORT:-3000}:3000"]

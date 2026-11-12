@@ -1,0 +1,50 @@
+{
+  "items": {
+    "home": "Home",
+    "ongoing": "Ongoing",
+    "conversations": "Conversations",
+    "packages": "Packages",
+    "access": "Access",
+    "settings": "Settings",
+    "admin": "Admin",
+    "more": "More"
+  },
+  "hints": {
+    "ongoing": "Investigations running now, and getting started",
+    "conversations": "Every question your agents asked, and the answers",
+    "packages": "Dependencies your agents can ask about, and proposals",
+    "access": "MCP tokens, connections, SSH keys and known hosts",
+    "settings": "Your profile, language and security",
+    "admin": "Users, storage, jobs and site settings"
+  },
+  "languageLabel": "Language",
+  "mainNav": {
+    "ariaLabel": "Main navigation"
+  },
+  "sidebar": {
+    "ariaLabel": "App navigation",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar"
+  },
+  "badge": {
+    "pendingProposals_one": "{{count}} proposal waiting",
+    "pendingProposals_other": "{{count}} proposals waiting"
+  },
+  "moreSheet": {
+    "description": "More sections of the app"
+  },
+  "themeToggle": {
+    "label": "Toggle theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "userMenu": {
+    "myAccount": "My account",
+    "signIn": "Sign in",
+    "signUp": "Sign up",
+    "signOut": "Sign out",
+    "open": "Open account menu"
+  },
+  "skipToContent": "Skip to content"
+}

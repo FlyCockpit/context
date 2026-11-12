@@ -1,0 +1,46 @@
+name: Nightly tooling self-tests
+
+on:
+  schedule:
+    # 03:30 UTC — quiet hour, off the top of the hour to dodge cron congestion.
+    - cron: "30 3 * * *"
+  # Manual trigger for testing the workflow or re-running a failure outside the
+  # schedule.
+  workflow_dispatch:
+
+# Least-privilege token: the self-tests only read the repo.
+permissions:
+  contents: read
+
+# One nightly run at a time; a superseded scheduled run is cancelled.
+concurrency:
+  group: nightly-tooling
+  cancel-in-progress: true
+
+jobs:
+  tooling-self-tests:
+    name: Tooling self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The inert secret-scanner wrapper test resolves HEAD and HEAD^.
+          fetch-depth: 2
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115  # v6.1.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Retained policy, hook, secret-filter, access-matrix and Dokploy self-tests.
+      - name: Run tooling self-tests
+        run: pnpm verify:tooling

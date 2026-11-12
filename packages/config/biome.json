@@ -1,0 +1,90 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.5/schema.json",
+  "root": false,
+  "files": {
+    "includes": [
+      "**",
+      "!!**/node_modules/**",
+      "!!**/dist/**",
+      "!!**/dev-dist/**",
+      "!!**/.pnpm-store/**",
+      "!!**/.docker-volumes/**",
+      "!!**/.turbo/**",
+      "!!**/.next/**",
+      "!!**/.expo/**",
+      "!!**/build/**",
+      "!!**/coverage/**",
+      "!!**/.vinxi/**",
+      "!!**/.output/**",
+      "!!**/.tanstack/**",
+      "!!**/target/**",
+      "!!**/generated/**",
+      "!!**/routeTree.gen.ts",
+      "!!**/.astro/**",
+      "!!**/expo-env.d.ts",
+      "!!**/uniwind-types.d.ts"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "domains": {
+      "react": "recommended"
+    },
+    "rules": {
+      "preset": "none",
+      "a11y": "off",
+      "complexity": {
+        "preset": "recommended",
+        "noImportantStyles": "off"
+      },
+      "correctness": {
+        "preset": "recommended",
+        "noUnknownTypeSelector": "off"
+      },
+      "nursery": "off",
+      "performance": "off",
+      "security": {
+        "preset": "recommended"
+      },
+      "style": "off",
+      "suspicious": {
+        "preset": "recommended",
+        "useBiomeIgnoreFolder": "off",
+        "noArrayIndexKey": "off"
+      }
+    }
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "markdown": {
+    "formatter": {
+      "enabled": false
+    }
+  },
+  "yaml": {
+    "formatter": {
+      "enabled": false
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  }
+}

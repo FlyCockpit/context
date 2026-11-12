@@ -1,0 +1,78 @@
+version: 2
+
+# Supply-chain guardrail: `cooldown.default-days` makes Dependabot ignore recent
+# releases when opening version-update PRs. npm and the image ecosystems are set
+# to 7 days, matching pnpm's `minimumReleaseAge` gate and Cockpit Context's rule that a
+# dependency is at least 7 days old; GitHub Actions use 3 days as a lightweight
+# compromised-release buffer. Notes:
+#   - Cooldown applies to VERSION updates only. Dependabot SECURITY updates are
+#     NOT delayed, so a real CVE fix still lands immediately.
+#   - With grouped updates, cooldown is evaluated per dependency: a too-young
+#     package is simply held back and folded into a later PR; the rest of the
+#     group still ships on schedule.
+#   - If a security fix is newer than 7 days, temporarily add it to
+#     pnpm-workspace.yaml `minimumReleaseAgeExclude` with the advisory and
+#     removal date, then remove the exclusion once it ages past the gate.
+
+updates:
+  # GitHub Actions — keeps SHA-pinned actions current. Dependabot rewrites the
+  # SHA in the `uses:` and updates the trailing `# vN` comment so the pin
+  # pattern stays readable in PR diffs.
+  - package-ecosystem: github-actions
+    target-branch: main
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Docker base images (the exact node:26.x-trixie-slim tag in Dockerfile,
+  # Dockerfile.dev). Scans every Dockerfile under the
+  # repo root.
+  - package-ecosystem: docker
+    target-branch: main
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      # Node stays on the 26 LTS line (Debian trixie images).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+
+  # Compose images (postgres:18.x in compose.yaml and the dev/agent stacks,
+  # mailpit in the dev/agent stacks). Postgres stays on 18: a major needs a
+  # dump/restore, so majors are ignored here.
+  - package-ecosystem: docker-compose
+    target-branch: main
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  # npm — covers package.json files across the pnpm workspace.
+  #
+  - package-ecosystem: npm
+    target-branch: main
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]

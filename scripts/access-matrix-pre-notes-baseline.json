@@ -1,0 +1,20 @@
+{
+  "health.check": "public",
+  "appConfig": "public",
+  "auth.passwordCapabilities": "authenticated",
+  "auth.verifyEmailTransport": "public",
+  "auth.updateLocale": "authenticated",
+  "settings.getAll": "authenticated",
+  "settings.adminSetupStatus": "authenticated",
+  "settings.myNotificationPreferences": "authenticated",
+  "settings.updateMyNotificationPreferences": "authenticated",
+  "settings.update": "admin",
+  "seed.info": "admin",
+  "seed.run": "admin",
+  "users.list": "admin",
+  "users.invite": "admin",
+  "users.setRole": "admin",
+  "users.archive": "admin",
+  "users.unarchive": "admin",
+  "users.remove": "admin"
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@cockpit-context/jobs",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests"
+  },
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./event-bus": {
+      "default": "./src/event-bus.ts"
+    }
+  },
+  "dependencies": {
+    "@cockpit-context/db": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:"
+  }
+}

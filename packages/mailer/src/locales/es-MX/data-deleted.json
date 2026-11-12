@@ -1,0 +1,13 @@
+{
+  "subject": "Se completó la eliminación programada de datos",
+  "heading": "Se completó la eliminación programada de datos",
+  "body": "Cockpit Context eliminó de forma permanente datos que ya no utiliza. La eliminación se programó al cambiar la estructura de la base de datos y se ejecutó después del periodo de espera. No ocurrió ningún error y no necesitas hacer nada.",
+  "effectsLabel": "Datos eliminados",
+  "effectsFallback": "Datos marcados para eliminación en el cambio de la base de datos.",
+  "whenLabel": "Fecha y hora (UTC)",
+  "changeLabel": "Cambio de la base de datos",
+  "noteLabel": "Notas",
+  "backupLabel": "Respaldo realizado antes de la eliminación:",
+  "recovery": "Si necesitas recuperar estos datos, pide a quien mantiene la aplicación que copie del respaldo solo los datos que necesitas. Restaurar el respaldo completo también desharía los cambios realizados desde entonces.",
+  "noBackup": "No se realizó un respaldo inmediatamente antes de la eliminación. Consulta con quien mantiene la aplicación sobre otras opciones de recuperación y la configuración de respaldos."
+}

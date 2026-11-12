@@ -1,0 +1,26 @@
+{
+  "name": "@cockpit-context/test-utils",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@cockpit-context/api": "workspace:*",
+    "@cockpit-context/auth": "workspace:*",
+    "@cockpit-context/db": "workspace:*",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

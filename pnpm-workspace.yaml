@@ -1,0 +1,151 @@
+packages:
+  - apps/*
+  - packages/*
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+# Explicit current-libc selection makes pnpm retain complete platform metadata,
+# including publication dates used by the release-age gate.
+supportedArchitectures:
+  libc: [current]
+# Excludes for packages that fail the 7-day minimum-age check on re-resolution.
+# Each entry is scoped to the exact version that fixes an advisory
+# (`pkg@x.y.z`; quote scoped names), so no other version of that package —
+# including a newer, equally young one — bypasses the gate.
+# Security-fix carve-outs only; ordinary updates must satisfy the age gate.
+# Each entry MUST carry a `drop-after: YYYY-MM-DD` marker in its comment. That
+# date is enforced by `pnpm deps:check-excludes` (CI lint job) — once it passes,
+# the build fails until the entry is deleted. Without it a carve-out taken for a
+# one-week security window quietly becomes a permanent exemption from the gate.
+# Block sequence only, never flow style — the checker only parses blocks. The
+# marker applies to the one entry it precedes or trails; it does not carry over.
+minimumReleaseAgeExclude:
+  # GHSA-39q9-qp46-w8xg: hono 4.13.18 (released 2026-11-11) fixes reachable
+  # unauthenticated body-limit memory exhaustion and is <7 days old.
+  # drop-after: 2026-11-18
+  - hono@4.13.18
+  # GHSA-fj57-4f93-cfw6: @hono/node-server 2.1.7 (released 2026-11-11)
+  # is the security fix and is <7 days old.
+  # drop-after: 2026-11-18
+  - "@hono/node-server@2.1.7"
+# Unfixable-advisory suppressions for `pnpm audit` — see
+# Only for a
+# high/critical advisory with NO patched release, reached solely through
+# tooling that never ships in the app image, and only with owner approval.
+# Each entry MUST carry a `drop-after: YYYY-MM-DD` marker, enforced by
+# `pnpm deps:check-excludes`; on expiry, re-check upstream and either delete
+# the entry or re-date it. None today (the braces GHSA-vfj7-8cjw-p6xm entry
+# was removed when the advisory was withdrawn, 2026-10-23). Add as:
+#   auditConfig:
+#     ignoreGhsas:
+#       # <pkg> <range> (no fix published): <impact>. Reached only via <path>.
+#       # drop-after: YYYY-MM-DD
+#       - GHSA-xxxx-yyyy-zzzz
+# Overrides: range-scoped selectors only, each with its reason. The 2026-10-26
+# refresh retired every CVE override (the transitives now resolve at or above
+# their fixed versions on their own). Add only narrowly scoped CVE overrides.
+overrides:
+  # Bundle dedupe, not a CVE: sileo 0.1.6 asks for motion ^12, which shipped a
+  # second, non-lazy Motion copy in the eager `ui` chunk next to @cockpit-context/ui's
+  # Motion 14. Point sileo at the catalog's Motion so one copy ships. sileo's
+  # only Motion use is `motion.rect` from `motion/react` (animate x/width/
+  # height/opacity, spring bounce+duration), unchanged in 14. Drop once sileo
+  # depends on motion 14.
+  "sileo>motion@^12": "catalog:"
+blockExoticSubdeps: true
+dangerouslyAllowAllBuilds: false
+savePrefix: ""
+# Moved here from the package.json "pnpm" field, which pnpm 11 no longer reads.
+peerDependencyRules:
+  allowedVersions:
+    vite: "*"
+allowBuilds:
+  # Its postinstall is `node scripts/check-types.js || true` — a best-effort
+  # diagnostic that always exits 0 and produces nothing the runtime needs. Denied
+  # rather than allowed: skipping it costs nothing and keeps a third-party install
+  # script from running. Listed explicitly (not omitted) because an *undecided*
+  # package is what makes pnpm fail every `pnpm <script>` with ERR_PNPM_IGNORED_BUILDS.
+  '@openrouter/sdk': false
+  # tree-sitter-bash ships prebuilt tree-sitter-bash.wasm; the native binding is not needed.
+  tree-sitter-bash: false
+  '@prisma/engines': true
+  esbuild: true
+  lefthook: true
+  msgpackr-extract: true
+  msw: true
+  prisma: true
+  sharp: true
+# Catalog: single-version deps shared across workspace packages.
+# Bump shared versions HERE, not in individual package.json files.
+catalog:
+  pg: ^8.23.1
+  "@babel/parser": 8.1.0
+  dotenv: ^18.0.9
+  zod: ^4.6.7
+  "@types/node": ^26.6.6
+  hono: 4.13.18
+  "@orpc/server": ^1.16.1
+  "@orpc/openapi": ^1.16.1
+  "@orpc/zod": ^1.16.1
+  # Exact pins: the 1.7.x family must stay aligned so @better-auth/core and
+  # plugin types resolve to a single copy. Bump the whole family together.
+  better-auth: 1.7.17
+  "@better-auth/oauth-provider": 1.7.17
+  "@better-auth/mcp": 1.7.17
+  "@better-auth/cimd": 1.7.17
+  # MCP SDK v2 (server transport), matching ws-model-proxy. Exact pin: the
+  # handler/auth-adapter API surface is versioned with the protocol.
+  "@modelcontextprotocol/server": 2.4.0
+  lucide-react: 1.68.0
+  next-themes: ^0.4.6
+  # Web/UI React.
+  react: ^19.3.1
+  react-dom: ^19.3.1
+  sileo: ^0.1.6
+  # One Motion for @cockpit-context/ui and (via the sileo override above) sileo.
+  motion: 14.9.1
+  "@prisma/client": ^7.10.1
+  # Keep the Prisma CLI in lockstep with @prisma/client above — they must match.
+  # Consumed by packages/db via `catalog:`.
+  prisma: ^7.10.1
+  "@orpc/client": ^1.16.1
+  "@orpc/tanstack-query": ^1.16.1
+  "@types/react": ^19.3.0
+  "@types/react-dom": ^19.3.0
+  tailwindcss: 4.3.4
+  # TypeScript 7 is also the shipped TS/JS language server (`tsc --lsp`), and
+  # pyright the Python one: @cockpit-context/explore spawns both, and apps/server declares
+  # them as runtime dependencies so the bundled server resolves them in the
+  # production image (Dockerfile prod-deps). Exact pyright pin: bump deliberately
+  # and re-run `pnpm run lsp:smoke`.
+  typescript: ^7.0.2
+  pyright: 1.1.414
+  vite: ^8.3.5
+  "@vitejs/plugin-react": 6.2.1
+  postcss: ^8.5.32
+  "@tanstack/ai": 1.1.0
+  "@tanstack/ai-anthropic": 1.1.0
+  "@tanstack/ai-openrouter": 1.1.0
+  "@tanstack/react-form": ^1.33.5
+  "@tanstack/react-query": 5.106.0
+  "@tanstack/react-query-devtools": 5.106.0
+  "@tanstack/react-router": ^1.170.46
+  "@tanstack/react-router-devtools": ^1.167.2
+  "@tanstack/react-router-ssr-query": ^1.167.3
+  "@tanstack/react-start": ^1.169.4
+  tsx: ^4.23.15
+  vitest: 5.1.0
+  vitest-mock-extended: ^5.1.1
+  rate-limiter-flexible: 11.2.4
+  nodemailer: 10.3.1 # GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w / GHSA-85x2-q946-cp5h (address parser)
+  "@types/nodemailer": ^8.0.2
+  tsdown: 0.23.5
+  "@aws-sdk/client-s3": 3.1162.0
+  i18next: 26.7.1
+  react-i18next: 17.1.12
+  i18next-browser-languagedetector: 8.3.0
+  openai: 7.50.0
+  "@anthropic-ai/sdk": 1.5.0
+  "qrcode.react": ^4.2.0
+  "@fontsource-variable/roboto": ^5.3.0
+  "tailwind-merge": ^3.7.0

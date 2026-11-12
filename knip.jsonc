@@ -1,0 +1,89 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema-jsonc.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        // Invoked by backup shell scripts and the container entrypoint.
+        "scripts/backup/*.mjs!",
+        // Root wrappers, runtime entrypoint, and the local database guard.
+        "scripts/db/*.mjs!",
+        "scripts/db/lib/local-db-name.mjs!",
+        // Each Dockerfile invokes the packageManager-pinned installer.
+        "scripts/install-pnpm.mjs!",
+        "scripts/trufflehog-pr-scan.sh!",
+        // Structural destructive-operation scanner — invoked by policy-checks.sh.
+        "scripts/check-destructive-operations.mjs!",
+        // Agent-rules gate (route exports / t() coverage / sitemap sync) —
+        // invoked by policy-checks.sh, not statically imported.
+        "scripts/check-agent-rules.ts!",
+        // Child Vitest config — passed dynamically to the I/O-guard fixture test.
+        "scripts/vitest-test-io-guard-fixture.config.ts!",
+        // Run by the Dockerfile runner stage and by hand in a live container.
+        "scripts/check-runtime-tools.mjs!"
+      ],
+      "ignoreBinaries": [
+        // Global local-dev CLI. Intentionally not listed in package.json.
+        "portless",
+        // OS binary from Debian's openssh-client, apt-installed in the image
+        // and spawned by scripts/check-runtime-tools.mjs. knip 6.42 started
+        // reading direct spawnSync("<bin>") calls as package binaries.
+        "ssh-keygen",
+        // PostgreSQL tools installed in the runtime image for backup/restore.
+        "psql",
+        "pg_restore"
+      ]
+    },
+    "apps/web": {
+      "entry": [
+        "src/routes/**/*.tsx!",
+        "src/hooks/*.ts!",
+        "src/stores/*.ts!",
+        // Shared overflow primitive retained for wide content layouts.
+        "src/components/wide-content.tsx!"
+      ],
+      "ignoreDependencies": [
+        // Imported only via PostCSS/Tailwind CSS pipeline, not statically.
+        "tailwindcss",
+        "postcss",
+        // Consumed indirectly via `@orpc/client` + `createORPCClient`.
+        "@orpc/server",
+        // Toast primitive re-exported from @cockpit-context/ui.
+        "sileo",
+        // Optional peer of h3 2.x (pulled by TanStack Start); pinned here so the
+        // SSR/oRPC stack binds crossws 0.4.x instead of the 0.3.x h3 1.x dedupes
+        // to. No static import in source — it's a build/runtime transitive.
+        "crossws"
+      ]
+    },
+    "apps/server": {
+      // pyright is the Python language server @cockpit-context/explore spawns (resolved
+      // at runtime with createRequire from the bundle); declared here so the
+      // production image's prod-deps closure carries it. (better-auth needs no
+      // entry: the server imports it directly.)
+      "ignoreDependencies": ["pyright"]
+    },
+    "packages/ui": {
+      "entry": ["src/components/**/*.tsx", "src/styles/**/*.css"]
+    },
+    "packages/api": {
+      "ignoreDependencies": ["@orpc/client", "@orpc/openapi", "@orpc/zod"]
+    },
+    "packages/db": {
+      "ignoreDependencies": ["@prisma/client", "pg", "zod"]
+    },
+    "packages/auth": {
+      "ignoreDependencies": ["zod"]
+    },
+    "packages/explore": {
+      // A tiny source tree the explore tools and the manual smoke script read
+      // as data (glob/grep/read targets), never imported.
+      "ignore": ["fixtures/**"],
+      // The fake language server is spawned by the LSP tests as a child
+      // process (a path string, not an import).
+      "entry": ["src/lsp/test-support/fake-lsp-server.mjs"],
+      // Resolved at runtime with require.resolve("pyright/langserver.index.js")
+      // and spawned under Node (src/lsp/specs.ts); never imported.
+      "ignoreDependencies": ["pyright"]
+    }
+  }
+}

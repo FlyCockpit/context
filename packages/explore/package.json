@@ -1,0 +1,32 @@
+{
+  "name": "@cockpit-context/explore",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./sandbox-check": {
+      "default": "./src/lsp/sandbox-check.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cockpit-context/agent-runtime": "workspace:*",
+    "minimatch": "11.0.4",
+    "pyright": "catalog:",
+    "typescript": "catalog:",
+    "vscode-languageserver-protocol": "3.18.5",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  }
+}

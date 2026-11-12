@@ -1,0 +1,837 @@
+{
+  "appSettingsLoadFailed": "No se pudieron cargar las configuraciones de la aplicación.",
+  "pages": {
+    "ongoing": {
+      "title": "En curso",
+      "description": "Lo que tus agentes están investigando en este momento."
+    },
+    "conversations": {
+      "title": "Conversaciones",
+      "description": "Cada pregunta sobre tus paquetes, con su respuesta."
+    },
+    "packages": {
+      "title": "Paquetes",
+      "description": "Las dependencias sobre las que tus agentes pueden preguntar a Cockpit Context."
+    },
+    "access": {
+      "title": "Acceso",
+      "description": "Cómo se conectan tus agentes de programación y cómo Cockpit Context llega a los repositorios privados."
+    },
+    "conversation": {
+      "back": "Todas las conversaciones"
+    }
+  },
+  "ongoing": {
+    "loadFailed": "No se pudo cargar tu resumen.",
+    "start": {
+      "title": "Primeros pasos",
+      "description": "Tres pasos para la primera respuesta de tu agente basada en código fuente real.",
+      "progress": "{{done}} de {{total}} listos",
+      "done": "Listo",
+      "connect": {
+        "title": "Conecta tu agente de programación",
+        "body": "Agrega Cockpit Context a Claude Code o Codex. Usa OAuth para iniciar sesión sin copiar un token.",
+        "copy": "Copiar el comando de Claude Code",
+        "authenticate": "Luego ejecuta /mcp en Claude Code, elige cockpit-context y selecciona Authenticate.",
+        "token": "Usar un token de API",
+        "claudeCode": "Claude Code",
+        "codex": "Codex",
+        "copyCodex": "Copiar comandos de Codex"
+      },
+      "package": {
+        "title": "Agrega un paquete",
+        "body": "Agrega una dependencia sobre la que quieras respuestas, o deja que tu agente proponga una. Las propuestas esperan tu aprobación.",
+        "action": "Ir a Paquetes"
+      },
+      "ask": {
+        "title": "Haz una pregunta",
+        "body": "Pregúntale a tu agente sobre el paquete. Cockpit Context lee su código fuente en la versión exacta que usas, y la investigación aparece aquí mientras se ejecuta.",
+        "example": "Usa Cockpit Context para revisar cómo maneja los reintentos la dependencia en la versión que usamos.",
+        "copy": "Copiar la pregunta de ejemplo"
+      }
+    },
+    "live": {
+      "title": "Investigaciones en vivo",
+      "history": "Historial de conversaciones",
+      "idleTitle": "Nada en curso por ahora",
+      "idleBody": "Cuando un agente le haga una pregunta a Cockpit Context, su investigación aparecerá aquí mientras trabaja.",
+      "loadFailed": "No se pudo cargar lo que está en ejecución."
+    },
+    "recent": {
+      "title": "Terminadas recientemente",
+      "loadFailed": "No se pudieron cargar las conversaciones recientes.",
+      "empty": "Todavía no ha terminado nada."
+    },
+    "modelMissing": {
+      "title": "El modelo aún no está configurado",
+      "admin": "Define OPENROUTER_API_KEY y COCKPIT_CONTEXT_MODEL en el entorno del servidor y reinícialo. Admin → Configuración muestra la configuración actual del modelo.",
+      "user": "Pide a tu administrador que configure el modelo antes de hacer una pregunta.",
+      "action": "Abrir configuración de administrador"
+    }
+  },
+  "access": {
+    "tabsAriaLabel": "Secciones de acceso",
+    "tabs": {
+      "tokens": "Tokens MCP",
+      "connections": "Conexiones",
+      "sshKeys": "Llaves SSH",
+      "knownHosts": "Hosts conocidos"
+    },
+    "revoke": "Revocar",
+    "revoking": "Revocando…",
+    "opensInNewTab": "(se abre en una pestaña nueva)",
+    "mcpUrlFailed": "No se pudo cargar la dirección del servidor de Cockpit Context.",
+    "state": {
+      "token": {
+        "active": "Activo",
+        "expired": "Vencido",
+        "revoked": "Revocado"
+      },
+      "connection": {
+        "active": "Activa",
+        "expired": "Vencida",
+        "revoked": "Revocada"
+      }
+    },
+    "dates": {
+      "created": "Se creó",
+      "lastUsed": "Último uso",
+      "neverUsed": "nunca",
+      "expires": "Vence",
+      "noExpiry": "No vence"
+    },
+    "expiry": {
+      "d7": "7 días",
+      "d30": "30 días",
+      "d90": "90 días",
+      "y1": "1 año",
+      "never": "Nunca"
+    },
+    "flags": {
+      "legend": "Qué puede hacer este agente",
+      "allowPropose": "Permitir que este agente proponga paquetes",
+      "allowProposeShort": "Puede proponer paquetes",
+      "allowProposeHint": "Puede pedirte que agregues un paquete que necesita. Cada propuesta te espera en la página de Propuestas.",
+      "autoApprove": "Aprobar sus propuestas automáticamente",
+      "autoApproveShort": "Aprobar propuestas automáticamente",
+      "autoApproveHint": "Sus propuestas se vuelven paquetes sin esperarte. Los paquetes que necesitan una llave SSH siempre esperan.",
+      "saved": "Guardado",
+      "saveFailed": "No se pudo guardar ese cambio. Inténtalo de nuevo."
+    },
+    "secret": {
+      "title": "Copia este token ahora",
+      "description": "Solo se muestra una vez. Cockpit Context guarda solo un hash, así que no puede volver a mostrarlo. Si lo pierdes, revócalo y crea otro.",
+      "done": "Ya lo copié"
+    },
+    "tokens": {
+      "title": "Tokens de API de MCP",
+      "description": "Un token permite que un agente se conecte a Cockpit Context en tu nombre sin iniciar sesión.",
+      "preferOAuth": "Los agentes que pueden iniciar sesión pueden usar OAuth.",
+      "loadFailed": "No se pudieron cargar tus tokens.",
+      "prefix": "Empieza con",
+      "rowActions": "Acciones para {{name}}",
+      "empty": {
+        "title": "Aún no hay tokens",
+        "body": "Crea un token para un agente que no puede iniciar sesión con OAuth, o para un script.",
+        "oauth": "Conectar con OAuth"
+      },
+      "create": {
+        "open": "Crear token",
+        "title": "Crear un token de MCP",
+        "description": "Ponle el nombre del agente o del equipo que lo usará, para distinguir tus tokens.",
+        "submit": "Crear token",
+        "pending": "Creando…",
+        "failed": "No se pudo crear el token. Inténtalo de nuevo."
+      },
+      "created": {
+        "title": "Tu nuevo token",
+        "description": "Agrégalo a tu agente con una de estas opciones y luego cierra este cuadro.",
+        "copyToken": "Copiar token",
+        "claudeCode": "Claude Code",
+        "claudeCodeHint": "Agrega --scope user para usarlo en todos tus proyectos. No guardes un token en un .mcp.json compartido.",
+        "copyCommand": "Copiar comando de Claude Code",
+        "json": "Otros clientes MCP (JSON)",
+        "copyJson": "Copiar configuración JSON",
+        "codex": "Codex",
+        "copyCodex": "Copiar comandos de Codex",
+        "codexHint": "Ejecuta estos comandos en la terminal donde iniciarás Codex. El token queda disponible en esa sesión; guárdalo de forma segura para futuras sesiones y no lo agregues a archivos compartidos."
+      },
+      "form": {
+        "name": "Nombre",
+        "nameHint": "Por ejemplo, la laptop o el trabajo de CI que lo usará.",
+        "namePlaceholder": "Laptop del trabajo",
+        "nameRequired": "Ponle un nombre al token.",
+        "nameTooLong": "Usa como máximo {{max}} caracteres.",
+        "expiry": "Vence en"
+      },
+      "rename": {
+        "open": "Renombrar",
+        "title": "Renombrar token",
+        "description": "El nombre es solo para ti. El token no cambia.",
+        "success": "Token renombrado",
+        "failed": "No se pudo renombrar el token. Inténtalo de nuevo."
+      },
+      "revoke": {
+        "title": "¿Revocar este token?",
+        "description": "Cualquier agente que lo use queda desconectado de inmediato. Esto no se puede deshacer.",
+        "typePrompt": "Escribe el nombre del token para confirmar",
+        "copy": "Copiar nombre del token",
+        "success": "Token revocado",
+        "failed": "No se pudo revocar el token. Inténtalo de nuevo."
+      }
+    },
+    "connections": {
+      "title": "Conexiones OAuth",
+      "description": "Agentes que aprobaste en la página de consentimiento de Cockpit Context. Cada uno actúa en tu nombre, dentro de sus permisos.",
+      "loadFailed": "No se pudieron cargar tus conexiones.",
+      "clientId": "ID de cliente",
+      "revokeLabel": "Revocar {{name}}",
+      "empty": {
+        "title": "Aún no hay conexiones",
+        "body": "Sigue los pasos de arriba. Cuando apruebes un agente, aparecerá aquí."
+      },
+      "guide": {
+        "title": "Conecta Claude Code con OAuth",
+        "description": "Sin token que copiar: Claude Code inicia sesión a través de tu navegador.",
+        "add": "Agrega Cockpit Context en una terminal",
+        "copyCommand": "Copiar comando",
+        "authenticate": "Autentícate en Claude Code",
+        "authenticateBody": "Ejecuta /mcp, elige Cockpit Context y selecciona Authenticate. Tu navegador abre Cockpit Context.",
+        "approve": "Inicia sesión y aprueba",
+        "approveBody": "Revisa el nombre del agente y a dónde vuelve tu navegador, elige sus permisos y permítelo.",
+        "otherClients": "Otros clientes MCP",
+        "copyUrl": "Copiar URL de MCP",
+        "otherClientsBody": "Usa esta URL en cualquier cliente que admita autorización MCP.",
+        "useToken": "Los clientes que no pueden iniciar sesión pueden usar un token."
+      },
+      "revoke": {
+        "title": "¿Revocar esta conexión?",
+        "description": "El agente queda desconectado de inmediato. Para reconectarse, tiene que iniciar sesión y ser aprobado de nuevo.",
+        "typePrompt": "Escribe el nombre del agente para confirmar",
+        "copy": "Copiar nombre del agente",
+        "success": "Conexión revocada",
+        "failed": "No se pudo revocar la conexión. Inténtalo de nuevo."
+      }
+    },
+    "sshKeys": {
+      "title": "Llaves SSH",
+      "description": "Cockpit Context clona repositorios privados por SSH. Agrega la mitad pública de una llave a tu servidor git como llave de despliegue de solo lectura.",
+      "loadFailed": "No se pudieron cargar tus llaves SSH.",
+      "rowActions": "Acciones para {{name}}",
+      "fingerprint": "Huella",
+      "publicKey": "Llave pública",
+      "copyPublicKey": "Copiar llave pública",
+      "source": {
+        "generated": "Generada",
+        "imported": "Importada"
+      },
+      "empty": {
+        "title": "Aún no hay llaves SSH",
+        "body": "Genera una llave en Cockpit Context o importa una que ya uses. Las llaves privadas se cifran y no se vuelven a mostrar."
+      },
+      "deployKey": {
+        "title": "Agrégala a tu servidor git",
+        "body": "Pega la llave pública como llave de despliegue con acceso de lectura en cada repositorio privado.",
+        "github": "Llaves de despliegue de GitHub",
+        "gitlab": "Llaves de despliegue de GitLab",
+        "bitbucket": "Llaves de acceso de Bitbucket"
+      },
+      "generate": {
+        "open": "Generar llave",
+        "title": "Generar una llave SSH",
+        "description": "Cockpit Context crea un par de llaves Ed25519 y guarda la mitad privada cifrada.",
+        "submit": "Generar",
+        "pending": "Generando…",
+        "failed": "No se pudo generar la llave. Inténtalo de nuevo.",
+        "createdTitle": "{{name}} está lista",
+        "createdDescription": "Copia la llave pública a tu servidor git. Puedes volver a verla desde el menú de la llave.",
+        "done": "Listo"
+      },
+      "import": {
+        "open": "Importar llave",
+        "title": "Importar una llave SSH",
+        "description": "Pega una llave privada OpenSSH o PEM. Cockpit Context la vuelve a cifrar con su propia llave y no la vuelve a mostrar.",
+        "submit": "Importar",
+        "pending": "Importando…",
+        "failed": "No se pudo importar la llave. Inténtalo de nuevo.",
+        "success": "{{name}} importada"
+      },
+      "form": {
+        "name": "Nombre",
+        "nameHint": "Por ejemplo, el servidor o los repositorios que abre.",
+        "namePlaceholder": "Llave de despliegue de GitHub",
+        "nameRequired": "Ponle un nombre a la llave.",
+        "nameTooLong": "Usa como máximo {{max}} caracteres.",
+        "privateKey": "Llave privada",
+        "privateKeyHint": "El archivo completo, incluidas las líneas BEGIN y END.",
+        "privateKeyPlaceholder": "BEGIN OPENSSH PRIVATE KEY …",
+        "privateKeyRequired": "Pega la llave privada.",
+        "privateKeyTooLong": "Es demasiado largo para ser una llave privada.",
+        "passphrase": "Frase de contraseña (opcional)",
+        "passphraseHint": "Solo si la llave tiene una. Se usa una vez para descifrar la llave y no se guarda.",
+        "passphraseTooLong": "No se admiten frases de contraseña de más de 1023 bytes.",
+        "passphraseLineBreak": "No se admiten frases de contraseña con saltos de línea."
+      },
+      "view": {
+        "open": "Ver llave pública",
+        "description": "La mitad pública de esta llave. La mitad privada sigue cifrada en el servidor."
+      },
+      "delete": {
+        "title": "¿Eliminar esta llave SSH?",
+        "description": "Cockpit Context olvida la llave para siempre. Los paquetes que todavía la usan deben cambiarse a otra llave primero.",
+        "typePrompt": "Escribe el nombre de la llave para confirmar",
+        "copy": "Copiar nombre de la llave",
+        "success": "Llave SSH eliminada",
+        "failed": "No se pudo eliminar la llave. Inténtalo de nuevo."
+      }
+    },
+    "knownHosts": {
+      "title": "Hosts conocidos",
+      "description": "Antes de que Cockpit Context clone desde un servidor git propio por SSH, confirmas la llave de host de ese servidor.",
+      "loadFailed": "No se pudieron cargar tus hosts conocidos.",
+      "fingerprint": "Huella",
+      "trusted": "De confianza desde",
+      "empty": {
+        "title": "Aún no hay hosts confirmados",
+        "body": "GitHub, GitLab y Bitbucket ya son de confianza. Agrega aquí tu propio servidor git."
+      },
+      "scan": {
+        "open": "Agregar host",
+        "title": "Agregar un host git",
+        "description": "Cockpit Context se conecta al host y muestra las llaves SSH que ofrece, para que las compares.",
+        "submit": "Escanear host",
+        "pending": "Escaneando…",
+        "failed": "No se pudo escanear ese host. Inténtalo de nuevo."
+      },
+      "form": {
+        "host": "Host",
+        "hostHint": "Un nombre de host, o pega una URL git de SSH.",
+        "hostPlaceholder": "git.example.com",
+        "hostInvalid": "Escribe un nombre de host como git.example.com.",
+        "port": "Puerto",
+        "portInvalid": "Usa un puerto del 1 al 65535."
+      },
+      "review": {
+        "title": "Llaves que ofrece {{host}}",
+        "description": "Confía solo en las llaves cuyas huellas coincidan con las que publica tu servidor git.",
+        "pinnedDescription": "No hay nada que confirmar.",
+        "pinnedBody": "{{host}} viene integrado: Cockpit Context ya confía en sus llaves publicadas.",
+        "done": "Listo",
+        "compare": "Compara cada huella con la que publica el administrador o la documentación de tu servidor git. Una llave que no coincide podría significar que alguien está interceptando la conexión.",
+        "keys_one": "{{count}} llave",
+        "keys_other": "{{count}} llaves",
+        "submit_one": "Confiar en {{count}} llave",
+        "submit_other": "Confiar en {{count}} llaves",
+        "submitNone": "Confiar en las llaves seleccionadas",
+        "pending": "Guardando…",
+        "success_one": "Se confió en {{count}} llave de {{host}}",
+        "success_other": "Se confió en {{count}} llaves de {{host}}",
+        "failed": "No se pudo guardar esa llave. Inténtalo de nuevo."
+      },
+      "remove": {
+        "label": "Dejar de confiar en {{host}}",
+        "title": "¿Dejar de confiar en esta llave?",
+        "description": "Los clones desde este host fallarán hasta que vuelvas a confirmar una llave. Huella:",
+        "typePrompt": "Escribe el host para confirmar",
+        "copy": "Copiar host",
+        "confirm": "Dejar de confiar",
+        "pending": "Quitando…",
+        "success": "Llave de host quitada",
+        "failed": "No se pudo quitar la llave. Inténtalo de nuevo."
+      },
+      "pinned": {
+        "title": "Hosts integrados",
+        "description": "Sus llaves de host publicadas son parte de Cockpit Context y no se pueden cambiar aquí.",
+        "badge": "Integrado",
+        "loadFailed": "No se pudieron cargar los hosts integrados."
+      }
+    }
+  },
+  "time": {
+    "never": "Nunca"
+  },
+  "origin": {
+    "mcp": "MCP",
+    "web": "Web"
+  },
+  "runStatus": {
+    "queued": "En cola",
+    "running": "En curso",
+    "completed": "Respondida",
+    "failed": "Falló",
+    "stopped": "Detenida",
+    "interrupted": "Interrumpida"
+  },
+  "packages": {
+    "add": "Agregar paquete",
+    "loadFailed": "No se pudieron cargar tus paquetes.",
+    "lastUsed": "Último uso",
+    "private": "Privado",
+    "noVersions": "Aún no hay versiones descargadas",
+    "versionsLabel": "Versiones descargadas:",
+    "moreVersions_one": "+{{count}} más",
+    "moreVersions_other": "+{{count}} más",
+    "rowActions": "Acciones para {{identifier}}",
+    "ecosystems": {
+      "npm": "npm",
+      "pypi": "PyPI",
+      "cargo": "Cargo",
+      "go": "Go",
+      "git": "Git"
+    },
+    "registries": {
+      "npm": "npm",
+      "pypi": "PyPI",
+      "cargo": "crates.io",
+      "go": "el proxy de módulos de Go"
+    },
+    "repositoryStatus": {
+      "pending": "Esperando para clonar",
+      "cloning": "Clonando",
+      "ready": "Clonado",
+      "failed": "Falló la clonación"
+    },
+    "filters": {
+      "ecosystem": "Filtrar por ecosistema",
+      "all": "Todos",
+      "search": "Buscar paquetes",
+      "searchPlaceholder": "Buscar por nombre…",
+      "clear": "Quitar filtros"
+    },
+    "empty": {
+      "title": "Aún no hay paquetes",
+      "body": "Agrega una dependencia sobre la que tus agentes puedan preguntar. Los agentes también pueden proponer paquetes; esos esperan tu aprobación.",
+      "noMatch": "Ningún paquete coincide",
+      "noMatchBody": "Prueba otro nombre u otro ecosistema."
+    },
+    "pendingBanner": {
+      "title_one": "Un agente propuso {{count}} paquete",
+      "title_other": "Los agentes propusieron {{count}} paquetes",
+      "body": "No pueden preguntar sobre ellos hasta que los apruebes.",
+      "action": "Revisar propuestas"
+    },
+    "form": {
+      "ecosystem": "Ecosistema",
+      "name": "Nombre del paquete",
+      "identifier": "Identificador",
+      "identifierFixed": "Los agentes lo usan para nombrar el paquete. No se puede cambiar.",
+      "displayName": "Nombre visible",
+      "displayNameHint": "Opcional. Por defecto es el nombre del paquete.",
+      "gitUrl": "URL de git",
+      "gitUrlHint": "Una URL https:// para repositorios públicos, o una URL SSH (git@host:dueño/repo) para los privados.",
+      "sshKey": "Llave SSH",
+      "sshKeyHint": "Agrega su llave pública al repositorio como deploy key de solo lectura.",
+      "sshKeyPlaceholder": "Elige una llave",
+      "sshKeyRequired": "Elige la llave SSH que puede leer este repositorio.",
+      "sshKeysFailed": "No se pudieron cargar tus llaves SSH.",
+      "noSshKeys": "Aún no tienes una llave SSH",
+      "noSshKeysBody": "Las URL SSH necesitan una llave que pueda leer el repositorio.",
+      "manageKeys": "Administrar llaves SSH",
+      "moreOptions": "Más opciones",
+      "subdirectory": "Subdirectorio",
+      "subdirectoryHint": "Para monorepos: la carpeta del paquete. El agente sigue viendo todo el repositorio, pero empieza aquí.",
+      "subdirectoryInvalid": "Usa una carpeta relativa dentro del repositorio, como packages/core.",
+      "tagPattern": "Patrón de tags",
+      "tagPatternHint": "Opcional. Cómo se nombran los tags de cada versión, con {version}. Se prueba primero cuando un agente pide una versión.",
+      "tagPatternInvalid": "Incluye {version}, por ejemplo v{version}.",
+      "defaultRef": "Ref predeterminada",
+      "defaultRefHint": "Opcional. Se usa cuando un agente no indica versión. Vacía significa la rama predeterminada del remoto.",
+      "notes": "Notas",
+      "notesHint": "Opcional. Contexto que el agente lee antes de cada investigación de este paquete.",
+      "placeholders": {
+        "gitUrl": "https://github.com/dueño/repo",
+        "subdirectory": "packages/core",
+        "tagPattern": "v{version}",
+        "defaultRef": "main"
+      },
+      "namePlaceholders": {
+        "npm": "@tanstack/react-query",
+        "pypi": "requests",
+        "cargo": "serde",
+        "go": "github.com/spf13/cobra",
+        "git": "dueño/repo"
+      }
+    },
+    "lookup": {
+      "action": "Buscar en {{registry}}",
+      "pending": "Buscando…",
+      "found": "Se encontró en {{registry}}",
+      "latestVersion": "Versión más reciente",
+      "useAll": "Usar estos valores",
+      "homepage": "Sitio web",
+      "noRepository": "El registro no indica un repositorio. Escribe tú la URL de git.",
+      "notFound": "No se encontró en {{registry}}. Revisa el nombre o escribe tú la URL de git.",
+      "unavailable": "{{registry}} no respondió. Inténtalo de nuevo o escribe tú la URL de git.",
+      "failed": "No se pudo buscar ese paquete. Inténtalo de nuevo.",
+      "gitHint": "Los paquetes de git no tienen registro. Nómbralos dueño/repo y escribe la URL de git."
+    },
+    "create": {
+      "title": "Agregar un paquete",
+      "description": "Indica a Cockpit Context dónde está el código de una dependencia. Búscala en su registro para llenar los datos.",
+      "submit": "Agregar paquete",
+      "pending": "Agregando…",
+      "success": "Se agregó {{identifier}}.",
+      "failed": "No se pudo agregar ese paquete. Inténtalo de nuevo."
+    },
+    "edit": {
+      "title": "Editar paquete",
+      "description": "Los cambios aplican a la siguiente pregunta. Una URL de git o llave nueva vuelve a revisar el repositorio.",
+      "success": "Paquete guardado.",
+      "failed": "No se pudo guardar el paquete. Inténtalo de nuevo."
+    },
+    "delete": {
+      "action": "Eliminar paquete",
+      "title": "¿Eliminar este paquete?",
+      "description": "Los agentes ya no podrán preguntar sobre él. Sus conversaciones se quedan en tu historial.",
+      "typePrompt": "Escribe el identificador para confirmar:",
+      "copy": "Copiar el identificador",
+      "success": "Paquete eliminado.",
+      "failed": "No se pudo eliminar el paquete. Inténtalo de nuevo."
+    },
+    "detail": {
+      "back": "Paquetes",
+      "ask": "Preguntar",
+      "loadFailed": "No se pudo cargar este paquete.",
+      "notFound": "No se encontró el paquete",
+      "notFoundBody": "Quizá se eliminó.",
+      "settings": "Configuración",
+      "settingsBody": "De dónde obtiene Cockpit Context el código y qué debe saber el agente.",
+      "copyGitUrl": "Copiar la URL de git",
+      "repository": "Repositorio",
+      "notCloned": "Aún no se clona. La primera pregunta lo clona.",
+      "fetched": "Actualizado",
+      "publicRepo": "Ninguna (repositorio público)",
+      "wholeRepo": "Todo el repositorio",
+      "tagPatternAuto": "Automático",
+      "remoteDefault": "Rama predeterminada del remoto {{branch}}",
+      "noNotes": "Aún no hay notas.",
+      "conversations": "Conversaciones recientes",
+      "conversationsBody": "Las preguntas más recientes sobre este paquete.",
+      "allConversations": "Todas las conversaciones",
+      "conversationsFailed": "No se pudieron cargar las conversaciones.",
+      "noConversations": "Aún no hay preguntas",
+      "noConversationsBody": "Pregunta sobre este paquete aquí, o deja que tu agente pregunte por MCP.",
+      "remoteDefaultUnknown": "La rama predeterminada del remoto"
+    },
+    "notUsedYet": "Aún sin usar",
+    "snapshot": {
+      "keyChoice": "Llave SSH",
+      "saved": "Usar una llave guardada",
+      "once": "Usar una llave una sola vez",
+      "hint": "La llave se usa solo para esta operación, a menos que elijas guardarla. Las instantáneas conservan sus referencias hasta que las actualices con tu llave. Guarda tu llave en un lugar seguro.",
+      "save": "Guardar esta llave en mis llaves SSH",
+      "badge": "Instantánea",
+      "update": "Actualizar con llave SSH",
+      "updating": "Actualizando instantánea…",
+      "updated": "Instantánea actualizada.",
+      "failed": "No se pudo actualizar la instantánea. Inténtalo de nuevo.",
+      "lastUpdated": "Última actualización",
+      "deleteWarning": "Esta instantánea no se puede restaurar sin tu llave SSH. Sus conversaciones conservan el nombre del paquete."
+    }
+  },
+  "checkouts": {
+    "title": "Versiones descargadas",
+    "description": "Cada versión por la que preguntó un agente, con el resumen que el agente lee primero. Los checkouts son una caché: eliminar uno libera espacio y la siguiente pregunta lo vuelve a crear.",
+    "loadFailed": "No se pudieron cargar los checkouts.",
+    "empty": "Aún no hay nada descargado",
+    "emptyBody": "La primera pregunta sobre una versión la descarga aquí.",
+    "inUse": "En uso",
+    "askThis": "Preguntar sobre esta versión",
+    "actions": "Acciones para {{version}}",
+    "columns": {
+      "version": "Versión o ref",
+      "commit": "Commit",
+      "size": "Tamaño",
+      "lastUsed": "Último uso",
+      "overview": "Resumen",
+      "actions": "Acciones"
+    },
+    "kind": {
+      "tag": "Tag",
+      "branch": "Rama",
+      "commit": "Commit",
+      "npmGitHead": "Commit de la versión en npm"
+    },
+    "status": {
+      "pending": "Descargando",
+      "ready": "Lista",
+      "failed": "Falló"
+    },
+    "summaryStatus": {
+      "none": "Ninguno",
+      "pending": "Escribiendo…",
+      "ready": "Listo",
+      "failed": "Falló"
+    },
+    "refresh": {
+      "action": "Traer lo más reciente",
+      "queued": "Trayendo los commits más recientes.",
+      "notCloned": "Aún no se clona. La siguiente pregunta clona la versión más reciente.",
+      "failed": "No se pudo actualizar el repositorio. Inténtalo de nuevo."
+    },
+    "summary": {
+      "title": "Resumen de {{version}}",
+      "modelNote": "Lo escribió el modelo a partir del código y lo comparten todas las personas que usan esta versión. El agente lo verifica con sus herramientas.",
+      "overrideNote": "Lo editaste tú. Tus investigaciones leen este texto en lugar del resumen del modelo. Nadie más lo ve.",
+      "overrideInUse": "Tus investigaciones usan tu versión editada en lugar de esta.",
+      "none": "Aún no hay resumen.",
+      "generatedPending": "Se está escribiendo un nuevo resumen del modelo.",
+      "versionPicker": "Qué resumen mostrar",
+      "yourVersion": "Tu versión editada",
+      "generatedVersion": "Del modelo",
+      "overrideBadge": "Tu edición",
+      "view": "Ver resumen",
+      "edit": "Editar resumen",
+      "editOwn": "Editar tu versión",
+      "editTitle": "Edita tu resumen de {{version}}",
+      "editDescription": "Tu versión editada es privada: solo tus investigaciones la leen, antes de cada investigación de esta versión. El resumen del modelo sigue igual para todos los demás.",
+      "label": "Resumen",
+      "markdownHint": "Markdown. Que sea breve: qué hace el código, rutas clave y APIs principales.",
+      "saved": "Tu versión se guardó. Tus investigaciones la usan a partir de ahora.",
+      "saveFailed": "No se pudo guardar el resumen. Inténtalo de nuevo.",
+      "revert": "Volver al resumen del modelo",
+      "revertTitle": "¿Volver al resumen del modelo?",
+      "revertDescription": "Se borra tu versión editada y tus investigaciones vuelven a usar el resumen del modelo.",
+      "revertConfirm": "Volver",
+      "reverted": "Listo. Tus investigaciones usan el resumen del modelo.",
+      "revertFailed": "No se pudo volver al resumen del modelo. Inténtalo de nuevo.",
+      "regenerate": "Regenerar resumen",
+      "regenerateNote": "Regenerar escribe un nuevo resumen del modelo para todas las personas que usan esta versión y consume tokens del modelo. Nunca cambia tu versión editada.",
+      "regenerating": "Escribiendo un resumen nuevo. Aparecerá aquí cuando esté listo.",
+      "regeneratingKeepsEdit": "Escribiendo un nuevo resumen del modelo. Tu versión editada sigue igual y tus investigaciones la siguen usando.",
+      "alreadyRunning": "Ya se está escribiendo un resumen.",
+      "regenerateFailed": "No se pudo iniciar un resumen nuevo. Inténtalo de nuevo.",
+      "viewStatus": "Ver resumen ({{status}})"
+    },
+    "delete": {
+      "action": "Eliminar checkout",
+      "leased": "En uso por una pregunta en curso",
+      "title": "¿Eliminar el checkout de {{version}}?",
+      "description": "Esto libera su espacio en disco. Sus conversaciones se pueden seguir leyendo, y la siguiente pregunta sobre esta versión la vuelve a descargar.",
+      "typePrompt": "Escribe el commit corto para confirmar:",
+      "copy": "Copiar el commit corto",
+      "success": "Checkout eliminado.",
+      "failed": "No se pudo eliminar el checkout. Inténtalo de nuevo."
+    }
+  },
+  "ask": {
+    "title": "Preguntar sobre {{identifier}}",
+    "description": "Cockpit Context lee el código en la versión que elijas y responde aquí. Esto usa tokens del modelo.",
+    "question": "Tu pregunta",
+    "questionPlaceholder": "¿Cómo reintento una solicitud fallida con espera exponencial?",
+    "target": "¿Qué código?",
+    "targets": {
+      "default": "Predeterminado",
+      "version": "Versión",
+      "ref": "Ref de git"
+    },
+    "defaultRef": "Usa la ref predeterminada del paquete, {{ref}}.",
+    "defaultBranch": "Usa el commit más reciente de la rama predeterminada del remoto.",
+    "versionLabel": "Versión",
+    "versionHint": "Una versión publicada, como 5.2.0. Cockpit Context encuentra su tag.",
+    "refLabel": "Tag, rama o commit",
+    "refHint": "Cualquier ref de git: un tag, el nombre de una rama o el hash de un commit.",
+    "valueRequired": "Escribe una versión o una ref, o elige Predeterminado.",
+    "submit": "Preguntar",
+    "pending": "Iniciando…",
+    "resolving": "Buscando esa versión. La primera pregunta sobre un paquete clona su repositorio, lo que puede tardar un minuto.",
+    "failed": "No se pudo iniciar la investigación. Inténtalo de nuevo.",
+    "nearestTags": "Tags cercanos a esa versión. Elige uno para preguntar sobre él:",
+    "confirmHost": "Confirmar la llave SSH del host",
+    "versionPlaceholder": "5.2.0",
+    "refPlaceholder": "main",
+    "aiDisclosure": "Las respuestas de Cockpit Context las escribe un modelo de IA. Pueden ser incorrectas: revisa los archivos citados."
+  },
+  "proposals": {
+    "title": "Propuestas",
+    "description": "Paquetes que tus agentes pidieron agregar. Apruébalos para agregarlos, o recházalos con un motivo que el agente pueda leer.",
+    "backToPackages": "Paquetes",
+    "pending": "Esperando tu revisión",
+    "history": "Historial",
+    "loadFailed": "No se pudieron cargar las propuestas.",
+    "emptyPending": "No hay propuestas pendientes",
+    "emptyPendingBody": "Cuando un agente proponga un paquete, aparecerá aquí para que lo revises.",
+    "emptyHistory": "Aún no hay decisiones",
+    "emptyHistoryBody": "Aquí se guardan las propuestas aprobadas y rechazadas.",
+    "proposedBy": "Propuesto por {{connection}}",
+    "proposedByUnknown": "Propuesto por una conexión eliminada",
+    "askedVersion": "Preguntó por la versión {{version}}",
+    "rejectedBecause": "Tu motivo: {{reason}}",
+    "openPackage": "Abrir el paquete",
+    "status": {
+      "pending": "Pendiente",
+      "approved": "Aprobada",
+      "rejected": "Rechazada"
+    },
+    "approve": {
+      "action": "Aprobar",
+      "title": "Aprobar este paquete",
+      "description": "Revisa las sugerencias del agente y cambia lo que haga falta antes de agregarlo.",
+      "submit": "Aprobar y agregar",
+      "pending": "Aprobando…",
+      "created": "Aprobada. {{identifier}} ya está en tus paquetes.",
+      "existing": "Aprobada. {{identifier}} ya estaba en tus paquetes.",
+      "open": "Abrir",
+      "failed": "No se pudo aprobar esa propuesta. Inténtalo de nuevo."
+    },
+    "reject": {
+      "action": "Rechazar",
+      "title": "¿Rechazar esta propuesta?",
+      "description": "{{identifier}} no se agregará. El agente verá que la rechazaste.",
+      "reason": "Motivo",
+      "reasonHint": "Opcional. El agente puede leerlo, así que dile qué hacer en su lugar.",
+      "submit": "Rechazar",
+      "pending": "Rechazando…",
+      "success": "Propuesta rechazada.",
+      "failed": "No se pudo rechazar esa propuesta. Inténtalo de nuevo."
+    }
+  },
+  "conversation": {
+    "loadFailed": "No se pudo cargar esta conversación.",
+    "notFound": {
+      "title": "Conversación no encontrada",
+      "description": "Puede que se haya eliminado o que pertenezca a otra cuenta."
+    },
+    "truncated": "Esta conversación es muy larga: solo se muestran sus primeras ejecuciones y turnos.",
+    "reconnecting": "Reconectando…",
+    "jumpToLatest": "Ir a lo más reciente",
+    "jumpToLatestNew": "Actividad nueva: ir a lo más reciente",
+    "aiDisclosure": "Las respuestas las escribe un modelo de IA que lee el código fuente del paquete. Pueden ser incorrectas: revisa los archivos citados antes de confiar en ellas.",
+    "header": {
+      "package": "Paquete",
+      "packageDeleted": "Este paquete se eliminó",
+      "commit": "Commit",
+      "origin": "Desde",
+      "cost": "Costo",
+      "tokens": "{{input}} de entrada / {{output}} de salida",
+      "status": "Estado"
+    },
+    "transcript": {
+      "label": "Transcripción",
+      "youAsked": "Preguntaste",
+      "askedBy": "{{name}} preguntó",
+      "followUp": "Tu seguimiento",
+      "steered": "Indicaste:",
+      "answer": "Respuesta (generada por IA)",
+      "streaming": "Escribiendo…"
+    },
+    "phase": {
+      "preparing": "Preparando el checkout…",
+      "queued": "Esperando un espacio libre…",
+      "running": "Investigando…",
+      "finishing": "Escribiendo la respuesta final…"
+    },
+    "phaseShort": {
+      "preparing": "Preparando el checkout",
+      "queued": "Esperando un espacio",
+      "running": "Investigando",
+      "finishing": "Escribiendo la respuesta"
+    },
+    "tools": {
+      "in": "en {{scope}}",
+      "running": "En curso",
+      "failed": "falló",
+      "matches_one": "{{count}} coincidencia",
+      "matches_other": "{{count}} coincidencias",
+      "files_one": "{{count}} archivo",
+      "files_other": "{{count}} archivos",
+      "locations_one": "{{count}} ubicación",
+      "locations_other": "{{count}} ubicaciones",
+      "helpers_one": "{{count}} ayudante",
+      "helpers_other": "{{count}} ayudantes",
+      "truncated": "{{text}} (hay más sin mostrar)",
+      "arguments": "Argumentos",
+      "result": "Resultado",
+      "noResult": "Todavía no hay resultado."
+    },
+    "helpers": {
+      "title": "Ayudante {{number}}",
+      "working": "Trabajando…",
+      "empty": "No se registró nada para este ayudante."
+    },
+    "ended": {
+      "failed": "Esta ejecución falló.",
+      "stopped": "Detenida.",
+      "interrupted": "Interrumpida por un reinicio del servidor."
+    },
+    "stopReasons": {
+      "max-iterations": "Llegó a su límite de pasos antes de terminar.",
+      "output-truncated": "La respuesta del modelo se cortó.",
+      "timeout": "Se quedó sin tiempo.",
+      "aborted": "Se detuvo antes de terminar.",
+      "vetoed": "Una comprobación de seguridad terminó la ejecución.",
+      "checkout-failed": "No se pudo preparar el checkout del paquete, o se eliminó mientras la ejecución lo usaba.",
+      "package-deleted": "El paquete se eliminó.",
+      "model-error": "El proveedor del modelo devolvió un error. Inténtalo de nuevo en un momento.",
+      "engine-error": "Algo salió mal en el servidor.",
+      "interrupted": "El servidor se reinició mientras se ejecutaba."
+    },
+    "composer": {
+      "steerLabel": "Guiar al agente",
+      "followUpLabel": "Hacer una pregunta de seguimiento",
+      "steerPlaceholder": "Guía al agente…",
+      "followUpPlaceholder": "Haz una pregunta de seguimiento…",
+      "sendSteer": "Guiar",
+      "send": "Enviar",
+      "stop": "Detener",
+      "stopping": "Deteniendo…",
+      "steerHint": "El agente lee tu mensaje en su siguiente paso. Enter envía; Mayús+Enter agrega una línea.",
+      "followUpHint": "Inicia una nueva ejecución en esta conversación, con la misma versión. No se envía a tu agente de programación.",
+      "recreateNotice": "El checkout de esta versión se eliminó para ahorrar espacio. Un seguimiento lo vuelve a crear primero, lo que puede tardar un momento.",
+      "disabled": {
+        "preparing": "Preparando el checkout. Podrás guiar al agente en cuanto empiece.",
+        "recreating": "Volviendo a crear el checkout de esta versión. Podrás guiar al agente en cuanto empiece.",
+        "finishing": "El agente está escribiendo su respuesta final, así que no puede recibir nuevas indicaciones. Haz una pregunta de seguimiento cuando termine.",
+        "packageDeleted": "Este paquete se eliminó, así que esta conversación no puede continuar."
+      },
+      "nothingToStop": "No había nada en ejecución.",
+      "steerTooLate": "El agente ya terminó su investigación. Haz una pregunta de seguimiento; tu texto sigue en el cuadro.",
+      "alreadyRunning": "Ya hay una ejecución en curso en esta conversación.",
+      "failed": "No se pudo enviar tu mensaje. Inténtalo de nuevo."
+    },
+    "delete": {
+      "action": "Eliminar conversación",
+      "title": "¿Eliminar esta conversación?",
+      "description": "Su pregunta, respuestas, llamadas a herramientas y ejecuciones de ayudantes se eliminan para siempre.",
+      "token": "eliminar",
+      "typePrompt": "Escribe “{{token}}” para confirmar",
+      "copy": "Copiar la palabra de confirmación",
+      "done": "Conversación eliminada."
+    }
+  },
+  "conversations": {
+    "loadFailed": "No se pudieron cargar tus conversaciones.",
+    "empty": {
+      "title": "Todavía no hay conversaciones",
+      "description": "Aquí aparecen las preguntas que tus agentes hacen por MCP y las que haces desde la página de un paquete."
+    },
+    "emptyFiltered": {
+      "title": "Ninguna conversación coincide",
+      "description": "Prueba con otro paquete u origen."
+    },
+    "filters": {
+      "origin": "Filtrar por origen",
+      "origins": {
+        "all": "Todas",
+        "mcp": "MCP",
+        "web": "Web"
+      },
+      "package": "Todos los paquetes",
+      "packageSearch": "Buscar paquetes…",
+      "packageEmpty": "Ningún paquete coincide.",
+      "clearPackage": "Mostrar todos los paquetes",
+      "clear": "Quitar filtros"
+    },
+    "row": {
+      "elapsed": "En ejecución desde hace",
+      "steps_one": "{{count}} paso",
+      "steps_other": "{{count}} pasos"
+    },
+    "retention": {
+      "loadFailed": "No se pudo cargar cuánto tiempo se guardan las conversaciones.",
+      "deletedAfter_one": "Las conversaciones se borran {{count}} día después de su última actividad.",
+      "deletedAfter_other": "Las conversaciones se borran {{count}} días después de su última actividad.",
+      "keptUntilDeleted": "Las conversaciones se guardan hasta que las borres."
+    }
+  }
+}

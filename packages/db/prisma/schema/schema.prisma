@@ -1,0 +1,22 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../generated"
+  moduleFormat    = "esm"
+  runtime         = "nodejs"
+  // `relationJoins` makes Postgres load relations with one LATERAL JOIN per
+  // relation (the default `relationLoadStrategy` becomes "join"), so a nested
+  // to-many `take` (e.g. the latest main run per conversation, recent checkouts
+  // per repository) is a per-parent LIMIT in SQL instead of loading every child
+  // row and slicing in memory. Set `relationLoadStrategy: "query"` on a query to
+  // opt back into the separate-query plan if one measures better.
+  previewFeatures = ["postgresqlExtensions", "relationJoins"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  // `pg_trgm` backs the GIN trigram indexes on the ILIKE-filtered columns
+  // (User.email/name). It ships in the
+  // stock Postgres 18 image. The 1.0.0 Prisma Migrate baseline enables it
+  // explicitly before creating the indexes; every schema change is versioned.
+  extensions = [pg_trgm]
+}

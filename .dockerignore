@@ -1,0 +1,63 @@
+.git
+# Commit identity only; no objects, config or remotes enter the build.
+!.git/HEAD
+!.git/packed-refs
+!.git/refs/heads
+!.git/refs/heads/**
+.gitignore
+.env
+.env.*
+**/.env
+**/.env.*
+*.md
+.vscode
+.idea
+.claude
+.playwright-cli
+
+# Dependency stores
+node_modules
+**/node_modules
+.pnpm-store
+.pnpm-store*
+
+
+# Build outputs and generated artifacts
+dist
+**/dist
+build
+**/build
+coverage
+**/coverage
+packages/db/prisma/generated
+
+# Cockpit Context's local data dir (COCKPIT_CONTEXT_DATA_DIR in development): bare clones and
+# checkouts of other people's code. Never part of the image.
+.data
+
+# Local database dumps.
+backups
+**/backups
+
+# Local framework/tool caches
+.turbo
+**/.turbo
+.cache
+**/.cache
+.vite
+**/.vite
+.next
+**/.next
+.astro
+**/.astro
+apps/web/.tanstack
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Local agent dependency mounts never enter the image context.
+.docker-volumes/
+
+# Runtime license notices.
+!LICENSE
+!THIRD-PARTY-LICENSES.md
+!NOTICE

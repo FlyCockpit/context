@@ -1,0 +1,118 @@
+# Cockpit Context: one app replica and a private Postgres database.
+# Dokploy routes to app:3000 using its domain UI; this file publishes no ports.
+# Plain VPS: docker compose -f compose.yaml -f compose.vps.yaml up -d --build
+name: cockpit-context
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-}
+        IMAGE_VERSION: ${IMAGE_VERSION:-dev}
+        VCS_REF: ${VCS_REF:-}
+    image: cockpit-context-app:${COCKPIT_CONTEXT_IMAGE_TAG:-latest}
+    # Published release image: ghcr.io/flycockpit/cockpit-context:<version>
+    restart: unless-stopped
+    env_file:
+      - path: ${COCKPIT_CONTEXT_ENV_FILE:-.env}
+        required: true
+    environment:
+      NODE_ENV: production
+      SERVER_PORT: "3000"
+      MIGRATE_ON_START: ${MIGRATE_ON_START:-true}
+      # Use a hex password: it is interpolated into this URL without escaping.
+      DATABASE_URL: postgresql://cockpit_context:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@cockpit-context-postgres:5432/cockpit_context
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env (min 32 chars)}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set BETTER_AUTH_URL to the public HTTPS origin}
+      COCKPIT_CONTEXT_ENCRYPTION_KEYS: ${COCKPIT_CONTEXT_ENCRYPTION_KEYS:?Set COCKPIT_CONTEXT_ENCRYPTION_KEYS in .env}
+      COCKPIT_CONTEXT_DATA_DIR: /data
+    volumes:
+      - cockpit-context-data:/data
+      - cockpit-context-backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+      - egress
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/18/docker
+      POSTGRES_DB: cockpit_context
+      POSTGRES_USER: cockpit_context
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      # PG18 stores PGDATA below this parent: /var/lib/postgresql/18/docker.
+      - cockpit-context-postgres:/var/lib/postgresql
+    networks:
+      internal:
+        aliases:
+          - cockpit-context-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cockpit_context -d cockpit_context"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 30s
+
+  # Opt in with --profile backup and BACKUP_SCHEDULE=daily.
+  # Receives only the DB connection and backup settings, never app secrets.
+  backup:
+    profiles: [backup]
+    image: cockpit-context-app:${COCKPIT_CONTEXT_IMAGE_TAG:-latest}
+    command: ["backup-schedule"]
+    healthcheck:
+      test: ["CMD", "node", "scripts/backup/schedule.mjs", "health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://cockpit_context:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@cockpit-context-postgres:5432/cockpit_context
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-off}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-3}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-auto}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-cockpit-context/prod/database}
+      BACKUP_S3_FORCE_PATH_STYLE: ${BACKUP_S3_FORCE_PATH_STYLE:-false}
+      BACKUP_S3_SSE: ${BACKUP_S3_SSE:-}
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
+    volumes:
+      - cockpit-context-backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+      - egress
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  # Database never joins Dokploy's shared proxy network.
+  internal:
+    internal: true
+  egress: {}
+
+# Compose scopes these names by project; no global name overrides.
+volumes:
+  cockpit-context-data:
+  cockpit-context-postgres:
+  cockpit-context-backups:

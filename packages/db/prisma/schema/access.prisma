@@ -1,0 +1,66 @@
+// MCP connection credentials and settings — docs/mcp.md.
+//
+// A connection is either an API token (McpAgentToken) or an OAuth grant
+// (McpGrant). Both act as exactly one user and carry the same two flags. The
+// Better-Auth OAuth provider tables (clients, access tokens, consents) are
+// defined by the OAuth provider plugin schema; McpGrant is Cockpit Context's own
+// per-connection settings row and not a Better-Auth model.
+
+/// A human-minted MCP API token (`cockpit_context_<random>`). The plaintext is shown once;
+/// only `lookupPrefix` and an HMAC `secretDigest` are stored.
+model McpAgentToken {
+  id           String    @id @default(cuid(2))
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now()) @updatedAt
+  userId       String
+  User         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  /// Non-secret prefix of the token, used to find the row before the digest
+  /// comparison.
+  lookupPrefix String    @unique
+  /// HMAC of the full token (key derived from BETTER_AUTH_SECRET).
+  secretDigest String    @unique
+  /// May call `propose_dependency` / `get_proposal`. Off hides both tools.
+  allowPropose Boolean   @default(true)
+  /// Proposals from this token create the package immediately (never for a
+  /// package that needs an SSH key).
+  autoApprove  Boolean   @default(false)
+  /// Updated at most once a minute.
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+  expiresAt    DateTime?
+
+  Proposals     PackageProposal[]
+  Conversations Conversation[]
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("mcp_agent_token")
+}
+
+/// Per-connection settings for an OAuth MCP client the user approved on the
+/// consent page: one row per user, client and consent reference.
+model McpGrant {
+  id           String    @id @default(cuid(2))
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now()) @updatedAt
+  userId       String
+  User         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The OAuth client id (dynamic client registration or CIMD URL).
+  clientId     String
+  /// The Better-Auth consent/reference id this grant belongs to.
+  referenceId  String
+  /// Snapshot of the client's display name at consent time.
+  clientName   String?
+  allowPropose Boolean   @default(true)
+  autoApprove  Boolean   @default(false)
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+
+  Proposals     PackageProposal[]
+  Conversations Conversation[]
+
+  @@unique([userId, clientId, referenceId])
+  @@index([userId, revokedAt])
+  @@map("mcp_grant")
+}

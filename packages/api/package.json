@@ -1,0 +1,79 @@
+{
+  "name": "@cockpit-context/api",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./context": {
+      "default": "./src/context.ts"
+    },
+    "./routers/index": {
+      "default": "./src/routers/index.ts"
+    },
+    "./lib/slug": {
+      "default": "./src/lib/slug.ts"
+    },
+    "./lib/backup-freshness": {
+      "default": "./src/lib/backup-freshness.ts"
+    },
+    "./lib/backup-freshness-store": {
+      "default": "./src/lib/backup-freshness-store.ts"
+    },
+    "./lib/ownership": {
+      "default": "./src/lib/ownership.ts"
+    },
+    "./lib/auth-token-retention": {
+      "default": "./src/lib/auth-token-retention.ts"
+    },
+    "./lib/conversation-retention": {
+      "default": "./src/lib/conversation-retention.ts"
+    },
+    "./lib/two-factor-policy": {
+      "default": "./src/lib/two-factor-policy.ts"
+    },
+    "./lib/rate-limit-families": {
+      "default": "./src/lib/rate-limit-families.ts"
+    },
+    "./lib/rate-budgets": {
+      "default": "./src/lib/rate-budgets.ts"
+    },
+    "./lib/packages": {
+      "default": "./src/lib/packages.ts"
+    },
+    "./lib/oauth-retention": {
+      "default": "./src/lib/oauth-retention.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc -p tsconfig.check-types.json --noEmit && pnpm check-types:contracts",
+    "check-types:contracts": "tsc -p tsconfig.boundary-tests.json --noEmit",
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests --exclude '**/*.contract.test.ts'"
+  },
+  "dependencies": {
+    "@orpc/client": "catalog:",
+    "@orpc/openapi": "catalog:",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "catalog:",
+    "@aws-sdk/client-s3": "catalog:",
+    "@cockpit-context/auth": "workspace:*",
+    "@cockpit-context/config": "workspace:*",
+    "@cockpit-context/db": "workspace:*",
+    "@cockpit-context/env": "workspace:*",
+    "@cockpit-context/jobs": "workspace:*",
+    "@cockpit-context/mailer": "workspace:*",
+    "@cockpit-context/repos": "workspace:*",
+    "@cockpit-context/runs": "workspace:*",
+    "rate-limiter-flexible": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "hono": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:"
+  },
+  "version": "0.0.0"
+}

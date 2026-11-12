@@ -1,0 +1,63 @@
+{
+  "name": "@cockpit-context/auth",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./ban": {
+      "default": "./src/ban.ts"
+    },
+    "./bootstrap-token": {
+      "default": "./src/bootstrap-token.ts"
+    },
+    "./invite-verification": {
+      "default": "./src/invite-verification.ts"
+    },
+    "./mcp-config": {
+      "default": "./src/mcp-config.ts"
+    },
+    "./mcp-consent-flags": {
+      "default": "./src/mcp-consent-flags.ts"
+    },
+    "./mcp-grant": {
+      "default": "./src/mcp-grant.ts"
+    },
+    "./roles": {
+      "default": "./src/roles.ts"
+    },
+    "./signup-availability": {
+      "default": "./src/signup-availability.ts"
+    },
+    "./signup-policy": {
+      "default": "./src/signup-policy.ts"
+    },
+    "./two-factor-policy": {
+      "default": "./src/two-factor-policy.ts"
+    },
+    "./user-creation-policy": {
+      "default": "./src/user-creation-policy.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@better-auth/cimd": "catalog:",
+    "@better-auth/mcp": "catalog:",
+    "@better-auth/oauth-provider": "catalog:",
+    "@cockpit-context/config": "workspace:*",
+    "@cockpit-context/db": "workspace:*",
+    "@cockpit-context/env": "workspace:*",
+    "@cockpit-context/mailer": "workspace:*",
+    "better-auth": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "version": "0.0.0"
+}

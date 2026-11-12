@@ -1,0 +1,152 @@
+// Conversations, agent runs and their saved turns — docs/product.md.
+//
+// Only the owner ever reads these; admins included. Every query is scoped by
+// `ownerId` (AgentRun carries its own copy so the per-user concurrency count
+// and ownership checks need no join).
+
+enum ConversationOrigin {
+  MCP
+  WEB
+}
+
+/// One thread with the investigation agent about one package checkout.
+model Conversation {
+  id                 String             @id @default(cuid(2))
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @default(now()) @updatedAt
+  ownerId            String
+  Owner              User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// SetNull on package delete; `packageIdentifier` keeps the snapshot.
+  packageId          String?
+  Package            Package?           @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  packageIdentifier  String
+  /// What the caller asked for (at most one of the two).
+  requestedVersion   String?
+  requestedRef       String?
+  /// SetNull when the checkout is pruned; follow-up chat re-creates it from
+  /// `commitSha`.
+  checkoutId         String?
+  Checkout           Checkout?          @relation(fields: [checkoutId], references: [id], onDelete: SetNull)
+  /// Resolution snapshots. Null until the version resolved.
+  commitSha          String?
+  resolvedFrom       String?
+  origin             ConversationOrigin
+  /// The MCP connection that started it (at most one; SetNull on delete).
+  mcpAgentTokenId    String?
+  McpAgentToken      McpAgentToken?     @relation(fields: [mcpAgentTokenId], references: [id], onDelete: SetNull)
+  mcpGrantId         String?
+  McpGrant           McpGrant?          @relation(fields: [mcpGrantId], references: [id], onDelete: SetNull)
+  /// Snapshot of the token name or OAuth client name. Null for WEB.
+  mcpConnectionLabel String?
+  title              String
+  lastActivityAt     DateTime           @default(now())
+
+  AgentRuns AgentRun[]
+
+  @@index([ownerId, lastActivityAt])
+  @@index([ownerId, packageId, lastActivityAt])
+  @@index([ownerId, origin, lastActivityAt])
+  @@index([packageId])
+  @@index([checkoutId])
+  @@index([mcpAgentTokenId])
+  @@index([mcpGrantId])
+  @@map("conversation")
+}
+
+/// MAIN runs answer the user; HELPER runs are `delegate_explore` children of a
+/// main run; SUMMARY runs write a checkout's overview and have no conversation.
+enum AgentRunKind {
+  MAIN
+  HELPER
+  SUMMARY
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  STOPPED
+  INTERRUPTED
+}
+
+enum AgentRunTrigger {
+  MCP_QUERY
+  WEB_MESSAGE
+  SUMMARY
+}
+
+/// One execution of the agent loop.
+model AgentRun {
+  id                String          @id @default(cuid(2))
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @default(now()) @updatedAt
+  ownerId           String
+  Owner             User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// Null only for SUMMARY runs.
+  conversationId    String?
+  Conversation      Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// Set on HELPER runs: the main run that delegated them.
+  parentRunId       String?
+  ParentRun         AgentRun?       @relation("AgentRunHelpers", fields: [parentRunId], references: [id], onDelete: Cascade)
+  /// The checkout this run reads (the summary target for SUMMARY runs).
+  /// SetNull when pruned.
+  checkoutId        String?
+  Checkout          Checkout?       @relation(fields: [checkoutId], references: [id], onDelete: SetNull)
+  kind              AgentRunKind
+  status            AgentRunStatus  @default(QUEUED)
+  trigger           AgentRunTrigger
+  /// The model id the run used (COCKPIT_CONTEXT_MODEL or COCKPIT_CONTEXT_HELPER_MODEL at start).
+  model             String?
+  /// HELPER runs: the focus the main agent delegated.
+  focus             String?
+  /// The agent loop's stop reason (`completed`, `max-iterations`, `timeout`, …).
+  stopReason        String?
+  error             String?
+  inputTokens       Int             @default(0)
+  outputTokens      Int             @default(0)
+  cachedInputTokens Int             @default(0)
+  /// Cost in millionths of a US dollar. Never a float.
+  costUsdMicros     Int             @default(0)
+  iterations        Int             @default(0)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  /// Final assistant text (MAIN and SUMMARY runs).
+  answer            String?
+
+  HelperRuns AgentRun[]      @relation("AgentRunHelpers")
+  Turns      RunTurn[]
+  Leases     CheckoutLease[]
+
+  @@index([conversationId, createdAt])
+  @@index([parentRunId])
+  @@index([checkoutId])
+  @@index([ownerId, status])
+  @@index([status, createdAt])
+  @@map("agent_run")
+}
+
+enum RunTurnRole {
+  USER
+  ASSISTANT
+  TOOL
+}
+
+/// One saved message of a run, written as the loop finishes it.
+model RunTurn {
+  id        String      @id @default(cuid(2))
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @default(now()) @updatedAt
+  runId     String
+  AgentRun  AgentRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// 0-based order within the run.
+  seq       Int
+  role      RunTurnRole
+  /// Message parts in `@cockpit-context/agent-runtime`'s AgentMessage part shape.
+  parts     Json
+  /// A USER turn the owner sent while the run was live (steering).
+  steering  Boolean     @default(false)
+
+  @@unique([runId, seq])
+  @@map("run_turn")
+}

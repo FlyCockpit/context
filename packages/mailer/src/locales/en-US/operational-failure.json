@@ -1,0 +1,12 @@
+{
+  "jobSubject": "background job failed",
+  "summarySubject": "checkout summary run failed",
+  "jobBody": "A background job failed permanently.",
+  "summaryBody": "A checkout overview summary run failed. The summary is marked failed; a user can regenerate it.",
+  "typeLabel": "Job type",
+  "jobLabel": "Job",
+  "attemptsLabel": "Attempts",
+  "runLabel": "Run",
+  "checkoutLabel": "Checkout",
+  "errorLabel": "Error"
+}

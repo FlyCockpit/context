@@ -1,0 +1,31 @@
+{
+  "info": {
+    "name": "requests",
+    "version": "2.34.2",
+    "summary": "Python HTTP for Humans.",
+    "home_page": null,
+    "project_urls": {
+      "Documentation": "https://requests.readthedocs.io",
+      "Source": "https://github.com/psf/requests"
+    },
+    "license": "Apache-2.0"
+  },
+  "releases": {
+    "2.9.1": [
+      {
+        "filename": "requests-2.9.1-py2.py3-none-any.whl",
+        "packagetype": "bdist_wheel",
+        "upload_time_iso_8601": "2015-12-21T14:55:10.646407Z",
+        "yanked": false
+      }
+    ],
+    "2.9.2": [
+      {
+        "filename": "requests-2.9.2-py2.py3-none-any.whl",
+        "packagetype": "bdist_wheel",
+        "upload_time_iso_8601": "2016-04-29T21:57:23.021820Z",
+        "yanked": false
+      }
+    ]
+  }
+}

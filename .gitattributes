@@ -1,0 +1,12 @@
+* text=auto eol=lf
+*.sh text eol=lf
+
+# Generated artifacts; migration SQL remains human-reviewed.
+pnpm-lock.yaml linguist-generated=true
+apps/web/src/routeTree.gen.ts linguist-generated=true
+CLAUDE.md linguist-generated=true
+.cursorrules linguist-generated=true
+.github/copilot-instructions.md linguist-generated=true
+**/.env.example linguist-generated=true
+.env.docker.defaults linguist-generated=true
+packages/db/prisma/migrations/** linguist-generated=false

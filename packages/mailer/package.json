@@ -1,0 +1,27 @@
+{
+  "name": "@cockpit-context/mailer",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@cockpit-context/env": "workspace:*",
+    "nodemailer": "catalog:"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/nodemailer": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

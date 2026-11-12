@@ -1,0 +1,59 @@
+# Dockerfile.dev — thin image for the port-parameterized local dev stack used
+# by agents (see docs/development.md and docker-compose.agent.yml).
+#
+# Source is bind-mounted at runtime; this image only provides the node + pnpm
+# toolchain. Dependencies are installed at container start into named volumes
+# that are scoped per compose project, so multi-agent runs do not collide.
+#
+# The container is launched with `user: "${HOST_UID}:${HOST_GID}"` from compose
+# so that files written to the bind-mounted source tree (turbo cache, vite
+# cache, generated prisma client, dist output, etc.) end up owned by the host
+# user rather than root. Every path the runtime needs to write to is created
+# here with world-writable perms so any UID works.
+#
+# NOT a production image. Use the root Dockerfile for that.
+# Exact Node runtime pin, shared with the production image.
+FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+  openssl \
+  ca-certificates \
+  procps \
+  gcc \
+  libc6-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Toolchain caches support an arbitrary host UID.
+ENV SERVER_PORT=3000
+ENV PNPM_HOME=/pnpm
+ENV HOME=/home/agent
+ENV PATH="$PNPM_HOME:$PATH"
+COPY package.json scripts/install-pnpm.mjs /tmp/pnpm-bootstrap/
+RUN node /tmp/pnpm-bootstrap/install-pnpm.mjs /tmp/pnpm-bootstrap/package.json && rm -rf /tmp/pnpm-bootstrap
+
+# Pre-create every node_modules mount point listed in docker-compose.agent.yml.
+# A fresh named volume mounted on a path that exists in the image is seeded
+# with that path's perms — pre-creating these dirs with a+rwX is what lets
+# the non-root container user write to them on first boot.
+RUN mkdir -p \
+    /app/node_modules \
+    /app/apps/web/node_modules \
+    /app/apps/server/node_modules \
+    /app/packages/api/node_modules \
+    /app/packages/auth/node_modules \
+    /app/packages/config/node_modules \
+    /app/packages/db/node_modules \
+    /app/packages/env/node_modules \
+    /app/packages/i18n-translate/node_modules \
+    /app/packages/mailer/node_modules \
+    /app/packages/jobs/node_modules \
+    /app/packages/explore/node_modules \
+    /app/packages/repos/node_modules \
+    /app/packages/runs/node_modules \
+    /app/packages/test-utils/node_modules \
+    /app/packages/ui/node_modules \
+    /app/packages/locales/node_modules \
+    "$PNPM_HOME" "$HOME" \
+  && chmod -R a+rwX /app "$PNPM_HOME" "$HOME"
+
+WORKDIR /app

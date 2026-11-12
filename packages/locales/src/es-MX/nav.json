@@ -1,0 +1,50 @@
+{
+  "items": {
+    "home": "Inicio",
+    "ongoing": "En curso",
+    "conversations": "Conversaciones",
+    "packages": "Paquetes",
+    "access": "Acceso",
+    "settings": "Configuración",
+    "admin": "Administración",
+    "more": "Más"
+  },
+  "hints": {
+    "ongoing": "Investigaciones en curso y primeros pasos",
+    "conversations": "Cada pregunta de tus agentes y sus respuestas",
+    "packages": "Dependencias sobre las que tus agentes pueden preguntar, y propuestas",
+    "access": "Tokens MCP, conexiones, llaves SSH y hosts conocidos",
+    "settings": "Tu perfil, idioma y seguridad",
+    "admin": "Usuarios, almacenamiento, trabajos y configuración del sitio"
+  },
+  "languageLabel": "Idioma",
+  "mainNav": {
+    "ariaLabel": "Navegación principal"
+  },
+  "sidebar": {
+    "ariaLabel": "Navegación de la aplicación",
+    "collapse": "Contraer barra lateral",
+    "expand": "Expandir barra lateral"
+  },
+  "badge": {
+    "pendingProposals_one": "{{count}} propuesta en espera",
+    "pendingProposals_other": "{{count}} propuestas en espera"
+  },
+  "moreSheet": {
+    "description": "Más secciones de la aplicación"
+  },
+  "themeToggle": {
+    "label": "Cambiar tema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  },
+  "userMenu": {
+    "myAccount": "Mi cuenta",
+    "signIn": "Iniciar sesión",
+    "signOut": "Cerrar sesión",
+    "signUp": "Registrarse",
+    "open": "Abrir el menú de la cuenta"
+  },
+  "skipToContent": "Saltar al contenido"
+}

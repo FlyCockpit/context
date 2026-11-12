@@ -1,0 +1,54 @@
+# Local development services — Postgres + a mailpit mail sink
+# Credentials match .env.example defaults so no extra config is needed.
+#
+# Usage:
+#   pnpm dev:services          # start in background
+#   docker compose -f docker-compose.dev.yml down   # stop
+#   docker compose -f docker-compose.dev.yml down -v # stop + delete data
+
+name: cockpit-context-dev
+
+services:
+  postgres:
+    # PostgreSQL 18 pin; PG_MAJOR in the app image matches.
+    image: postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    environment:
+      PGDATA: /var/lib/postgresql/18/docker
+      POSTGRES_DB: cockpit_context
+      POSTGRES_USER: postgres
+      # DEV ONLY — do not use this password in production.
+      POSTGRES_PASSWORD: password
+    ports:
+      # Bind to loopback only. A bare "5432:5432" binds 0.0.0.0 and, because
+      # Docker writes its own iptables rules ahead of ufw/firewalld, would
+      # expose Postgres to the public internet on a VPS — with the dev password
+      # below — even behind a closed host firewall. localhost dev is unaffected.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - cockpit-context-dev-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Local mail sink — captures every outgoing email (signup verification,
+  # password reset, 2FA codes) so the real flows work offline with zero
+  # credentials. `pnpm run setup` points .env at it (SMTP_HOST=localhost,
+  # SMTP_PORT=1025); read captured mail at http://localhost:8025. Set real
+  # SMTP_* values in .env to send through a provider instead — the app
+  # switches over with no other change.
+  mailpit:
+    image: axllent/mailpit:v1.33.0@sha256:9b3a463be15354c0f0eba91697d80e3e0d8a5623ef0e627cacc836bc17fd5231
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      # Loopback only — see the postgres note above.
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+
+volumes:
+  cockpit-context-dev-postgres:

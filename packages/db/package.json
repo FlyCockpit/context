@@ -1,0 +1,52 @@
+{
+  "name": "@cockpit-context/db",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./seed": {
+      "default": "./prisma/seed.ts"
+    },
+    "./mcp-agent-token": {
+      "default": "./src/mcp-agent-token.ts"
+    },
+    "./instance-heartbeat": {
+      "default": "./src/instance-heartbeat.ts"
+    },
+    "./runner-tables": {
+      "default": "./src/runner-tables.ts"
+    },
+    "./data-deletion-notices": {
+      "default": "./src/data-deletion-notices.ts"
+    }
+  },
+  "scripts": {
+    "db:seed": "bash ../../scripts/assert-local-database.sh db:seed && prisma db seed --",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate && prisma format && prisma format --check",
+    "check-types": "tsc --noEmit",
+    "postinstall": "prisma generate",
+    "db:studio": "bash ../../scripts/assert-local-database.sh db:studio && prisma studio",
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "catalog:",
+    "@cockpit-context/env": "workspace:*",
+    "dotenv": "catalog:",
+    "pg": "catalog:",
+    "zod": "catalog:",
+    "prisma": "catalog:"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:"
+  },
+  "version": "0.0.0"
+}

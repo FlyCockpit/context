@@ -1,0 +1,47 @@
+{
+  "name": "server",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsdown",
+    "check-types": "tsc --noEmit",
+    "compile": "bun build --compile --minify --sourcemap --bytecode ./src/index.ts --outfile server",
+    "dev": "node ../../scripts/build-landlock-helper.mjs --if-possible && tsx watch src/index.ts",
+    "start": "node dist/index.mjs",
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@better-auth/mcp": "catalog:",
+    "@hono/node-server": "2.1.7",
+    "@cockpit-context/api": "workspace:*",
+    "@cockpit-context/auth": "workspace:*",
+    "@cockpit-context/db": "workspace:*",
+    "@cockpit-context/env": "workspace:*",
+    "@cockpit-context/explore": "workspace:*",
+    "@cockpit-context/jobs": "workspace:*",
+    "@cockpit-context/mailer": "workspace:*",
+    "@cockpit-context/repos": "workspace:*",
+    "@cockpit-context/runs": "workspace:*",
+    "@modelcontextprotocol/server": "catalog:",
+    "@orpc/openapi": "catalog:",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "catalog:",
+    "better-auth": "catalog:",
+    "hono": "catalog:",
+    "pyright": "catalog:",
+    "rate-limiter-flexible": "catalog:",
+    "typescript": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "tsx": "catalog:",
+    "vitest": "catalog:",
+    "vitest-mock-extended": "catalog:"
+  },
+  "version": "1.0.0"
+}

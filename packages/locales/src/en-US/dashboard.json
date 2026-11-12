@@ -1,0 +1,837 @@
+{
+  "appSettingsLoadFailed": "Failed to load app settings.",
+  "pages": {
+    "ongoing": {
+      "title": "Ongoing",
+      "description": "What your agents are investigating right now."
+    },
+    "conversations": {
+      "title": "Conversations",
+      "description": "Every question asked about your packages, with its answer."
+    },
+    "packages": {
+      "title": "Packages",
+      "description": "The dependencies your agents can ask Cockpit Context about."
+    },
+    "access": {
+      "title": "Access",
+      "description": "How your coding agents connect, and how Cockpit Context reaches private repositories."
+    },
+    "conversation": {
+      "back": "All conversations"
+    }
+  },
+  "ongoing": {
+    "loadFailed": "Couldn’t load your overview.",
+    "start": {
+      "title": "Getting started",
+      "description": "Three steps to your agent’s first answer from real source code.",
+      "progress": "{{done}} of {{total}} done",
+      "done": "Done",
+      "connect": {
+        "title": "Connect your coding agent",
+        "body": "Add Cockpit Context to Claude Code or Codex. Sign in with OAuth without copying a token.",
+        "copy": "Copy the Claude Code command",
+        "authenticate": "Then run /mcp in Claude Code, pick cockpit-context and choose Authenticate.",
+        "token": "Use an API token instead",
+        "claudeCode": "Claude Code",
+        "codex": "Codex",
+        "copyCodex": "Copy Codex commands"
+      },
+      "package": {
+        "title": "Add a package",
+        "body": "Add a dependency you want answers about, or let your agent propose one. Proposals wait for your approval.",
+        "action": "Go to Packages"
+      },
+      "ask": {
+        "title": "Ask a question",
+        "body": "Ask your agent about the package. Cockpit Context reads its source at the exact version you use, and the investigation shows up here while it runs.",
+        "example": "Use Cockpit Context to check how the dependency handles retries in the version we use.",
+        "copy": "Copy the example question"
+      }
+    },
+    "live": {
+      "title": "Live investigations",
+      "history": "Conversation history",
+      "idleTitle": "Nothing running right now",
+      "idleBody": "When an agent asks Cockpit Context a question, its investigation appears here while it works.",
+      "loadFailed": "Couldn’t load what’s running."
+    },
+    "recent": {
+      "title": "Recently finished",
+      "loadFailed": "Couldn’t load recent conversations.",
+      "empty": "Nothing has finished yet."
+    },
+    "modelMissing": {
+      "title": "The model is not configured yet",
+      "admin": "Set OPENROUTER_API_KEY and COCKPIT_CONTEXT_MODEL in the server's environment and restart it. Admin → Settings shows the current model configuration.",
+      "user": "Ask your administrator to configure the model before asking a question.",
+      "action": "Open admin settings"
+    }
+  },
+  "access": {
+    "tabsAriaLabel": "Access sections",
+    "tabs": {
+      "tokens": "MCP tokens",
+      "connections": "Connections",
+      "sshKeys": "SSH keys",
+      "knownHosts": "Known hosts"
+    },
+    "revoke": "Revoke",
+    "revoking": "Revoking…",
+    "opensInNewTab": "(opens in a new tab)",
+    "mcpUrlFailed": "Couldn’t load the Cockpit Context server address.",
+    "state": {
+      "token": {
+        "active": "Active",
+        "expired": "Expired",
+        "revoked": "Revoked"
+      },
+      "connection": {
+        "active": "Active",
+        "expired": "Expired",
+        "revoked": "Revoked"
+      }
+    },
+    "dates": {
+      "created": "Created",
+      "lastUsed": "Last used",
+      "neverUsed": "never",
+      "expires": "Expires",
+      "noExpiry": "Never expires"
+    },
+    "expiry": {
+      "d7": "7 days",
+      "d30": "30 days",
+      "d90": "90 days",
+      "y1": "1 year",
+      "never": "Never"
+    },
+    "flags": {
+      "legend": "What this agent may do",
+      "allowPropose": "Allow this agent to propose packages",
+      "allowProposeShort": "May propose packages",
+      "allowProposeHint": "It can ask you to add a package it needs. Each proposal waits for you on the Proposals page.",
+      "autoApprove": "Auto-approve its proposals",
+      "autoApproveShort": "Auto-approve proposals",
+      "autoApproveHint": "Its proposals become packages without waiting for you. Packages that need an SSH key always wait.",
+      "saved": "Saved",
+      "saveFailed": "Couldn’t save that change. Try again."
+    },
+    "secret": {
+      "title": "Copy this token now",
+      "description": "It’s shown only once. Cockpit Context keeps only a hash, so it can’t show it again. If you lose it, revoke it and create another.",
+      "done": "I’ve copied it"
+    },
+    "tokens": {
+      "title": "MCP API tokens",
+      "description": "A token lets an agent connect to Cockpit Context as you without signing in.",
+      "preferOAuth": "Agents that can sign in can use OAuth instead.",
+      "loadFailed": "Couldn’t load your tokens.",
+      "prefix": "Starts with",
+      "rowActions": "Actions for {{name}}",
+      "empty": {
+        "title": "No tokens yet",
+        "body": "Create a token for an agent that can’t sign in with OAuth, or for a script.",
+        "oauth": "Connect with OAuth"
+      },
+      "create": {
+        "open": "Create token",
+        "title": "Create an MCP token",
+        "description": "Name it after the agent or machine that will use it, so you can tell tokens apart.",
+        "submit": "Create token",
+        "pending": "Creating…",
+        "failed": "Couldn’t create the token. Try again."
+      },
+      "created": {
+        "title": "Your new token",
+        "description": "Add it to your agent with one of these, then close this dialog.",
+        "copyToken": "Copy token",
+        "claudeCode": "Claude Code",
+        "claudeCodeHint": "Add --scope user to use it in every project. Don’t commit a token to a shared .mcp.json.",
+        "copyCommand": "Copy Claude Code command",
+        "json": "Other MCP clients (JSON)",
+        "copyJson": "Copy JSON config",
+        "codex": "Codex",
+        "copyCodex": "Copy Codex commands",
+        "codexHint": "Run these commands in the shell that will launch Codex. The token lasts for that shell session; store it securely for future sessions and keep it out of shared files."
+      },
+      "form": {
+        "name": "Name",
+        "nameHint": "For example, the laptop or CI job that will use it.",
+        "namePlaceholder": "Work laptop",
+        "nameRequired": "Give the token a name.",
+        "nameTooLong": "Use at most {{max}} characters.",
+        "expiry": "Expires after"
+      },
+      "rename": {
+        "open": "Rename",
+        "title": "Rename token",
+        "description": "The name is only for you. The token itself doesn’t change.",
+        "success": "Token renamed",
+        "failed": "Couldn’t rename the token. Try again."
+      },
+      "revoke": {
+        "title": "Revoke this token?",
+        "description": "Any agent using it is cut off at once. This can’t be undone.",
+        "typePrompt": "Type the token’s name to confirm",
+        "copy": "Copy token name",
+        "success": "Token revoked",
+        "failed": "Couldn’t revoke the token. Try again."
+      }
+    },
+    "connections": {
+      "title": "OAuth connections",
+      "description": "Agents you approved on the Cockpit Context consent page. Each acts as you, within its flags.",
+      "loadFailed": "Couldn’t load your connections.",
+      "clientId": "Client ID",
+      "revokeLabel": "Revoke {{name}}",
+      "empty": {
+        "title": "No connections yet",
+        "body": "Follow the steps above. Once you approve an agent, it appears here."
+      },
+      "guide": {
+        "title": "Connect Claude Code with OAuth",
+        "description": "No token to copy: Claude Code signs in through your browser.",
+        "add": "Add Cockpit Context in a terminal",
+        "copyCommand": "Copy command",
+        "authenticate": "Authenticate in Claude Code",
+        "authenticateBody": "Run /mcp, pick Cockpit Context and choose Authenticate. Your browser opens Cockpit Context.",
+        "approve": "Sign in and approve",
+        "approveBody": "Check the agent’s name and where your browser returns, choose its flags, then allow it.",
+        "otherClients": "Other MCP clients",
+        "copyUrl": "Copy MCP URL",
+        "otherClientsBody": "Use this URL in any client that supports MCP authorization.",
+        "useToken": "Clients that can’t sign in can use a token."
+      },
+      "revoke": {
+        "title": "Revoke this connection?",
+        "description": "The agent is cut off at once. To reconnect, it has to sign in and be approved again.",
+        "typePrompt": "Type the agent’s name to confirm",
+        "copy": "Copy agent name",
+        "success": "Connection revoked",
+        "failed": "Couldn’t revoke the connection. Try again."
+      }
+    },
+    "sshKeys": {
+      "title": "SSH keys",
+      "description": "Cockpit Context clones private repositories over SSH. Add a key’s public half to your git host as a read-only deploy key.",
+      "loadFailed": "Couldn’t load your SSH keys.",
+      "rowActions": "Actions for {{name}}",
+      "fingerprint": "Fingerprint",
+      "publicKey": "Public key",
+      "copyPublicKey": "Copy public key",
+      "source": {
+        "generated": "Generated",
+        "imported": "Imported"
+      },
+      "empty": {
+        "title": "No SSH keys yet",
+        "body": "Generate a key in Cockpit Context, or import one you already use. Private keys are encrypted and never shown again."
+      },
+      "deployKey": {
+        "title": "Add it to your git host",
+        "body": "Paste the public key as a deploy key with read access on each private repository.",
+        "github": "GitHub deploy keys",
+        "gitlab": "GitLab deploy keys",
+        "bitbucket": "Bitbucket access keys"
+      },
+      "generate": {
+        "open": "Generate key",
+        "title": "Generate an SSH key",
+        "description": "Cockpit Context creates an Ed25519 key pair and keeps the private half encrypted.",
+        "submit": "Generate",
+        "pending": "Generating…",
+        "failed": "Couldn’t generate the key. Try again.",
+        "createdTitle": "{{name}} is ready",
+        "createdDescription": "Copy the public key to your git host. You can see it again from the key’s menu.",
+        "done": "Done"
+      },
+      "import": {
+        "open": "Import key",
+        "title": "Import an SSH key",
+        "description": "Paste an OpenSSH or PEM private key. Cockpit Context re-encrypts it under its own key and never shows it again.",
+        "submit": "Import",
+        "pending": "Importing…",
+        "failed": "Couldn’t import the key. Try again.",
+        "success": "{{name}} imported"
+      },
+      "form": {
+        "name": "Name",
+        "nameHint": "For example, the host or repositories it opens.",
+        "namePlaceholder": "GitHub deploy key",
+        "nameRequired": "Give the key a name.",
+        "nameTooLong": "Use at most {{max}} characters.",
+        "privateKey": "Private key",
+        "privateKeyHint": "The whole file, including the BEGIN and END lines.",
+        "privateKeyPlaceholder": "BEGIN OPENSSH PRIVATE KEY …",
+        "privateKeyRequired": "Paste the private key.",
+        "privateKeyTooLong": "That’s too long to be a private key.",
+        "passphrase": "Passphrase (optional)",
+        "passphraseHint": "Only if the key has one. It’s used once to decrypt the key and isn’t stored.",
+        "passphraseTooLong": "Passphrases longer than 1023 bytes are not supported.",
+        "passphraseLineBreak": "Passphrases with line breaks are not supported."
+      },
+      "view": {
+        "open": "Show public key",
+        "description": "The public half of this key. The private half stays encrypted on the server."
+      },
+      "delete": {
+        "title": "Delete this SSH key?",
+        "description": "Cockpit Context forgets the key for good. Packages that still use it must be switched to another key first.",
+        "typePrompt": "Type the key’s name to confirm",
+        "copy": "Copy key name",
+        "success": "SSH key deleted",
+        "failed": "Couldn’t delete the key. Try again."
+      }
+    },
+    "knownHosts": {
+      "title": "Known hosts",
+      "description": "Before Cockpit Context clones from a self-hosted git server over SSH, you confirm that server’s host key.",
+      "loadFailed": "Couldn’t load your known hosts.",
+      "fingerprint": "Fingerprint",
+      "trusted": "Trusted",
+      "empty": {
+        "title": "No hosts confirmed yet",
+        "body": "GitHub, GitLab and Bitbucket are trusted already. Add your own git server here."
+      },
+      "scan": {
+        "open": "Add host",
+        "title": "Add a git host",
+        "description": "Cockpit Context connects to the host and lists the SSH keys it offers, for you to compare.",
+        "submit": "Scan host",
+        "pending": "Scanning…",
+        "failed": "Couldn’t scan that host. Try again."
+      },
+      "form": {
+        "host": "Host",
+        "hostHint": "A host name, or paste an SSH git URL.",
+        "hostPlaceholder": "git.example.com",
+        "hostInvalid": "Enter a host name such as git.example.com.",
+        "port": "Port",
+        "portInvalid": "Use a port from 1 to 65535."
+      },
+      "review": {
+        "title": "Keys offered by {{host}}",
+        "description": "Trust only keys whose fingerprints match the ones your git host publishes.",
+        "pinnedDescription": "Nothing to confirm.",
+        "pinnedBody": "{{host}} is built in: Cockpit Context already trusts its published keys.",
+        "done": "Done",
+        "compare": "Compare each fingerprint with the one your git host’s admin or documentation publishes. A key that doesn’t match could mean someone is intercepting the connection.",
+        "keys_one": "{{count}} key",
+        "keys_other": "{{count}} keys",
+        "submit_one": "Trust {{count}} key",
+        "submit_other": "Trust {{count}} keys",
+        "submitNone": "Trust selected keys",
+        "pending": "Saving…",
+        "success_one": "Trusted {{count}} key for {{host}}",
+        "success_other": "Trusted {{count}} keys for {{host}}",
+        "failed": "Couldn’t save that key. Try again."
+      },
+      "remove": {
+        "label": "Stop trusting {{host}}",
+        "title": "Stop trusting this key?",
+        "description": "Clones from this host fail until you confirm a key again. Fingerprint:",
+        "typePrompt": "Type the host to confirm",
+        "copy": "Copy host",
+        "confirm": "Stop trusting",
+        "pending": "Removing…",
+        "success": "Host key removed",
+        "failed": "Couldn’t remove the key. Try again."
+      },
+      "pinned": {
+        "title": "Built-in hosts",
+        "description": "Their published host keys are part of Cockpit Context and can’t be changed here.",
+        "badge": "Built in",
+        "loadFailed": "Couldn’t load the built-in hosts."
+      }
+    }
+  },
+  "time": {
+    "never": "Never"
+  },
+  "origin": {
+    "mcp": "MCP",
+    "web": "Web"
+  },
+  "runStatus": {
+    "queued": "Queued",
+    "running": "Running",
+    "completed": "Answered",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "interrupted": "Interrupted"
+  },
+  "packages": {
+    "add": "Add package",
+    "loadFailed": "Couldn’t load your packages.",
+    "lastUsed": "Last used",
+    "private": "Private",
+    "noVersions": "No versions checked out yet",
+    "versionsLabel": "Versions checked out:",
+    "moreVersions_one": "+{{count}} more",
+    "moreVersions_other": "+{{count}} more",
+    "rowActions": "Actions for {{identifier}}",
+    "ecosystems": {
+      "npm": "npm",
+      "pypi": "PyPI",
+      "cargo": "Cargo",
+      "go": "Go",
+      "git": "Git"
+    },
+    "registries": {
+      "npm": "npm",
+      "pypi": "PyPI",
+      "cargo": "crates.io",
+      "go": "the Go module proxy"
+    },
+    "repositoryStatus": {
+      "pending": "Waiting to clone",
+      "cloning": "Cloning",
+      "ready": "Cloned",
+      "failed": "Clone failed"
+    },
+    "filters": {
+      "ecosystem": "Filter by ecosystem",
+      "all": "All",
+      "search": "Search packages",
+      "searchPlaceholder": "Search by name…",
+      "clear": "Clear filters"
+    },
+    "empty": {
+      "title": "No packages yet",
+      "body": "Add a dependency your agents should be able to ask about. Agents can also propose packages; those wait for your approval.",
+      "noMatch": "No packages match",
+      "noMatchBody": "Try a different name or ecosystem."
+    },
+    "pendingBanner": {
+      "title_one": "An agent proposed {{count}} package",
+      "title_other": "Agents proposed {{count}} packages",
+      "body": "They can’t ask about it until you approve it.",
+      "action": "Review proposals"
+    },
+    "form": {
+      "ecosystem": "Ecosystem",
+      "name": "Package name",
+      "identifier": "Identifier",
+      "identifierFixed": "Agents use this to name the package. It can’t be changed.",
+      "displayName": "Display name",
+      "displayNameHint": "Optional. Defaults to the package name.",
+      "gitUrl": "Git URL",
+      "gitUrlHint": "An https:// URL for public repositories, or an SSH URL (git@host:owner/repo) for private ones.",
+      "sshKey": "SSH key",
+      "sshKeyHint": "Add its public key to the repository as a read-only deploy key.",
+      "sshKeyPlaceholder": "Choose a key",
+      "sshKeyRequired": "Choose the SSH key that can read this repository.",
+      "sshKeysFailed": "Couldn’t load your SSH keys.",
+      "noSshKeys": "You don’t have an SSH key yet",
+      "noSshKeysBody": "SSH URLs need a key that can read the repository.",
+      "manageKeys": "Manage SSH keys",
+      "moreOptions": "More options",
+      "subdirectory": "Subdirectory",
+      "subdirectoryHint": "For monorepos: the package’s folder. The agent still sees the whole repository but starts here.",
+      "subdirectoryInvalid": "Use a relative folder inside the repository, like packages/core.",
+      "tagPattern": "Tag pattern",
+      "tagPatternHint": "Optional. How release tags are named, with {version}. Tried first when an agent asks for a version.",
+      "tagPatternInvalid": "Include {version}, for example v{version}.",
+      "defaultRef": "Default ref",
+      "defaultRefHint": "Optional. Used when an agent gives no version. Empty means the remote’s default branch.",
+      "notes": "Notes",
+      "notesHint": "Optional. Context the agent reads before every investigation of this package.",
+      "placeholders": {
+        "gitUrl": "https://github.com/owner/repo",
+        "subdirectory": "packages/core",
+        "tagPattern": "v{version}",
+        "defaultRef": "main"
+      },
+      "namePlaceholders": {
+        "npm": "@tanstack/react-query",
+        "pypi": "requests",
+        "cargo": "serde",
+        "go": "github.com/spf13/cobra",
+        "git": "owner/repo"
+      }
+    },
+    "lookup": {
+      "action": "Look up on {{registry}}",
+      "pending": "Looking up…",
+      "found": "Found on {{registry}}",
+      "latestVersion": "Latest version",
+      "useAll": "Use these values",
+      "homepage": "Homepage",
+      "noRepository": "The registry doesn’t list a repository. Enter the git URL yourself.",
+      "notFound": "Not found on {{registry}}. Check the name, or enter the git URL yourself.",
+      "unavailable": "{{registry}} didn’t answer. Try again, or enter the git URL yourself.",
+      "failed": "Couldn’t look that package up. Try again.",
+      "gitHint": "Git packages have no registry. Name them owner/repo and give the git URL."
+    },
+    "create": {
+      "title": "Add a package",
+      "description": "Point Cockpit Context at a dependency’s source. Look it up on its registry to fill in the details.",
+      "submit": "Add package",
+      "pending": "Adding…",
+      "success": "Added {{identifier}}.",
+      "failed": "Couldn’t add that package. Try again."
+    },
+    "edit": {
+      "title": "Edit package",
+      "description": "Changes apply to the next question. A new git URL or key re-checks the repository.",
+      "success": "Package saved.",
+      "failed": "Couldn’t save the package. Try again."
+    },
+    "delete": {
+      "action": "Delete package",
+      "title": "Delete this package?",
+      "description": "Agents won’t be able to ask about it. Its conversations stay in your history.",
+      "typePrompt": "Type the identifier to confirm:",
+      "copy": "Copy the identifier",
+      "success": "Package deleted.",
+      "failed": "Couldn’t delete the package. Try again."
+    },
+    "detail": {
+      "back": "Packages",
+      "ask": "Ask",
+      "loadFailed": "Couldn’t load this package.",
+      "notFound": "Package not found",
+      "notFoundBody": "It may have been deleted.",
+      "settings": "Settings",
+      "settingsBody": "Where Cockpit Context gets the source, and what the agent should know.",
+      "copyGitUrl": "Copy the git URL",
+      "repository": "Repository",
+      "notCloned": "Not cloned yet. The first question clones it.",
+      "fetched": "Fetched",
+      "publicRepo": "None (public repository)",
+      "wholeRepo": "Whole repository",
+      "tagPatternAuto": "Automatic",
+      "remoteDefault": "Remote default branch {{branch}}",
+      "noNotes": "No notes yet.",
+      "conversations": "Recent conversations",
+      "conversationsBody": "The latest questions about this package.",
+      "allConversations": "All conversations",
+      "conversationsFailed": "Couldn’t load the conversations.",
+      "noConversations": "No questions yet",
+      "noConversationsBody": "Ask about this package here, or let your agent ask over MCP.",
+      "remoteDefaultUnknown": "The remote’s default branch"
+    },
+    "notUsedYet": "Not used yet",
+    "snapshot": {
+      "keyChoice": "SSH key",
+      "saved": "Use a saved key",
+      "once": "Use a key once",
+      "hint": "The key is used only for this operation unless you choose to save it. Snapshots stay at their current refs until you update them with your key. Keep your key somewhere safe.",
+      "save": "Save this key to my SSH keys",
+      "badge": "Snapshot",
+      "update": "Update with SSH key",
+      "updating": "Updating snapshot…",
+      "updated": "Snapshot updated.",
+      "failed": "Couldn’t update the snapshot. Try again.",
+      "lastUpdated": "Last updated",
+      "deleteWarning": "This snapshot cannot be restored without your SSH key. Its conversations keep the package name."
+    }
+  },
+  "checkouts": {
+    "title": "Versions checked out",
+    "description": "Each version an agent asked about, with the overview the agent reads first. Checkouts are a cache: deleting one frees space, and the next question re-creates it.",
+    "loadFailed": "Couldn’t load the checkouts.",
+    "empty": "Nothing checked out yet",
+    "emptyBody": "The first question about a version checks it out here.",
+    "inUse": "In use",
+    "askThis": "Ask about this version",
+    "actions": "Actions for {{version}}",
+    "columns": {
+      "version": "Version or ref",
+      "commit": "Commit",
+      "size": "Size",
+      "lastUsed": "Last used",
+      "overview": "Overview",
+      "actions": "Actions"
+    },
+    "kind": {
+      "tag": "Tag",
+      "branch": "Branch",
+      "commit": "Commit",
+      "npmGitHead": "npm release commit"
+    },
+    "status": {
+      "pending": "Checking out",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "summaryStatus": {
+      "none": "None",
+      "pending": "Writing…",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "refresh": {
+      "action": "Fetch latest",
+      "queued": "Fetching the latest commits.",
+      "notCloned": "Not cloned yet. The next question clones the latest version.",
+      "failed": "Couldn’t fetch the repository. Try again."
+    },
+    "summary": {
+      "title": "Overview of {{version}}",
+      "modelNote": "Written by the model from the source and shared by everyone who uses this version. The agent verifies it with its tools.",
+      "overrideNote": "Edited by you. Your investigations read this instead of the model-written overview. Nobody else sees it.",
+      "overrideInUse": "Your investigations use your edited version instead of this one.",
+      "none": "No overview yet.",
+      "generatedPending": "A new model-written overview is being written.",
+      "versionPicker": "Which overview to show",
+      "yourVersion": "Your edited version",
+      "generatedVersion": "Model-written",
+      "overrideBadge": "Your edit",
+      "view": "View overview",
+      "edit": "Edit overview",
+      "editOwn": "Edit your version",
+      "editTitle": "Edit your overview of {{version}}",
+      "editDescription": "Your edited version is private: only your investigations read it, before every investigation of this version. The model-written overview stays as it is for everyone else.",
+      "label": "Overview",
+      "markdownHint": "Markdown. Keep it short: what the code does, key paths, main APIs.",
+      "saved": "Your version is saved. Your investigations use it from now on.",
+      "saveFailed": "Couldn’t save the overview. Try again.",
+      "revert": "Revert to model-written",
+      "revertTitle": "Revert to the model-written overview?",
+      "revertDescription": "Your edited version is deleted, and your investigations use the model-written overview again.",
+      "revertConfirm": "Revert",
+      "reverted": "Reverted. Your investigations use the model-written overview.",
+      "revertFailed": "Couldn’t revert the overview. Try again.",
+      "regenerate": "Regenerate overview",
+      "regenerateNote": "Regenerating writes a new model-written overview for everyone who uses this version, using model tokens. It never changes your edited version.",
+      "regenerating": "Writing a new overview. It appears here when it’s ready.",
+      "regeneratingKeepsEdit": "Writing a new model-written overview. Your edited version stays as it is, and your investigations keep using it.",
+      "alreadyRunning": "An overview is already being written.",
+      "regenerateFailed": "Couldn’t start a new overview. Try again.",
+      "viewStatus": "View overview ({{status}})"
+    },
+    "delete": {
+      "action": "Delete checkout",
+      "leased": "In use by a running question",
+      "title": "Delete the checkout of {{version}}?",
+      "description": "This frees its disk space. Its conversations stay readable, and the next question about this version checks it out again.",
+      "typePrompt": "Type the short commit to confirm:",
+      "copy": "Copy the short commit",
+      "success": "Checkout deleted.",
+      "failed": "Couldn’t delete the checkout. Try again."
+    }
+  },
+  "ask": {
+    "title": "Ask about {{identifier}}",
+    "description": "Cockpit Context reads the source at the version you pick and answers here. This uses model tokens.",
+    "question": "Your question",
+    "questionPlaceholder": "How do I retry a failed request with backoff?",
+    "target": "Which code?",
+    "targets": {
+      "default": "Default",
+      "version": "Version",
+      "ref": "Git ref"
+    },
+    "defaultRef": "Uses the package’s default ref, {{ref}}.",
+    "defaultBranch": "Uses the latest commit on the remote’s default branch.",
+    "versionLabel": "Version",
+    "versionHint": "A released version, like 5.2.0. Cockpit Context finds its tag.",
+    "refLabel": "Tag, branch or commit",
+    "refHint": "Any git ref: a tag, a branch name or a commit hash.",
+    "valueRequired": "Enter a version or a ref, or choose Default.",
+    "submit": "Ask",
+    "pending": "Starting…",
+    "resolving": "Finding that version. The first question about a package clones its repository, which can take a minute.",
+    "failed": "Couldn’t start the investigation. Try again.",
+    "nearestTags": "Tags close to that version. Pick one to ask about it:",
+    "confirmHost": "Confirm the host’s SSH key",
+    "versionPlaceholder": "5.2.0",
+    "refPlaceholder": "main",
+    "aiDisclosure": "Cockpit Context’s answers are written by an AI model. They can be wrong: check the cited files."
+  },
+  "proposals": {
+    "title": "Proposals",
+    "description": "Packages your agents asked to add. Approve to add them, or reject with a reason the agent can read.",
+    "backToPackages": "Packages",
+    "pending": "Waiting for you",
+    "history": "History",
+    "loadFailed": "Couldn’t load proposals.",
+    "emptyPending": "No proposals waiting",
+    "emptyPendingBody": "When an agent proposes a package, it shows up here for your review.",
+    "emptyHistory": "No decisions yet",
+    "emptyHistoryBody": "Approved and rejected proposals are kept here.",
+    "proposedBy": "Proposed by {{connection}}",
+    "proposedByUnknown": "Proposed by a removed connection",
+    "askedVersion": "Asked about version {{version}}",
+    "rejectedBecause": "Your reason: {{reason}}",
+    "openPackage": "Open the package",
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "approve": {
+      "action": "Approve",
+      "title": "Approve this package",
+      "description": "Check the agent’s suggestions and change anything before adding it.",
+      "submit": "Approve and add",
+      "pending": "Approving…",
+      "created": "Approved. {{identifier}} is in your packages.",
+      "existing": "Approved. {{identifier}} was already in your packages.",
+      "open": "Open",
+      "failed": "Couldn’t approve that proposal. Try again."
+    },
+    "reject": {
+      "action": "Reject",
+      "title": "Reject this proposal?",
+      "description": "{{identifier}} won’t be added. The agent sees that you rejected it.",
+      "reason": "Reason",
+      "reasonHint": "Optional. The agent can read it, so say what it should do instead.",
+      "submit": "Reject",
+      "pending": "Rejecting…",
+      "success": "Proposal rejected.",
+      "failed": "Couldn’t reject that proposal. Try again."
+    }
+  },
+  "conversation": {
+    "loadFailed": "Couldn’t load this conversation.",
+    "notFound": {
+      "title": "Conversation not found",
+      "description": "It may have been deleted, or it belongs to another account."
+    },
+    "truncated": "This conversation is very long: only its first runs and turns are shown.",
+    "reconnecting": "Reconnecting…",
+    "jumpToLatest": "Jump to latest",
+    "jumpToLatestNew": "New activity — jump to latest",
+    "aiDisclosure": "Answers are written by an AI model reading the package’s source. They can be wrong: check the cited files before relying on them.",
+    "header": {
+      "package": "Package",
+      "packageDeleted": "This package was deleted",
+      "commit": "Commit",
+      "origin": "From",
+      "cost": "Cost",
+      "tokens": "{{input}} in / {{output}} out",
+      "status": "Status"
+    },
+    "transcript": {
+      "label": "Transcript",
+      "youAsked": "You asked",
+      "askedBy": "{{name}} asked",
+      "followUp": "Your follow-up",
+      "steered": "You steered:",
+      "answer": "Answer (AI-generated)",
+      "streaming": "Writing…"
+    },
+    "phase": {
+      "preparing": "Preparing the checkout…",
+      "queued": "Waiting for a free slot…",
+      "running": "Investigating…",
+      "finishing": "Writing the final answer…"
+    },
+    "phaseShort": {
+      "preparing": "Preparing checkout",
+      "queued": "Waiting for a slot",
+      "running": "Investigating",
+      "finishing": "Writing the answer"
+    },
+    "tools": {
+      "in": "in {{scope}}",
+      "running": "Running",
+      "failed": "failed",
+      "matches_one": "{{count}} match",
+      "matches_other": "{{count}} matches",
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files",
+      "locations_one": "{{count}} location",
+      "locations_other": "{{count}} locations",
+      "helpers_one": "{{count}} helper",
+      "helpers_other": "{{count}} helpers",
+      "truncated": "{{text}} (more not shown)",
+      "arguments": "Arguments",
+      "result": "Result",
+      "noResult": "No result yet."
+    },
+    "helpers": {
+      "title": "Helper {{number}}",
+      "working": "Working…",
+      "empty": "Nothing recorded for this helper."
+    },
+    "ended": {
+      "failed": "This run failed.",
+      "stopped": "Stopped.",
+      "interrupted": "Interrupted by a server restart."
+    },
+    "stopReasons": {
+      "max-iterations": "It reached its step limit before finishing.",
+      "output-truncated": "The model’s reply was cut off.",
+      "timeout": "It ran out of time.",
+      "aborted": "It was stopped before it finished.",
+      "vetoed": "A safety check ended the run.",
+      "checkout-failed": "The package’s checkout couldn’t be prepared, or was removed while the run used it.",
+      "package-deleted": "The package was deleted.",
+      "model-error": "The model provider returned an error. Try again in a moment.",
+      "engine-error": "Something went wrong on the server.",
+      "interrupted": "The server restarted while it was running."
+    },
+    "composer": {
+      "steerLabel": "Steer the agent",
+      "followUpLabel": "Ask a follow-up",
+      "steerPlaceholder": "Steer the agent…",
+      "followUpPlaceholder": "Ask a follow-up…",
+      "sendSteer": "Steer",
+      "send": "Send",
+      "stop": "Stop",
+      "stopping": "Stopping…",
+      "steerHint": "The agent reads your message at its next step. Enter sends, Shift+Enter adds a line.",
+      "followUpHint": "Starts a new run in this conversation, reading the same version. It is not sent to your coding agent.",
+      "recreateNotice": "This version’s checkout was removed to save space. A follow-up re-creates it first, which can take a moment.",
+      "disabled": {
+        "preparing": "Getting the checkout ready. You can steer once the agent starts.",
+        "recreating": "Re-creating this version’s checkout. You can steer once the agent starts.",
+        "finishing": "The agent is writing its final answer, so it can’t take new instructions. Ask a follow-up once it finishes.",
+        "packageDeleted": "This package was deleted, so this conversation can’t continue."
+      },
+      "nothingToStop": "Nothing was running.",
+      "steerTooLate": "The agent has already finished its investigation. Ask a follow-up instead; your text is still in the box.",
+      "alreadyRunning": "A run is already in progress in this conversation.",
+      "failed": "Couldn’t send your message. Try again."
+    },
+    "delete": {
+      "action": "Delete conversation",
+      "title": "Delete this conversation?",
+      "description": "Its question, answers, tool calls and helper runs are deleted for good.",
+      "token": "delete",
+      "typePrompt": "Type “{{token}}” to confirm",
+      "copy": "Copy the confirmation word",
+      "done": "Conversation deleted."
+    }
+  },
+  "conversations": {
+    "loadFailed": "Couldn’t load your conversations.",
+    "empty": {
+      "title": "No conversations yet",
+      "description": "Questions your agents ask over MCP, and ones you ask from a package page, appear here."
+    },
+    "emptyFiltered": {
+      "title": "No conversations match",
+      "description": "Try another package or origin."
+    },
+    "filters": {
+      "origin": "Filter by origin",
+      "origins": {
+        "all": "All",
+        "mcp": "MCP",
+        "web": "Web"
+      },
+      "package": "All packages",
+      "packageSearch": "Search packages…",
+      "packageEmpty": "No package matches.",
+      "clearPackage": "Show all packages",
+      "clear": "Clear filters"
+    },
+    "row": {
+      "elapsed": "Running for",
+      "steps_one": "{{count}} step",
+      "steps_other": "{{count}} steps"
+    },
+    "retention": {
+      "loadFailed": "Couldn’t load how long conversations are kept.",
+      "deletedAfter_one": "Conversations are deleted {{count}} day after their last activity.",
+      "deletedAfter_other": "Conversations are deleted {{count}} days after their last activity.",
+      "keptUntilDeleted": "Conversations are kept until you delete them."
+    }
+  }
+}

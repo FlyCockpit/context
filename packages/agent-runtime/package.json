@@ -1,0 +1,28 @@
+{
+  "name": "@cockpit-context/agent-runtime",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config ../../vitest.config.ts --passWithNoTests",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/ai": "catalog:",
+    "@tanstack/ai-anthropic": "catalog:",
+    "@tanstack/ai-openrouter": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cockpit-context/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

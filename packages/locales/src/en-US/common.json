@@ -1,0 +1,33 @@
+{
+  "home": {
+    "title": "Cockpit Context",
+    "description": "Let your AI coding agents ask how to use your dependencies. Cockpit Context answers by reading the real source code at the exact version you use.",
+    "signIn": "Sign in"
+  },
+  "actions": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "edit": "Edit",
+    "manage": "Manage",
+    "reload": "Reload",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "save": "Save",
+    "saveChanges": "Save changes",
+    "saving": "Saving…",
+    "tryAgain": "Try again",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…"
+  },
+  "appName": "Cockpit Context",
+  "loading": "Loading…",
+  "somethingWentWrong": "Something went wrong",
+  "fileDrop": {
+    "ignored": "That file can't be dropped here."
+  }
+}

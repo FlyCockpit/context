@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["@shadcn/lint"],
+  "categories": {
+    "correctness": "off"
+  },
+  "rules": {},
+  "ignorePatterns": [
+    "**/node_modules/",
+    "**/dist/",
+    "**/dev-dist/",
+    "**/build/",
+    "**/coverage/",
+    "**/generated/",
+    "**/target/",
+    "**/routeTree.gen.ts",
+    ".turbo/",
+    ".next/",
+    ".vinxi/",
+    ".output/",
+    ".tanstack/",
+    ".astro/",
+    ".docker-volumes/",
+    ".pnpm-store/"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "jobSubject": "falló una tarea en segundo plano",
+  "summarySubject": "falló la ejecución del resumen de la copia de trabajo",
+  "jobBody": "Una tarea en segundo plano falló de forma definitiva.",
+  "summaryBody": "Falló la ejecución del resumen general de una copia de trabajo. El resumen está marcado como fallido; un usuario puede volver a generarlo.",
+  "typeLabel": "Tipo de tarea",
+  "jobLabel": "Tarea",
+  "attemptsLabel": "Intentos",
+  "runLabel": "Ejecución",
+  "checkoutLabel": "Copia de trabajo",
+  "errorLabel": "Error"
+}

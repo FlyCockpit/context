@@ -1,0 +1,25 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "base-lyra",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@cockpit-context/ui/components",
+    "utils": "@cockpit-context/ui/lib/utils",
+    "hooks": "@cockpit-context/ui/hooks",
+    "lib": "@cockpit-context/ui/lib",
+    "ui": "@cockpit-context/ui/components"
+  },
+  "menuColor": "default-translucent",
+  "menuAccent": "subtle",
+  "registries": {},
+  "rtl": false
+}

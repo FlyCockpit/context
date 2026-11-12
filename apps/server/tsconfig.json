@@ -1,0 +1,10 @@
+{
+  "extends": "@cockpit-context/config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
+  }
+}

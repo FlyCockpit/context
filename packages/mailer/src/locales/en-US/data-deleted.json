@@ -1,0 +1,13 @@
+{
+  "subject": "Planned data deletion completed",
+  "heading": "Planned data deletion completed",
+  "body": "Cockpit Context permanently deleted data it no longer uses. This was scheduled when the database layout changed and ran after the waiting period. Nothing went wrong, and no action is required.",
+  "effectsLabel": "What was deleted",
+  "effectsFallback": "Data marked for removal in the database change.",
+  "whenLabel": "When (UTC)",
+  "changeLabel": "Database change",
+  "noteLabel": "Notes",
+  "backupLabel": "Backup taken before deletion:",
+  "recovery": "If you need this data back, ask your app maintainer to copy only the data you need from this backup. Restoring the whole backup would also undo changes made since then.",
+  "noBackup": "No backup was taken immediately before deletion. Ask your app maintainer about other recovery options and setting up backups."
+}

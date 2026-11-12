@@ -1,0 +1,4 @@
+[project]
+name = "sample-py"
+version = "1.0.0"
+description = "Python fixture for the LSP smoke test (scripts/smoke-lsp.ts)."
