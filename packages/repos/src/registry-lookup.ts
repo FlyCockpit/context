@@ -25,7 +25,7 @@ const TIMEOUT_MS = 5_000;
 /** crates.io and PyPI answers carry every release; big projects run to a few MB. */
 const MAX_BYTES = 10 * 1024 * 1024;
 /** crates.io refuses requests without a User-Agent (its crawler policy). */
-const USER_AGENT = "cockpit-context/1.0.0 (+https://github.com/FlyCockpit/cockpit-context)";
+const USER_AGENT = "cockpit-context/1.0.0 (+https://github.com/FlyCockpit/context)";
 const WELL_KNOWN_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org"]);
 
 export interface RegistrySuggestion {

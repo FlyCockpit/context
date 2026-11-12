@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://shieldcn.dev/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://github.com/FlyCockpit/cockpit-context/releases"><img src="https://shieldcn.dev/github/FlyCockpit/cockpit-context/release.svg" alt="GitHub release"></a>
+  <a href="https://github.com/FlyCockpit/context/releases"><img src="https://shieldcn.dev/github/FlyCockpit/context/release.svg" alt="GitHub release"></a>
   <a href="https://nodejs.org"><img src="https://shieldcn.dev/badge/Node.js-26.13.1-339933.svg?logo=nodedotjs" alt="Node.js 26.13.1"></a>
   <a href="https://react.dev"><img src="https://shieldcn.dev/badge/React-19-087EA4.svg?logo=react" alt="React 19"></a>
   <a href="https://tanstack.com"><img src="https://shieldcn.dev/badge/TanStack-Router%20%C2%B7%20Query-FF4154.svg?logo=tanstack" alt="TanStack Router and Query"></a>
@@ -45,7 +45,7 @@ Repository reuse does not share users' conversations or imply a cross-user answe
 Install Node.js 26.13.1, Docker or Podman and user-managed `portless` (`npm install -g portless`). Install repository-pinned pnpm 12 with its verified installer:
 
 ```sh
-git clone https://github.com/FlyCockpit/cockpit-context.git
+git clone https://github.com/FlyCockpit/context.git
 cd cockpit-context
 node scripts/install-pnpm.mjs package.json "$HOME/.local/bin" "$HOME/.local/share/cockpit-context"
 export PATH="$HOME/.local/bin:$PATH"
@@ -94,7 +94,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) and the [Code of Conduct](./CODE_OF_CO
 
 ## Security
 
-Report vulnerabilities through [GitHub private vulnerability reporting](https://github.com/FlyCockpit/cockpit-context/security/advisories/new). See [SECURITY.md](./SECURITY.md).
+Report vulnerabilities through [GitHub private vulnerability reporting](https://github.com/FlyCockpit/context/security/advisories/new). See [SECURITY.md](./SECURITY.md).
 
 ## License
 

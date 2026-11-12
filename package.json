@@ -126,11 +126,11 @@
   "description": "Self-hosted MCP investigation app that answers coding agents' questions from dependency source at the exact version.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FlyCockpit/cockpit-context.git"
+    "url": "git+https://github.com/FlyCockpit/context.git"
   },
-  "homepage": "https://github.com/FlyCockpit/cockpit-context#readme",
+  "homepage": "https://github.com/FlyCockpit/context#readme",
   "bugs": {
-    "url": "https://github.com/FlyCockpit/cockpit-context/issues"
+    "url": "https://github.com/FlyCockpit/context/issues"
   },
   "author": "FlyCockpit LLC"
 }

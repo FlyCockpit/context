@@ -191,10 +191,10 @@ FROM base AS runner
 ARG IMAGE_VERSION=dev
 ARG VCS_REF=""
 LABEL org.opencontainers.image.title="Cockpit Context" \
-      org.opencontainers.image.source="https://github.com/FlyCockpit/cockpit-context" \
+      org.opencontainers.image.source="https://github.com/FlyCockpit/context" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="FlyCockpit LLC" \
-      org.opencontainers.image.url="https://github.com/FlyCockpit/cockpit-context" \
+      org.opencontainers.image.url="https://github.com/FlyCockpit/context" \
       org.opencontainers.image.version="$IMAGE_VERSION" \
       org.opencontainers.image.revision="$VCS_REF"
 ENV NODE_ENV=production

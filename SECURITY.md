@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report suspected vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/FlyCockpit/cockpit-context/security/advisories/new). Do not open a public issue or attach credentials, private source or user conversations. Include affected version, impact and a minimal reproduction using synthetic data. We aim to acknowledge reports within 72 hours.
+Report suspected vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/FlyCockpit/context/security/advisories/new). Do not open a public issue or attach credentials, private source or user conversations. Include affected version, impact and a minimal reproduction using synthetic data. We aim to acknowledge reports within 72 hours.
 
 ## Supported versions
 

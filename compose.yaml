@@ -12,7 +12,7 @@ services:
         IMAGE_VERSION: ${IMAGE_VERSION:-dev}
         VCS_REF: ${VCS_REF:-}
     image: cockpit-context-app:${COCKPIT_CONTEXT_IMAGE_TAG:-latest}
-    # Published release image: ghcr.io/flycockpit/cockpit-context:<version>
+    # Published release image: ghcr.io/flycockpit/context:<version>
     restart: unless-stopped
     env_file:
       - path: ${COCKPIT_CONTEXT_ENV_FILE:-.env}

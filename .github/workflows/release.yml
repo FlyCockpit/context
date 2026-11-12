@@ -162,10 +162,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/flycockpit/cockpit-context:${{ needs.validate.outputs.image_tag }}
-            ghcr.io/flycockpit/cockpit-context:latest
+            ghcr.io/flycockpit/context:${{ needs.validate.outputs.image_tag }}
+            ghcr.io/flycockpit/context:latest
           labels: |
-            org.opencontainers.image.source=https://github.com/FlyCockpit/cockpit-context
+            org.opencontainers.image.source=https://github.com/FlyCockpit/context
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.validate.outputs.version }}
           build-args: |

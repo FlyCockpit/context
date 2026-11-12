@@ -441,10 +441,10 @@ function imageErrors(file: string, text: string, dev = false): string[] {
     found.push(`${file}: write BUILD_COMMIT into the server artifact.`);
   for (const [key, value] of Object.entries({
     title: "Cockpit Context",
-    source: "https://github.com/FlyCockpit/cockpit-context",
+    source: "https://github.com/FlyCockpit/context",
     licenses: "MIT",
     vendor: "FlyCockpit LLC",
-    url: "https://github.com/FlyCockpit/cockpit-context",
+    url: "https://github.com/FlyCockpit/context",
     version: "$IMAGE_VERSION",
     revision: "$VCS_REF",
   })) {

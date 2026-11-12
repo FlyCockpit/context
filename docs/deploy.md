@@ -9,12 +9,12 @@ Use Docker Compose on a Linux host: one Node.js 26.13.1 app container and Postgr
 Clone the public repository and use a unique project name such as `cockpit-context` on a server also running other services. Do not add `container_name` or global volume/network names. This keeps it separate from WS Sandbox Proxy and Knowledge Base, including their databases.
 
 ```sh
-git clone https://github.com/FlyCockpit/cockpit-context.git
+git clone https://github.com/FlyCockpit/context.git
 cd cockpit-context
 cp .env.example .env
 ```
 
-Edit `.env` privately. Generated examples contain placeholders, not deployment credentials. Do not use `.env.docker.defaults` for production. The supplied Compose file builds `Dockerfile` locally; a published release image is `ghcr.io/flycockpit/cockpit-context:1.0.0`. To use a published image, override the app and optional backup image consistently and pull the selected release; prefer a digest for immutable deployments.
+Edit `.env` privately. Generated examples contain placeholders, not deployment credentials. Do not use `.env.docker.defaults` for production. The supplied Compose file builds `Dockerfile` locally; a published release image is `ghcr.io/flycockpit/context:1.0.0`. To use a published image, override the app and optional backup image consistently and pull the selected release; prefer a digest for immutable deployments.
 
 ## Configuration
 
