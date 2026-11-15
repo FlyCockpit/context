@@ -40,6 +40,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createGunzip } from "node:zlib";
 
@@ -73,15 +74,39 @@ class Refusal extends Error {}
  * Exit status of a refused restore — nothing was changed: a usage error,
  * preview only, a cancelled prompt (or a stop signal before the restore
  * transaction started), a failed check, or a failed pre-restore snapshot.
- * 0 is a restore that committed, even when a signal then cut the closing
- * summary short ("restore completed; then interrupted"). 1 is a restore that
- * failed while changing the target: rolled back when COMMIT was never sent,
- * uncertain once it was (read the output). 129/130/143 is one interrupted by a
- * signal while its transaction was open: rolled back before COMMIT was sent,
- * uncertain after. host.sh starts the stopped writers again only after 3 (after 0 it prints the
- * manual next steps and leaves them stopped).
+ *
+ * The whole contract (docs/backup-restore.md § Offline restore step 4):
+ *   0   committed, even when a signal then cut the closing summary short
+ *       ("restore completed; then interrupted").
+ *   3   REFUSED_EXIT: refused or cancelled before the restore transaction started.
+ *   4   ROLLED_BACK_EXIT: the restore transaction started and provably did not
+ *       commit — the target is unchanged. Only when COMMIT was never sent, when
+ *       psql stopped on an SQL error (ON_ERROR_STOP, exit 3) before printing
+ *       the confirmation that follows COMMIT, or when the server reports the
+ *       transaction aborted (pg_xact_status).
+ *   1   failed with the outcome uncertain (COMMIT may have been sent), or the
+ *       restore committed and a later step failed (the output says which).
+ *   129/130/143  a signal after COMMIT was sent, before it was confirmed:
+ *       uncertain. (A signal before COMMIT was sent is a rollback: 4.)
+ * Callers treat 0/3/4 as definite; anything else means "inspect the target".
+ * host.sh starts the stopped writers again only after 3 or 4 (after 0 it
+ * prints the manual next steps and leaves them stopped).
  */
 export const REFUSED_EXIT = 3;
+/** Exit status of a restore that started and rolled back: the target is unchanged. */
+export const ROLLED_BACK_EXIT = 4;
+/** psql's exit status for an SQL error that stopped the script (ON_ERROR_STOP). */
+const PSQL_SCRIPT_ERROR = 3;
+/**
+ * How long the server is asked about an unconfirmed restore transaction
+ * (waiting while it is "in progress", each status query bounded by what is
+ * left) before the outcome is "uncertain". RESTORE_XACT_STATUS_WAIT_MS can only
+ * shorten it, for the unit tests' fake psql.
+ */
+const XACT_STATUS_WAIT_MS = Math.min(
+  15_000,
+  Number.parseInt(process.env.RESTORE_XACT_STATUS_WAIT_MS ?? "", 10) || 15_000,
+);
 
 /** @type {Set<import("node:child_process").ChildProcess>} */
 const children = new Set();
@@ -92,13 +117,22 @@ const children = new Set();
  * @param {{ env: NodeJS.ProcessEnv, capture?: boolean }} options
  * @returns {Promise<{ code: number, stdout: string, stderr: string }>}
  */
-function run(command, args, { env, capture = true }) {
+function run(command, args, { env, capture = true, timeoutMs = 0 }) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       env,
       stdio: ["ignore", capture ? "pipe" : "inherit", capture ? "pipe" : "inherit"],
     });
     children.add(child);
+    // A client stalled on a dead connection outlives any server-side timeout.
+    let timedOut = false;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            child.kill("SIGKILL");
+          }, timeoutMs)
+        : undefined;
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => {
@@ -109,8 +143,13 @@ function run(command, args, { env, capture = true }) {
     });
     child.on("error", reject);
     child.on("close", (code, signal) => {
+      clearTimeout(timer);
       children.delete(child);
-      resolvePromise({ code: code ?? (signal ? 128 : 1), stdout, stderr });
+      resolvePromise(
+        timedOut
+          ? { code: 124, stdout, stderr: `${stderr}timed out after ${timeoutMs} ms` }
+          : { code: code ?? (signal ? 128 : 1), stdout, stderr },
+      );
     });
   });
 }
@@ -119,10 +158,12 @@ function run(command, args, { env, capture = true }) {
  * One read-only query with short timeouts; returns trimmed unaligned output.
  * @param {NodeJS.ProcessEnv} env
  * @param {string} sql
+ * @param {{ timeoutMs?: number }} [options] kill psql after this long (0: never)
  */
-async function query(env, sql) {
+async function query(env, sql, { timeoutMs = 0 } = {}) {
   const result = await run("psql", ["-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", sql], {
     env: { ...env, PGOPTIONS: "-c lock_timeout=5s -c statement_timeout=60s" },
+    timeoutMs,
   });
   if (result.code !== 0) {
     throw new Refusal(
@@ -524,23 +565,38 @@ function applyArchive(archive, env, replace, session, holdSql) {
     let psqlDone = false;
     let psqlCode = 0;
     let dumpCode = /** @type {number | null} */ (null);
-    // COMMIT counts as done only once the session confirms it: the marker
-    // query written after COMMIT prints only if COMMIT succeeded (ON_ERROR_STOP).
+    // COMMIT counts as done only once the session confirms it: the marker is
+    // a client-side \echo written after COMMIT, so it prints only if COMMIT
+    // succeeded (ON_ERROR_STOP), and nothing after COMMIT can raise an SQL
+    // error. That is what makes "psql exit 3 without the marker" provably a
+    // rollback: the failed statement came at or before COMMIT.
     // A COMMIT written into a session that was already gone never confirms.
-    const marker = `cockpit-context-restore-committed-${randomBytes(8).toString("hex")}`;
+    const nonce = randomBytes(8).toString("hex");
+    const marker = `cockpit-context-restore-committed-${nonce}`;
+    // The transaction's id, printed right after BEGIN: when the outcome is
+    // otherwise uncertain, the server's pg_xact_status() for it decides.
+    const xidPrefix = `cockpit-context-restore-xid-${nonce}:`;
+    // The newline makes a line split across chunks match only once complete.
+    const xidPattern = new RegExp(`${xidPrefix}(\\d+)\\n`);
     let confirmed = false;
+    /** @type {string | null} */
+    let xid = null;
     let tail = "";
     psql.stdout.on("data", (chunk) => {
       if (confirmed) return;
       const seen = tail + chunk;
+      if (xid === null) xid = xidPattern.exec(seen)?.[1] ?? null;
       confirmed = seen.includes(marker);
       if (confirmed) commitConfirmed = true;
-      tail = seen.slice(-marker.length);
+      // Keep enough for a marker or an xid line split across chunks.
+      tail = seen.slice(-(xidPrefix.length + 24));
     });
     psql.stdin.on("error", () => {
       dump.kill("SIGTERM");
     });
-    psql.stdin.write("BEGIN;\nSET LOCAL client_min_messages = warning;\n");
+    psql.stdin.write(
+      `BEGIN;\nSET LOCAL client_min_messages = warning;\nSELECT '${xidPrefix}' || pg_current_xact_id();\n`,
+    );
     if (replace) {
       // The schema drop runs in the same transaction as the restore: either
       // the archive fully replaces the old contents or nothing changes.
@@ -565,7 +621,7 @@ CREATE SCHEMA public;
         // From here on the server may commit at any moment: neither a psql
         // failure nor a signal may be reported as "rolled back" any more.
         commitSent = true;
-        psql.stdin.write(`${holdSql}COMMIT;\nSELECT '${marker}';\n`);
+        psql.stdin.write(`${holdSql}COMMIT;\n\\echo ${marker}\n`);
       }
       psql.stdin.end();
     });
@@ -581,11 +637,75 @@ CREATE SCHEMA public;
           confirmed,
           psqlCode,
           dumpCode,
+          xid,
         });
       if (dumpCode === null) dump.once("close", finish);
       else finish();
     });
   });
+}
+
+/**
+ * Decide what a restore that did not end cleanly did to the target. Reports
+ * "rolled-back" only when that is provable; otherwise asks the server, and
+ * stays "uncertain" when even the server cannot say.
+ * @param {{ confirmed: boolean, psqlCode: number, xid: string | null }} result
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {Promise<{ outcome: "committed" | "rolled-back" | "uncertain", reason: string }>}
+ */
+async function settleOutcome(result, env) {
+  if (result.confirmed)
+    return { outcome: "committed", reason: "the restore session confirmed COMMIT" };
+  if (!commitSent) return { outcome: "rolled-back", reason: "COMMIT was never sent" };
+  if (result.psqlCode === PSQL_SCRIPT_ERROR) {
+    // ON_ERROR_STOP: psql stopped at the first failing statement, and nothing
+    // after COMMIT can fail (the confirmation is a client-side \echo). So the
+    // failure was at or before COMMIT, and a failed COMMIT rolls back too.
+    return {
+      outcome: "rolled-back",
+      reason: "psql stopped on an SQL error (ON_ERROR_STOP) before confirming COMMIT",
+    };
+  }
+  const status = await serverXactStatus(env, result.xid);
+  if (status === "committed")
+    return { outcome: "committed", reason: "the server reports the restore transaction committed" };
+  if (status === "aborted")
+    return { outcome: "rolled-back", reason: "the server reports the restore transaction aborted" };
+  return {
+    outcome: "uncertain",
+    reason: result.xid
+      ? `the server reports the restore transaction as ${status}`
+      : "the restore transaction's id was never seen",
+  };
+}
+
+/**
+ * The server's pg_xact_status() for the restore transaction, from a fresh
+ * session. Waits while it is still "in progress" (the dead session's backend
+ * may still be finishing its COMMIT or its rollback), up to XACT_STATUS_WAIT_MS.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string | null} xid digits only (parsed from the session's output)
+ * @returns {Promise<string>} committed | aborted | in progress | unknown | unavailable
+ */
+async function serverXactStatus(env, xid) {
+  if (!xid || !/^\d+$/.test(xid)) return "unknown";
+  const deadline = Date.now() + XACT_STATUS_WAIT_MS;
+  for (;;) {
+    // Every query and pause gets only what is left of the wait.
+    const left = deadline - Date.now();
+    if (left <= 0) return "still in progress";
+    let status;
+    try {
+      status = await query(env, `SELECT coalesce(pg_xact_status('${xid}'::xid8), 'unknown')`, {
+        timeoutMs: left,
+      });
+    } catch {
+      return "unavailable (the status query failed)";
+    }
+    if (status === "committed" || status === "aborted") return status;
+    if (status !== "in progress") return "unknown";
+    await delay(Math.min(250, Math.max(0, deadline - Date.now())));
+  }
 }
 
 /** @param {NodeJS.ProcessEnv} env */
@@ -664,10 +784,12 @@ let commitSent = false;
  */
 let commitConfirmed = false;
 /**
- * Set once a failure has been reported (exit 1): a signal while the process
- * winds down keeps that status instead of reporting another outcome.
+ * Set to the exit status once a failure has been reported (1 or
+ * ROLLED_BACK_EXIT): a signal while the process winds down keeps that status
+ * instead of reporting another outcome.
+ * @type {number | null}
  */
-let failureReported = false;
+let reportedExit = null;
 
 async function main() {
   let args;
@@ -698,7 +820,7 @@ async function main() {
       // Killing psql before COMMIT rolls the restore back.
       for (const child of children) child.kill("SIGTERM");
       cleanup();
-      if (failureReported) process.exit(1);
+      if (reportedExit !== null) process.exit(reportedExit);
       if (committed || commitConfirmed) {
         // The restore itself finished; only the closing summary was cut short.
         // Report it as done (exit 0, owner decision 2026-11-14): host.sh then
@@ -718,10 +840,15 @@ async function main() {
         );
         process.exit(REFUSED_EXIT);
       }
+      if (!commitSent) {
+        // COMMIT was never written: killing psql makes PostgreSQL roll back.
+        console.error(
+          `\nROLLED BACK: interrupted by ${signal} before COMMIT; the unfinished restore transaction is rolled back and the target is unchanged.`,
+        );
+        process.exit(ROLLED_BACK_EXIT);
+      }
       console.error(
-        commitSent
-          ? `\nFATAL: interrupted by ${signal} after COMMIT was sent; the outcome for the target is uncertain (the restore may have committed). Keep every writer stopped and inspect the database before trusting it.`
-          : `\nFATAL: interrupted by ${signal} before COMMIT; the unfinished restore transaction is rolled back and the target is unchanged.`,
+        `\nFATAL: interrupted by ${signal} after COMMIT was sent; the outcome for the target is uncertain (the restore may have committed). Keep every writer stopped and inspect the database before trusting it.`,
       );
       process.exit(signal === "SIGINT" ? 130 : signal === "SIGHUP" ? 129 : 143);
     });
@@ -921,13 +1048,19 @@ async function main() {
         restoreHoldSql(prismaSchemaName(process.env.DATABASE_URL ?? "")),
       );
       if (!result.ok) {
-        failureReported = true;
+        const { outcome, reason } = await settleOutcome(result, env);
+        if (outcome === "rolled-back") {
+          reportedExit = ROLLED_BACK_EXIT;
+          console.error(
+            `ROLLED BACK: restore failed (psql exit ${result.psqlCode}, pg_restore exit ${result.dumpCode}). ${reason}, so the transaction was rolled back; "${database}" is unchanged.`,
+          );
+          return ROLLED_BACK_EXIT;
+        }
+        reportedExit = 1;
         console.error(
-          result.confirmed
-            ? `FATAL: the restore session confirmed COMMIT, then failed (psql exit ${result.psqlCode}). "${database}" is restored (the transaction committed), but the session did not end cleanly. Keep every writer stopped and inspect the database before trusting it.`
-            : commitSent
-              ? `FATAL: restore failed after COMMIT was sent (psql exit ${result.psqlCode}, COMMIT not confirmed). The outcome for "${database}" is uncertain: the restore may have committed before the failure. Keep every writer stopped and inspect the database before trusting it.`
-              : `FATAL: restore failed (psql exit ${result.psqlCode}, pg_restore exit ${result.dumpCode}). COMMIT was never sent, so the transaction was rolled back; "${database}" is unchanged.`,
+          outcome === "committed"
+            ? `FATAL: ${result.confirmed ? "the restore session confirmed COMMIT, then failed" : "the restore session failed before confirming COMMIT, but the server reports the restore transaction committed"} (psql exit ${result.psqlCode}). "${database}" is restored (the transaction committed), but the session did not end cleanly. Keep every writer stopped and inspect the database before trusting it.`
+            : `FATAL: restore failed after COMMIT was sent (psql exit ${result.psqlCode}, COMMIT not confirmed; ${reason}). The outcome for "${database}" is uncertain: the restore may have committed before the failure. Keep every writer stopped and inspect the database before trusting it.`,
         );
         return 1;
       }
@@ -965,13 +1098,17 @@ See docs/backup-restore.md.`);
   }
 }
 
+/** An error's message as a sentence, so a verdict can follow it. */
+const sentence = (/** @type {unknown} */ error) =>
+  `${error instanceof Error ? error.message : String(error)}`.replace(/\.?\s*$/, ".");
+
 try {
   process.exitCode = await main();
 } catch (error) {
   if (committed) {
     // After COMMIT nothing is "refused" any more: the restore itself
     // succeeded. Not 0 (something failed), not REFUSED_EXIT (data changed).
-    failureReported = true;
+    reportedExit = 1;
     console.error(
       `FATAL: the restore was committed, then: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -987,10 +1124,18 @@ try {
       `\nREFUSED: ${message}${error instanceof Refusal ? "" : " Nothing was changed."}`,
     );
     process.exitCode = REFUSED_EXIT;
-  } else {
-    failureReported = true;
+  } else if (!commitSent) {
+    // The restore transaction started but COMMIT was never written; main's
+    // `finally` already ended the session's input, so PostgreSQL rolled it back.
+    reportedExit = ROLLED_BACK_EXIT;
     console.error(
-      `FATAL: ${error instanceof Error ? error.message : String(error)}${commitSent ? " COMMIT had been sent: the outcome for the target is uncertain; inspect it before trusting it." : ""}`,
+      `ROLLED BACK: ${sentence(error)} COMMIT was never sent, so the restore transaction was rolled back; the target is unchanged.`,
+    );
+    process.exitCode = ROLLED_BACK_EXIT;
+  } else {
+    reportedExit = 1;
+    console.error(
+      `FATAL: ${sentence(error)} COMMIT had been sent: the outcome for the target is uncertain; inspect it before trusting it.`,
     );
     process.exitCode = 1;
   }

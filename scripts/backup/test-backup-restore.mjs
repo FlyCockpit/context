@@ -3,7 +3,13 @@
  * End-to-end test for scripts/backup/pre-migrate.sh and restore.sh against
  * disposable postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42 containers. Needs Docker; touches nothing else.
  *
- *   node scripts/backup/test-backup-restore.mjs
+ *   node scripts/backup/test-backup-restore.mjs [--container-prefix <name>]
+ *
+ * `--container-prefix` (or TEST_CONTAINER_PREFIX; the flag wins) names every
+ * container, the network and the tools image `<name>-...` (default
+ * `cockpit-context-backup-test`; see e2e-names.mjs), so parallel runs stay in
+ * their own namespace. The server is also published on a fixed loopback port
+ * (below), so a parallel run needs its own BACKUP_TEST_PG_PORT too.
  *
  * pg_dump/pg_restore/psql are not assumed on the host: the scripts run inside
  * a throwaway "tools" image (postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42 + the node binary from node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc),
@@ -24,13 +30,19 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { containerPrefix, e2eNames } from "./e2e-names.mjs";
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOST_PORT = process.env.BACKUP_TEST_PG_PORT ?? "55432";
-const TOOLS_IMAGE = "cockpit-context-backup-test-tools:pg18";
 const suffix = `${process.pid}-${Date.now().toString(36)}`;
-const NETWORK = `backup-test-${suffix}`;
-const PG = `backup-pg-${suffix}`;
+const names = e2eNames(containerPrefix(process.argv.slice(2)), suffix);
+const TOOLS_IMAGE = names.toolsImage;
+const NETWORK = names.network;
+const PG = names.pg;
+const TEST_LABEL = `cockpit-context.backup-test=${suffix}`;
+/** Every container this run started (all named), removed in teardown. */
+const containers = new Set();
+let containerNumber = 0;
 const work = mkdtempSync(join(tmpdir(), "backup-restore-test-"));
 const backups = join(work, "backups");
 const uid = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
@@ -40,6 +52,14 @@ const uid = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
  * @param {{ input?: string, allowFail?: boolean }} [options]
  */
 function docker(args, { input, allowFail = false } = {}) {
+  if (args[0] === "run") {
+    // Every container is named under the prefix and labelled with this run.
+    args = [...args];
+    const nameIndex = args.indexOf("--name");
+    const name = nameIndex === -1 ? names.tool(++containerNumber) : args[nameIndex + 1];
+    containers.add(name);
+    args.splice(1, 0, "--label", TEST_LABEL, ...(nameIndex === -1 ? ["--name", name] : []));
+  }
   const result = spawnSync("docker", args, {
     encoding: "utf8",
     input,
@@ -229,8 +249,9 @@ RUN ldconfig && node --version
 
 function teardown() {
   // -v: a force-removed --rm container keeps its anonymous PGDATA volume.
-  docker(["rm", "-f", "-v", PG], { allowFail: true });
+  for (const container of containers) docker(["rm", "-f", "-v", container], { allowFail: true });
   docker(["network", "rm", NETWORK], { allowFail: true });
+  docker(["image", "rm", TOOLS_IMAGE], { allowFail: true });
   rmSync(work, { recursive: true, force: true });
 }
 
@@ -607,13 +628,18 @@ try {
       "--confirm",
       "RESTORE:restored_misc",
     );
-    assert.equal(result.code, 1, result.out);
-    // psql stops at the failing COPY, but restore cannot tell whether it read
-    // the COMMIT written after the last statement: it says "rolled back" only
-    // when COMMIT was never sent, and otherwise "uncertain". Either way it must
-    // never report a completed restore, and the target must be unchanged.
-    assert.match(result.out, /restore failed|rolled back/);
-    assert.doesNotMatch(result.out, /Restore complete/i);
+    // psql stops at the failing COPY (ON_ERROR_STOP, exit 3) before the
+    // confirmation after COMMIT: provably rolled back, whether or not COMMIT
+    // had already been written (it never ran). Exit 4, ROLLED_BACK_EXIT.
+    assert.equal(result.code, 4, result.out);
+    assert.match(
+      result.out,
+      /ROLLED BACK: restore failed \(psql exit 3, pg_restore exit 0\)\. (COMMIT was never sent|psql stopped on an SQL error \(ON_ERROR_STOP\) before confirming COMMIT), so the transaction was rolled back; "restored_misc" is unchanged/,
+    );
+    assert.doesNotMatch(result.out, /Restore complete|uncertain/i);
+    // It failed where intended (the COPY that violates later_check), not at
+    // some unrelated earlier step that would leave the same state behind.
+    assert.match(result.out, /later_check/);
     assert.equal(fingerprint("restored_misc"), sourcePrint);
     assert.equal(sql("restored_misc", "SELECT to_regclass('public.ok') IS NULL"), "t");
   });
@@ -678,9 +704,15 @@ try {
       "--confirm",
       "RESTORE:restored_misc",
     );
-    // 1 when the restore transaction was cut, 3 if the lock session ended first.
-    assert.notEqual(result.code, 0, result.out);
-    assert.doesNotMatch(result.out, /Restore complete/);
+    // The terminated backend aborted the transaction: rolled back (exit 4),
+    // because COMMIT was never sent (pg_restore was still blocked on the full
+    // pipe) or because the server reports the transaction aborted.
+    assert.equal(result.code, 4, result.out);
+    assert.match(
+      result.out,
+      /ROLLED BACK: restore failed \(psql exit 2, pg_restore exit -?\d+\)\. (COMMIT was never sent|the server reports the restore transaction aborted), so the transaction was rolled back; "restored_misc" is unchanged/,
+    );
+    assert.doesNotMatch(result.out, /Restore complete|uncertain/);
     spawnSync("sleep", ["3"]);
     assert.equal(sql("postgres", "SELECT string_agg(got::text, ',') FROM lock_probe"), "false");
     assert.equal(fingerprint("restored_misc"), sourcePrint);

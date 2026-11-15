@@ -116,13 +116,31 @@ Create a distinct Compose project for this repository, using `compose.yaml` alon
 
 Use a unique project name alongside WS Sandbox Proxy and Knowledge Base, and project-scoped networks/volumes. Keep one app replica and stop-first replacement. Configure proxy timeout/streaming for MCP. This is Dokploy **Compose**, not a separate Swarm Application or db-applier image.
 
+### Compose source: Git repository or raw file
+
+There is no Dokploy config generator; pick one of two sources for the Compose service.
+
+- **Git source (simplest).** Connect this repository with Compose path `compose.yaml` and your branch. Dokploy clones it on every deploy and builds `context: .`; the clone's `.git/HEAD` gives the image its commit, so `/ready` reports it for `pnpm deploy:check`. Put the settings above in the compose's **Environment** tab (Dokploy writes them to the `.env` that `compose.yaml` reads), plus `COMPOSE_PROFILES=backup` when you run the backup scheduler. Dokploy takes one Compose file, so `compose.backup.yaml` cannot be added here: give the app S3 for its pre-migration dumps, or use the raw form with the overlay merged in. Auto-deploy follows the branch.
+- **Raw file (pinned Git context).** Paste a Compose file when the server needs its own edits (an extra network, Traefik labels). Start from `compose.yaml` as it is (for app-local dumps, copy in `compose.backup.yaml`'s two additions: the app's `/backups` volume and the scheduler's `depends_on: app`), keep its `${…}` references and put the settings in the **Environment** tab, so no secret is stored in the file. A pasted file has no source tree, so set the app's build context to the repository pinned to a full commit SHA, and keep `.git` in that build so the image can still read its commit:
+
+  ```yaml
+  services:
+    app:
+      build:
+        context: "https://github.com/FlyCockpit/context.git#<full commit SHA>"
+        args:
+          BUILDKIT_CONTEXT_KEEP_GIT_DIR: "1"
+  ```
+
+  Without the build arg, a Git context drops `.git` and `/ready` reports `commit: null` unless `BUILD_VERSION` is set to the same full SHA. The Dokploy server's Docker fetches the context itself, so the repository must be reachable from there (public, or an SSH URL whose key that Docker can use). Never put a token in the URL: the file is stored in Dokploy. The `backup` service runs the image the app service builds. To release, change the SHA and deploy; a raw file does not follow the branch.
+
 ### Response compression
 
 The Node server ships no compression middleware; compression is the proxy's job. Traefik, Dokploy's proxy, has compression off by default, so SSR pages and JSON responses go out uncompressed until you attach a compress middleware to the app router (labels `traefik.http.middlewares.<name>.compress=true` and `traefik.http.routers.<router>.middlewares=<name>`, or the equivalent in Dokploy's domain settings). If you add compression to Caddy for the plain-VPS setup, test that MCP and live-view event streams (`text/event-stream`) still arrive unbuffered. `pnpm dokploy:verify` warns when the public site root is served uncompressed.
 
 ## Runtime checks and limits
 
-Check `/health` for liveness and `/ready` for readiness after migrations, then sign in and run an actual dependency question. Admin → Settings reports model, storage and language-server sandbox status. To probe Landlock in the app:
+Check `/health` for liveness and `/ready` for readiness after migrations, then sign in and run an actual dependency question. From your computer, `pnpm deploy:check https://<your-app> --commit <sha>` confirms the release that is live. On the host, from a checkout, `pnpm dokploy:verify --project <compose project> --url https://<your-app> --commit <sha>` waits (up to `--timeout-seconds`, default 600) until the project's single `app` container runs healthy and was built from that commit (its baked `BUILD_COMMIT`), and `/ready` passes and reports the same commit, so an earlier release a failed redeploy left running never passes. It fails on a missing or second app container (`docker compose run` one-offs do not count), an unhealthy, exited or restarting one, or a container replaced while it watches, and it reads only container labels, state and that commit file, never environment or logs. Dokploy's Compose project name is the compose's app name (shown in its settings); for the plain VPS setup it is `cockpit-context`. Admin → Settings reports model, storage and language-server sandbox status. To probe Landlock in the app:
 
 ```sh
 docker compose -p cockpit-context exec app node apps/server/dist/lsp-sandbox-check.mjs

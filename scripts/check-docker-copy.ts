@@ -570,6 +570,25 @@ function composeErrors(file: string, text: string, production = false): string[]
   return found;
 }
 
+/**
+ * compose.backup.yaml may add only the app's backup volume, and must create
+ * the scheduler after the app: both then mount one fresh named volume, and
+ * Docker's copy-up of the image's /backups into it races when two containers
+ * are created at once (the knowledge-base deploy failed on exactly that).
+ */
+function backupOverlayErrors(text: string): string[] {
+  const body = text
+    .split("\n")
+    .filter((line) => line && !line.trimStart().startsWith("#"))
+    .join("\n");
+  return body ===
+    "services:\n  app:\n    volumes:\n      - cockpit-context-backups:/backups\n  backup:\n    depends_on:\n      app:\n        condition: service_started"
+    ? []
+    : [
+        "compose.backup.yaml: overlay may add only the app backup volume and must start the scheduler after the app (condition: service_started), so the shared fresh volume's copy-up never races.",
+      ];
+}
+
 function verify(): string[] {
   const found: string[] = [];
   const members = discoverMembers();
@@ -613,14 +632,7 @@ function verify(): string[] {
     '# Loopback HTTP for a host reverse proxy such as Caddy.\nservices:\n  app:\n    ports: ["127.0.0.1:${COCKPIT_CONTEXT_HTTP_PORT:-3000}:3000"]'
   )
     found.push("compose.vps.yaml: overlay may add only the loopback app port.");
-  const backupOverlay = readFileSync(resolve(ROOT, "compose.backup.yaml"), "utf8");
-  if (
-    backupOverlay
-      .split("\n")
-      .filter((line) => line && !line.startsWith("#"))
-      .join("\n") !== "services:\n  app:\n    volumes:\n      - cockpit-context-backups:/backups"
-  )
-    found.push("compose.backup.yaml: overlay may add only the app backup volume.");
+  found.push(...backupOverlayErrors(readFileSync(resolve(ROOT, "compose.backup.yaml"), "utf8")));
   const ignore = readFileSync(resolve(ROOT, ".dockerignore"), "utf8");
   for (const item of [".docker-volumes/", "!LICENSE", "!THIRD-PARTY-LICENSES.md"])
     if (!ignore.split("\n").includes(item)) found.push(`.dockerignore: missing ${item}.`);
@@ -674,6 +686,17 @@ if (process.argv.includes("--self-test")) {
     ].sort(),
     ["scripts/backup/pre-migrate.sh", "scripts/db/lib/x.mjs"],
   );
+  const overlay = readFileSync(resolve(ROOT, "compose.backup.yaml"), "utf8");
+  deepStrictEqual(backupOverlayErrors(overlay), []);
+  for (const mutation of [
+    // The scheduler created alongside the app: the fresh volume's copy-up races.
+    overlay.replace(/\n {2}backup:[\s\S]*$/, "\n"),
+    overlay.replace("condition: service_started", "condition: service_healthy"),
+    overlay.replace("      app:\n", "      postgres:\n"),
+    `${overlay}      - cockpit-context-data:/data\n`,
+  ])
+    if (backupOverlayErrors(mutation).length === 0)
+      throw new Error("compose.backup.yaml mutation escaped");
   console.log("Docker/Compose contract self-tests passed.");
 }
 const failures = verify();

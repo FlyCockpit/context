@@ -1,21 +1,24 @@
 #!/usr/bin/env node
-// Read-only verification on the single VPS. Never request env or container logs.
+// Read-only verification on the single VPS. Never request env or container logs:
+// it reads container labels and state, and the image's baked BUILD_COMMIT file.
 import { execFile } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { sameCommit } from "./deploy-check.mjs";
 
 const execute = promisify(execFile);
-const serviceFormat =
-  '{"id":{{json .ID}},"version":{{json .Version.Index}},"image":{{json .Spec.TaskTemplate.ContainerSpec.Image}},"generation":{{json .Spec.TaskTemplate.ForceUpdate}},"mode":{{json .Spec.Mode}},"update":{{json .UpdateStatus}}}';
-const taskFormat =
-  '{"id":{{json .ID}},"image":{{json .Spec.ContainerSpec.Image}},"generation":{{json .Spec.ForceUpdate}},"slot":{{json .Slot}},"desired":{{json .DesiredState}},"status":{{json .Status.State}},"container":{{json .Status.ContainerStatus}}}';
+// Labels and state only: never .Config.Env, mounts' contents or logs.
 const containerFormat =
-  '{"running":{{json .State.Running}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}';
+  '{"id":{{json .Id}},"image":{{json .Image}},"project":{{json (index .Config.Labels "com.docker.compose.project")}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"status":{{json .State.Status}},"running":{{json .State.Running}},"restarts":{{json .RestartCount}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}';
+/** The Compose service that serves the app (compose.yaml). */
+const APP_SERVICE = "app";
+/** The commit the image was built from (Dockerfile; apps/server/src/build-commit.ts). */
+const BUILD_COMMIT_FILE = "/app/apps/server/dist/BUILD_COMMIT";
 
 export function parseOptions(args) {
   const options = {};
-  const allowed = new Set(["server", "url", "timeout-seconds"]);
+  const allowed = new Set(["project", "url", "commit", "timeout-seconds"]);
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index].replace(/^--/, "");
     if (
@@ -25,14 +28,21 @@ export function parseOptions(args) {
       !args[index + 1] ||
       args[index + 1].startsWith("--")
     )
-      throw new Error("Use --server <service> --url <https-origin> [--timeout-seconds 600].");
+      throw new Error(
+        "Use --project <compose project> --url <https-origin> --commit <sha> [--timeout-seconds 600].",
+      );
     options[key] = args[index + 1];
   }
-  if (!options.server || !options.url) throw new Error("--server and --url are required.");
-  for (const key of ["server"]) {
-    if (options[key] && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(options[key]))
-      throw new Error(`Invalid ${key} service name.`);
-  }
+  if (!options.project || !options.url || !options.commit)
+    throw new Error("--project, --url and --commit are required.");
+  // A healthy container proves only that something runs: an earlier release
+  // left running by a failed redeploy is healthy too. /ready must name this one.
+  options.commit = options.commit.trim().toLowerCase();
+  if (!/^[0-9a-f]{7,40}$/.test(options.commit))
+    throw new Error("--commit must be a commit SHA (7 to 40 hex characters).");
+  // Compose project names: lowercase letters, digits, dashes and underscores.
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(options.project))
+    throw new Error("Invalid Compose project name.");
   const url = new URL(options.url);
   if (
     url.protocol !== "https:" ||
@@ -49,25 +59,25 @@ export function parseOptions(args) {
   return { ...options, url: url.origin, timeout };
 }
 
-export function evaluateService(role, service, tasks) {
-  if (!service.mode?.Replicated || service.mode.Replicated.Replicas < 1)
-    throw new Error(`${role}: expected an enabled Replicated service.`);
-  if (service.mode.Replicated.Replicas !== 1)
-    throw new Error("server: expected exactly one app replica.");
-  if (/paused|rollback/.test(service.update?.State || ""))
-    throw new Error(`${role}: rollout paused or rolled back; inspect Dokploy.`);
-  const current = tasks.filter(
-    (task) => task.image === service.image && (task.generation || 0) === (service.generation || 0),
-  );
-  // Historical completions and healthy old containers cannot satisfy this run.
-  const selected = new Map();
-  for (const task of current) {
-    if (task.status === "failed" || task.status === "rejected")
-      throw new Error(`${role}: a task from the selected deployment failed.`);
-    if (task.status === "running" && task.desired === "running") selected.set(task.slot, task);
-  }
-  if (selected.size !== service.mode.Replicated.Replicas) return null;
-  return [...selected.values()];
+/**
+ * Judge the project's app containers: exactly one (one app replica), labelled
+ * for this project and service. Returns true when it runs healthy, false while
+ * it is still starting; throws when it cannot become a verified deployment.
+ */
+export function evaluateApp(project, containers) {
+  if (containers.length === 0)
+    throw new Error(`no ${APP_SERVICE} container in Compose project "${project}".`);
+  if (containers.length !== 1)
+    throw new Error(`expected exactly one ${APP_SERVICE} container (one app replica).`);
+  const [app] = containers;
+  if (app.project !== project || app.service !== APP_SERVICE)
+    throw new Error("app container label mismatch.");
+  if (app.health === null)
+    throw new Error("app: image has no healthcheck; startup cannot be verified.");
+  if (app.health === "unhealthy") throw new Error("app: the container is unhealthy.");
+  if (app.status === "exited" || app.status === "dead")
+    throw new Error(`app: the container has ${app.status}; inspect its logs in Dokploy.`);
+  return app.running === true && app.status === "running" && app.health === "healthy";
 }
 
 const compressionEncodings = new Set(["gzip", "br", "deflate", "zstd"]);
@@ -127,7 +137,7 @@ async function docker(args, signal) {
     ).stdout.trim();
   } catch {
     throw new Error(
-      "Docker inspection failed. Run this on the single VPS with Docker access; no configuration was changed.",
+      "Docker inspection failed. Run this on the deployment host with Docker access; no configuration was changed.",
     );
   }
 }
@@ -144,76 +154,70 @@ export async function verifyDeployment(
   } = {},
 ) {
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(options.timeout * 1000)]);
-  const services = ["server"];
-  const snapshots = new Map();
-  for (const role of services) {
-    snapshots.set(
-      role,
-      JSON.parse(
-        await inspect(["service", "inspect", options[role], "--format", serviceFormat], deadline),
-      ),
-    );
-  }
-  log(
-    "Checking the currently selected deployment. Run this after Dokploy finishes building each selected Application.",
-  );
-  while (!deadline.aborted) {
-    let ready = true;
-    for (const role of services) {
-      const service = JSON.parse(
-        await inspect(["service", "inspect", options[role], "--format", serviceFormat], deadline),
-      );
-      const previous = snapshots.get(role);
-      if (
-        service.id !== previous.id ||
-        service.image !== previous.image ||
-        service.generation !== previous.generation ||
-        JSON.stringify(service.mode) !== JSON.stringify(previous.mode)
+  const appContainers = async () => {
+    const ids = (
+      await inspect(
+        [
+          "ps",
+          "--all",
+          "--no-trunc",
+          "--quiet",
+          "--filter",
+          `label=com.docker.compose.project=${options.project}`,
+          "--filter",
+          `label=com.docker.compose.service=${APP_SERVICE}`,
+          // Not `docker compose run` containers: they carry the same labels.
+          "--filter",
+          "label=com.docker.compose.oneoff=False",
+        ],
+        deadline,
       )
-        throw new Error(
-          `${role}: deployment changed during verification; rerun after the new build finishes.`,
-        );
-      const ids = (
-        await inspect(["service", "ps", "--quiet", "--no-trunc", options[role]], deadline)
-      )
-        .split(/\s+/)
-        .filter(Boolean);
-      const tasks = [];
-      for (const id of ids)
-        tasks.push(
-          JSON.parse(
-            await inspect(["inspect", "--type", "task", id, "--format", taskFormat], deadline),
-          ),
-        );
-      const selected = evaluateService(role, service, tasks);
-      if (!selected) {
-        ready = false;
-        continue;
-      }
-      for (const task of selected) {
-        if (!task.container?.ContainerID) {
-          ready = false;
-          continue;
-        }
-        const container = JSON.parse(
+    )
+      .split(/\s+/)
+      .filter(Boolean);
+    const containers = [];
+    for (const id of ids)
+      containers.push(
+        JSON.parse(
           await inspect(
-            [
-              "inspect",
-              "--type",
-              "container",
-              task.container.ContainerID,
-              "--format",
-              containerFormat,
-            ],
+            ["inspect", "--type", "container", id, "--format", containerFormat],
             deadline,
           ),
+        ),
+      );
+    return containers;
+  };
+  /** The selected container's own build commit, read once it runs healthy. */
+  let containerCommit = null;
+  const first = await appContainers();
+  evaluateApp(options.project, first);
+  log(
+    `Checking the app container of Compose project "${options.project}". Run this after Dokploy finishes the deployment.`,
+  );
+  while (!deadline.aborted) {
+    const containers = await appContainers();
+    let ready = evaluateApp(options.project, containers);
+    if (containers[0].id !== first[0].id || containers[0].image !== first[0].image)
+      throw new Error(
+        "app: deployment changed during verification; rerun after the new deploy finishes.",
+      );
+    // `restart: unless-stopped` hides a crash loop behind a fresh start.
+    if (containers[0].restarts > first[0].restarts)
+      throw new Error(
+        "app: the container restarted during verification; inspect its logs in Dokploy.",
+      );
+    if (ready && containerCommit === null) {
+      // The container itself must run the expected release, not merely some
+      // healthy container while the URL answers from another deployment.
+      containerCommit = (
+        await inspect(["exec", containers[0].id, "cat", BUILD_COMMIT_FILE], deadline)
+      ).trim();
+      if (!sameCommit(containerCommit, options.commit))
+        throw new Error(
+          containerCommit
+            ? `app: the container runs commit ${containerCommit.slice(0, 12)}, not ${options.commit.slice(0, 12)}; if a deploy is still running, rerun after it finishes.`
+            : "app: the image does not know its commit (built without git metadata or BUILD_VERSION); the deployment cannot be verified.",
         );
-        if (container.health === "unhealthy")
-          throw new Error(`${role}: selected container is unhealthy.`);
-        if (container.health === null)
-          throw new Error(`${role}: image has no healthcheck; startup cannot be verified.`);
-        if (!container.running || container.health !== "healthy") ready = false;
-      }
     }
     if (ready) {
       try {
@@ -222,7 +226,8 @@ export async function verifyDeployment(
           signal: AbortSignal.any([deadline, AbortSignal.timeout(5000)]),
         });
         const body = await response.json();
-        ready = response.status === 200 && body.ok === true;
+        ready =
+          response.status === 200 && body.ok === true && sameCommit(body.commit, options.commit);
       } catch {
         ready = false;
       }
@@ -230,7 +235,7 @@ export async function verifyDeployment(
     if (ready && !deadline.aborted) {
       await reportCompression(options, { fetchPage, log, deadline });
       log(
-        "Deployment verified: selected app container is healthy, and the public readiness endpoint passed.",
+        `Deployment verified: the app container is healthy, and the public readiness endpoint reports commit ${options.commit.slice(0, 12)}.`,
       );
       return;
     }
@@ -241,7 +246,7 @@ export async function verifyDeployment(
     }
   }
   throw new Error(
-    "Deployment verification timed out or was cancelled. Check the selected task and readiness failure in Dokploy; no rollback or database change was performed.",
+    "Deployment verification timed out or was cancelled. Check the app container, the commit /ready reports and readiness in Dokploy; no rollback or database change was performed.",
   );
 }
 

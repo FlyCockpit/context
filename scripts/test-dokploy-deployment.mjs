@@ -6,131 +6,234 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  evaluateApp,
   evaluateCompression,
-  evaluateService,
   parseOptions,
   verifyDeployment,
 } from "./verify-dokploy-deployment.mjs";
 
-const service = {
-  id: "service",
-  version: 1,
-  image: "server:latest",
-  generation: 2,
-  mode: { Replicated: { Replicas: 1 } },
-};
-const task = {
-  id: "task",
-  image: service.image,
-  generation: 2,
-  slot: 1,
-  desired: "running",
+const project = "compose-cockpit-context-abc123";
+const app = {
+  id: "container-1",
+  image: "sha256:app",
+  project,
+  service: "app",
   status: "running",
-  container: { ContainerID: "container", ExitCode: 0 },
+  running: true,
+  restarts: 0,
+  health: "healthy",
 };
 
-test("only the single app role is accepted, without credentials", () => {
+test("only a Compose project, an HTTPS origin and a commit are accepted, without credentials", () => {
   assert.throws(() => parseOptions([]), /required/);
-  assert.equal(parseOptions(["--server", "web", "--url", "https://app.example.com"]).timeout, 600);
+  const ok = ["--project", project, "--url", "https://app.example.com", "--commit", "ABCDEF1"];
+  assert.equal(parseOptions(ok).timeout, 600);
+  assert.equal(parseOptions(ok).commit, "abcdef1");
+  // Without the expected commit an earlier healthy release could pass.
   assert.throws(
-    () =>
-      parseOptions(["--server", "web", "--applier", "schema", "--url", "https://app.example.com"]),
-    /Use --server/,
+    () => parseOptions(["--project", project, "--url", "https://app.example.com"]),
+    /--commit are required/,
+  );
+  assert.throws(() => parseOptions([...ok.slice(0, 5), "main"]), /commit SHA/);
+  // The Swarm-era --server option is gone.
+  assert.throws(
+    () => parseOptions(["--server", "web", "--url", "https://app.example.com"]),
+    /Use --project/,
   );
   assert.throws(
-    () => parseOptions(["--server", "web", "--url", "https://user:password@example.com"]),
+    () =>
+      parseOptions([
+        "--project",
+        "Bad Name",
+        "--url",
+        "https://app.example.com",
+        "--commit",
+        "abcdef1",
+      ]),
+    /Invalid Compose project/,
+  );
+  assert.throws(
+    () =>
+      parseOptions([
+        "--project",
+        project,
+        "--url",
+        "https://user:password@example.com",
+        "--commit",
+        "abcdef1",
+      ]),
     /credentials/,
   );
 });
 
-test("a healthy task from the previous generation cannot pass a new deployment", () => {
-  assert.equal(evaluateService("server", service, [{ ...task, generation: 1 }]), null);
-  assert.equal(evaluateService("server", service, [{ ...task, status: "complete" }]), null);
+test("exactly one labelled, healthy app container is ready; a starting one is not yet", () => {
+  assert.equal(evaluateApp(project, [app]), true);
+  assert.equal(evaluateApp(project, [{ ...app, health: "starting" }]), false);
+  assert.equal(evaluateApp(project, [{ ...app, status: "restarting", running: true }]), false);
+  assert.equal(evaluateApp(project, [{ ...app, status: "created", running: false }]), false);
 });
 
-test("failed or rolled-back deployment and incomplete replica set cannot report success", () => {
+test("a missing, duplicated, mislabelled, unhealthy, stopped or unchecked app cannot report success", () => {
+  assert.throws(() => evaluateApp(project, []), /no app container/);
   assert.throws(
-    () => evaluateService("server", service, [{ ...task, status: "failed" }]),
-    /failed/,
+    () => evaluateApp(project, [app, { ...app, id: "container-2" }]),
+    /exactly one app container/,
   );
+  assert.throws(() => evaluateApp(project, [{ ...app, project: "other" }]), /label mismatch/);
+  assert.throws(() => evaluateApp(project, [{ ...app, service: "backup" }]), /label mismatch/);
+  assert.throws(() => evaluateApp(project, [{ ...app, health: "unhealthy" }]), /unhealthy/);
   assert.throws(
-    () =>
-      evaluateService("server", { ...service, update: { State: "rollback_completed" } }, [task]),
-    /rolled back/,
+    () => evaluateApp(project, [{ ...app, status: "exited", running: false, health: "starting" }]),
+    /has exited/,
   );
-  assert.throws(
-    () => evaluateService("server", { ...service, mode: { Replicated: { Replicas: 2 } } }, [task]),
-    /exactly one app replica/,
-  );
+  assert.throws(() => evaluateApp(project, [{ ...app, health: null }]), /no healthcheck/);
 });
 
-function fakeDocker({ health = "healthy", mutate = false } = {}) {
-  let reads = 0;
+/** Inert Docker: answers the project-scoped `ps` and the container inspect. */
+function fakeDocker({
+  health = "healthy",
+  replaced = false,
+  restarted = false,
+  seen = [],
+  buildCommit = "0123456789abcdef0123456789abcdef01234567",
+} = {}) {
+  let inspects = 0;
   return async (args) => {
+    seen.push(args);
     assert.ok(!args.join(" ").includes(".Env"));
-    if (args[0] === "service" && args[1] === "inspect")
-      return JSON.stringify({ ...service, generation: mutate && reads++ > 0 ? 3 : 2 });
-    if (args[0] === "service") return "task";
-    if (args[2] === "task") return JSON.stringify(task);
-    return JSON.stringify({ running: true, health });
+    if (args[0] === "exec") {
+      // Only the baked build commit is read from inside the container.
+      assert.deepEqual(args, ["exec", "container-1", "cat", "/app/apps/server/dist/BUILD_COMMIT"]);
+      return `${buildCommit}\n`;
+    }
+    if (args[0] === "ps") {
+      assert.ok(args.includes(`label=com.docker.compose.project=${project}`));
+      assert.ok(args.includes("label=com.docker.compose.service=app"));
+      // A retained `docker compose run app …` container is not a second replica.
+      assert.ok(args.includes("label=com.docker.compose.oneoff=False"));
+      return "container-1";
+    }
+    assert.deepEqual(args.slice(0, 4), ["inspect", "--type", "container", "container-1"]);
+    const later = inspects++ > 0;
+    return JSON.stringify({
+      ...app,
+      health,
+      id: replaced && later ? "container-2" : app.id,
+      restarts: restarted && later ? 1 : 0,
+    });
   };
 }
 
-test("verification requires healthy selected runtime and JSON public readiness", async () => {
+const commit = "0123456789abcdef0123456789abcdef01234567";
+const options = { project, url: "https://example.com", commit, timeout: 1 };
+
+test("verification requires the healthy app container and JSON public readiness", async () => {
   let queried = false;
+  const seen = [];
+  await verifyDeployment(options, {
+    inspect: fakeDocker({ seen }),
+    log: () => {},
+    fetchReady: async (url) => {
+      queried = true;
+      assert.equal(url, "https://example.com/ready");
+      return { status: 200, json: async () => ({ ok: true, commit }) };
+    },
+    fetchPage: async () => ({
+      headers: new Headers({ "content-encoding": "br" }),
+      arrayBuffer: async () => new ArrayBuffer(4096),
+    }),
+  });
+  assert.equal(queried, true);
+  // Plain containers only: no Swarm service or task inspection.
+  assert.ok(!seen.some((args) => args[0] === "service" || args.includes("task")));
+  await assert.rejects(
+    verifyDeployment(options, { inspect: fakeDocker({ health: null }), log: () => {} }),
+    /no healthcheck/,
+  );
+  await assert.rejects(
+    verifyDeployment(options, { inspect: fakeDocker({ replaced: true }), log: () => {} }),
+    /changed/,
+  );
+  await assert.rejects(
+    verifyDeployment(options, { inspect: fakeDocker({ restarted: true }), log: () => {} }),
+    /restarted during verification/,
+  );
+});
+
+test("an earlier healthy release does not pass: /ready must report the expected commit", async () => {
+  for (const reported of ["fedcba9876543210fedcba9876543210fedcba98", null, undefined]) {
+    const controller = new AbortController();
+    let polls = 0;
+    await assert.rejects(
+      verifyDeployment(options, {
+        inspect: fakeDocker(),
+        log: () => {},
+        signal: controller.signal,
+        fetchReady: async () => {
+          polls++;
+          return { status: 200, json: async () => ({ ok: true, commit: reported }) };
+        },
+        sleep: async () => {
+          controller.abort();
+        },
+      }),
+      /timed out or was cancelled/,
+      String(reported),
+    );
+    assert.equal(polls, 1);
+  }
+  // A short expected SHA matches the full one /ready reports.
   await verifyDeployment(
-    { server: "web", url: "https://example.com", timeout: 1 },
+    { ...options, commit: commit.slice(0, 7) },
     {
       inspect: fakeDocker(),
       log: () => {},
-      fetchReady: async (url) => {
-        queried = true;
-        assert.equal(url, "https://example.com/ready");
-        return { status: 200, json: async () => ({ ok: true }) };
-      },
+      fetchReady: async () => ({ status: 200, json: async () => ({ ok: true, commit }) }),
       fetchPage: async () => ({
         headers: new Headers({ "content-encoding": "br" }),
         arrayBuffer: async () => new ArrayBuffer(4096),
       }),
     },
   );
-  assert.equal(queried, true);
+});
+
+test("the selected container must itself run the expected commit, whatever the URL answers", async () => {
+  const ready = async () => ({ status: 200, json: async () => ({ ok: true, commit }) });
   await assert.rejects(
-    verifyDeployment(
-      { server: "web", url: "https://example.com", timeout: 1 },
-      { inspect: fakeDocker({ health: null }), log: () => {} },
-    ),
-    /no healthcheck/,
+    verifyDeployment(options, {
+      inspect: fakeDocker({ buildCommit: "fedcba9876543210fedcba9876543210fedcba98" }),
+      log: () => {},
+      fetchReady: ready,
+    }),
+    /container runs commit fedcba987654, not 0123456789ab/,
   );
   await assert.rejects(
-    verifyDeployment(
-      { server: "web", url: "https://example.com", timeout: 1 },
-      { inspect: fakeDocker({ mutate: true }), log: () => {} },
-    ),
-    /changed/,
+    verifyDeployment(options, {
+      inspect: fakeDocker({ buildCommit: "" }),
+      log: () => {},
+      fetchReady: ready,
+    }),
+    /does not know its commit/,
   );
 });
 
 test("an HTTP 200 HTML fallback does not pass public readiness; cancellation fails", async () => {
   const controller = new AbortController();
   await assert.rejects(
-    verifyDeployment(
-      { server: "web", url: "https://example.com", timeout: 1 },
-      {
-        inspect: fakeDocker(),
-        log: () => {},
-        signal: controller.signal,
-        fetchReady: async () => ({
-          status: 200,
-          json: async () => {
-            throw new Error("HTML");
-          },
-        }),
-        sleep: async () => {
-          controller.abort();
+    verifyDeployment(options, {
+      inspect: fakeDocker(),
+      log: () => {},
+      signal: controller.signal,
+      fetchReady: async () => ({
+        status: 200,
+        json: async () => {
+          throw new Error("HTML");
         },
+      }),
+      sleep: async () => {
+        controller.abort();
       },
-    ),
+    }),
     /cancelled/,
   );
 });
@@ -148,15 +251,12 @@ test("compression is classified per content-encoding token, including identity a
 test("compression advisory passes silently when compressed and warns without failing when not", async () => {
   const run = async (fetchPage) => {
     const messages = [];
-    await verifyDeployment(
-      { server: "web", url: "https://example.com", timeout: 1 },
-      {
-        inspect: fakeDocker(),
-        log: (line) => messages.push(line),
-        fetchReady: async () => ({ status: 200, json: async () => ({ ok: true }) }),
-        fetchPage,
-      },
-    );
+    await verifyDeployment(options, {
+      inspect: fakeDocker(),
+      log: (line) => messages.push(line),
+      fetchReady: async () => ({ status: 200, json: async () => ({ ok: true, commit }) }),
+      fetchPage,
+    });
     return messages;
   };
   const page = (encoding, size) => async (url, init) => {

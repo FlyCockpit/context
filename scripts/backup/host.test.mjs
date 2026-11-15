@@ -49,7 +49,9 @@ if (args[0] === 'ps') {
   const template = args[2];
   const id = args.at(-1);
   if (!ids[id]) process.exit(1);
-  if (template.includes('Config.Labels')) out(template.includes('compose.service') ? ids[id] : project);
+  if (template.includes('working_dir')) out(fixture.workingDir ?? '<no value>');
+  else if (template.includes('config_files')) out(fixture.configFiles ?? '<no value>');
+  else if (template.includes('Config.Labels')) out(template.includes('compose.service') ? ids[id] : project);
   else if (template.includes('.State.Running')) out('true');
   else if (template.includes('.Image')) out('image-id');
   else if (template.includes('.Mounts')) out(fixture.volumes?.[id] ?? fixture.volume ?? 'backups-volume');
@@ -67,6 +69,12 @@ if (args[0] === 'ps') {
   else if (template.includes('.Aliases')) out(fixture.aliases.join('\\n'));
   else if (template.includes('.NetworkSettings.Networks')) out((id === 'app-id' ? fixture.appNetworks : fixture.pgNetworks).join('\\n'));
   else process.exit(2);
+} else if (args[0] === 'image' && args[1] === 'inspect') {
+  // The app container's image ID is gone after a no-change redeploy (fixture.imageGone).
+  if (fixture.imageGone || args.at(-1) !== 'image-id') {
+    console.error('Error response from daemon: No such image: ' + args.at(-1));
+    process.exit(1);
+  }
 } else if (args[0] === 'run') {
   const names = process.env.FIXTURE_NAMES.split('\\n').sort();
   fs.writeFileSync(process.env.RESULT, JSON.stringify({args, names}));
@@ -316,9 +324,13 @@ test("host falls back to the backup scheduler's /backups volume when the app has
 const restoreBody = `require_terminal() { return 0; }\nask() { return 0; }\nmain restore daily.dump --project ${project}`;
 const writerIds = ["app-id", "backup-id"];
 
-test("host restarts the app and scheduler after a cancelled/refused (3) restore", () => {
+test("host restarts the app and scheduler after a cancelled/refused (3) or rolled-back (4) restore", () => {
   for (const [restoreExit, message] of [
     [3, /Cancelled or refused; nothing was changed[\s\S]*Started the app again/],
+    [
+      4,
+      /Restore failed and was rolled back; the database is unchanged[\s\S]*Started the app again/,
+    ],
   ]) {
     const result = run({ ...base, restoreExit }, { body: restoreBody });
     assert.equal(result.status, restoreExit, result.stderr);
@@ -344,8 +356,9 @@ test("host restarts the app and scheduler after a cancelled/refused (3) restore"
     assert.match(result.stdout + result.stderr, message);
     assert.doesNotMatch(
       result.stdout + result.stderr,
-      /failed or its outcome is uncertain|Restore done/,
+      /outcome is uncertain, or|Restore done|stays stopped until/,
     );
+    if (restoreExit !== 4) assert.doesNotMatch(result.stdout + result.stderr, /was rolled back/);
   }
 });
 
@@ -367,13 +380,13 @@ test("host keeps the app and scheduler stopped after a completed (0) restore and
   // The pre-stop notice says so too.
   assert.match(
     result.stdout,
-    /After a restore that ran \(completed, failed or interrupted\), the app stays stopped/,
+    /After a restore that completed, or[\s\S]*?one whose outcome is uncertain, the app stays stopped/,
   );
-  assert.doesNotMatch(output, /Started the app again|failed or its outcome is uncertain/);
+  assert.doesNotMatch(output, /Started the app again|outcome is uncertain, or/);
 });
 
-test("host keeps the app stopped after a restore that failed, was interrupted or is uncertain", () => {
-  for (const restoreExit of [1, 2, 7, 125, 129, 130, 143]) {
+test("host keeps the app stopped after a restore whose outcome is uncertain (or that committed, then failed)", () => {
+  for (const restoreExit of [1, 2, 5, 7, 125, 129, 130, 143]) {
     const result = run({ ...base, restoreExit }, { body: restoreBody });
     assert.equal(result.status, restoreExit, result.stderr);
     assert.deepEqual(verbs(result), ["stop", "stop", "run"], String(restoreExit));
@@ -381,10 +394,10 @@ test("host keeps the app stopped after a restore that failed, was interrupted or
     assert.match(
       output,
       new RegExp(
-        `Restore failed or its outcome is uncertain \\(exit ${restoreExit}\\): the restore output above says which\\. The app stays stopped`,
+        `Restore failed and its outcome is uncertain, or it committed and a later step failed \\(exit ${restoreExit}\\): the restore output above says which\\. The app stays stopped`,
       ),
     );
-    assert.match(output, /rolled back[\s\S]*uncertain/);
+    assert.match(output, /Inspect the database first \(bash \S+ list; the restore output above\)/);
     assert.match(output, /docker start app-id backup-id/);
     // It may have committed ("confirmed COMMIT, then failed", or a signal to
     // the helper during a restore that completed): the /data and keyring
@@ -393,7 +406,7 @@ test("host keeps the app stopped after a restore that failed, was interrupted or
       output,
       /\/data snapshot clones[\s\S]*COCKPIT_CONTEXT_ENCRYPTION_KEYS keyring[\s\S]*docker start app-id backup-id/,
     );
-    assert.doesNotMatch(output, /Started the app again|Restore done/);
+    assert.doesNotMatch(output, /Started the app again|Restore done|was rolled back/);
     if (restoreExit === 125) assert.match(output, /docker run failed \(exit 125\)/);
   }
 });
@@ -609,4 +622,66 @@ test("host prints usage with no arguments, from a file and piped into bash -s, e
   assert.equal(piped.status, 2, piped.stderr);
   assert.match(piped.stderr, /^Usage: bash <this script> list \| backup \| restore/);
   assert.doesNotMatch(piped.stderr, /sed:|No such file/);
+});
+
+test("host stops with the recreate command when the app's image ID is gone, and never runs the tag", () => {
+  const vps = "/srv/cc/compose.yaml,/srv/cc/compose.vps.yaml,/srv/my cc/compose.backup.yaml";
+  for (const [command, workingDir, dir, configFiles, files] of [
+    [
+      "list",
+      "/etc/dokploy/compose/cockpit-context-prod/code",
+      "/etc/dokploy/compose/cockpit-context-prod/code",
+      "/etc/dokploy/compose/cockpit-context-prod/code/docker-compose.yml",
+      " -f /etc/dokploy/compose/cockpit-context-prod/code/docker-compose.yml",
+    ],
+    // printf %q quotes a real directory and file; overlays are kept in order.
+    [
+      "backup",
+      "/srv/my app",
+      "/srv/my\\ app",
+      vps,
+      " -f /srv/cc/compose.yaml -f /srv/cc/compose.vps.yaml -f /srv/my\\ cc/compose.backup.yaml",
+    ],
+    // Unknown labels: the placeholders are printed verbatim.
+    [
+      "drill",
+      undefined,
+      "<the compose's directory>",
+      undefined,
+      " -f <each compose file the deploy uses>",
+    ],
+    [
+      "restore daily.dump",
+      undefined,
+      "<the compose's directory>",
+      undefined,
+      " -f <each compose file the deploy uses>",
+    ],
+  ]) {
+    const result = run(
+      {
+        ...base,
+        imageGone: true,
+        ...(workingDir ? { workingDir } : {}),
+        ...(configFiles ? { configFiles } : {}),
+      },
+      {
+        body: `require_terminal() { return 0; }\nask() { return 0; }\nmain ${command} --project ${project}`,
+      },
+    );
+    assert.equal(result.status, 1, `${command}: ${result.stderr}`);
+    assert.match(
+      result.stderr,
+      /the app container's image \(image-id\) is no longer on this machine/,
+    );
+    assert.ok(
+      result.stderr.includes(
+        `cd ${dir} && docker compose -p ${project}${files} up -d --no-build --force-recreate app`,
+      ),
+      `${command}: ${result.stderr}`,
+    );
+    assert.match(result.stderr, /--profile backup/);
+    // Nothing was run, stopped or started: no fallback to the image's tag.
+    assert.deepEqual(verbs(result), [], command);
+  }
 });

@@ -4,3 +4,10 @@ services:
   app:
     volumes:
       - cockpit-context-backups:/backups
+  # The app and the scheduler now share one fresh named volume. Docker fills
+  # an empty volume from the image on first mount; two containers created at
+  # once race on that copy-up, so the scheduler is created after the app.
+  backup:
+    depends_on:
+      app:
+        condition: service_started

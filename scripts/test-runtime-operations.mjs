@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { containerPrefix } from "./backup/e2e-names.mjs";
 
 // Exact tag, the Alpine variant of compose.yaml's postgres:18.6, so the
 // disposable fixture never floats to a newer minor (docs/hosting.md).
@@ -141,6 +142,9 @@ async function main() {
   if (process.argv[2] !== "--disposable-services") {
     throw new Error("Use node scripts/test-runtime-operations.mjs --disposable-services.");
   }
+  // Container names only: `--container-prefix`, else TEST_CONTAINER_PREFIX
+  // (shared with backup:test and db:test-migrations), else the default.
+  const namePrefix = containerPrefix(process.argv.slice(3), process.env, "cockpit-context-runtime");
   const environment = { PATH: process.env.PATH };
   const docker = (...args) =>
     execFileSync("docker", args, {
@@ -161,7 +165,7 @@ async function main() {
       "--detach",
       "--rm",
       "--name",
-      `cockpit-context-runtime-pg-${randomUUID()}`,
+      `${namePrefix}-pg-${randomUUID()}`,
       "--memory",
       "256m",
       "--tmpfs",

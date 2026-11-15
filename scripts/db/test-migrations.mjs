@@ -3,9 +3,11 @@
  * `pnpm db:test-migrations` — end-to-end test of the migration tooling
  * against a DISPOSABLE Postgres (a throwaway `postgres:18` docker container,
  * or `--server-url <superuser url>` for one you already run, e.g. CI).
- * `--container-prefix <name>` (or TEST_MIGRATIONS_CONTAINER_PREFIX) names the
- * throwaway container `<name>-<hex>` (default `cockpit-context-test-migrations`),
- * so a shared machine's containers stay in their own namespace. Every database
+ * `--container-prefix <name>` names the throwaway container `<name>-<hex>`
+ * (default `cockpit-context-test-migrations`); without the flag,
+ * TEST_CONTAINER_PREFIX does (shared with `backup:test` and
+ * `runtime:test-operations`), so a shared machine's containers stay in their
+ * own namespace. Every database
  * and role it creates carries a per-run random suffix, so a `--server-url`
  * server's real databases (`cockpit_context`, a dev checkout's) are never
  * touched; the run removes exactly what it created.
@@ -56,6 +58,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { containerPrefix } from "../backup/e2e-names.mjs";
 import { withDatabase } from "./lib/local-db-name.mjs";
 import { readMigrationsFolder } from "./lib/migration-state.mjs";
 import { loadPg, ROOT } from "./lib/prisma.mjs";
@@ -93,17 +96,13 @@ function freePort() {
   });
 }
 
-/** The throwaway container's name prefix: `--container-prefix`, then the env var. */
-function containerPrefix() {
-  const index = process.argv.indexOf("--container-prefix");
-  const prefix =
-    index >= 0
-      ? process.argv[index + 1]
-      : process.env.TEST_MIGRATIONS_CONTAINER_PREFIX || "cockpit-context-test-migrations";
-  if (!prefix || !/^[a-z0-9][a-z0-9_.-]*$/.test(prefix))
-    throw new Error("--container-prefix needs a Docker name prefix ([a-z0-9][a-z0-9_.-]*)");
-  return prefix;
-}
+/**
+ * The throwaway container's name prefix: `--container-prefix`, then
+ * TEST_CONTAINER_PREFIX (for chained runs), then the default. An empty or
+ * invalid value is an error, never a silent default.
+ */
+const testContainerPrefix = () =>
+  containerPrefix(process.argv.slice(2), process.env, "cockpit-context-test-migrations");
 
 /**
  * @param {(stop: () => void) => void} register receives the container's
@@ -111,7 +110,7 @@ function containerPrefix() {
  * (removing a container that does not exist yet is harmless) removes it.
  */
 async function startPostgres(register) {
-  const name = `${containerPrefix()}-${randomBytes(4).toString("hex")}`;
+  const name = `${testContainerPrefix()}-${randomBytes(4).toString("hex")}`;
   const password = randomBytes(24).toString("hex");
   // -v: a force-removed --rm container keeps its anonymous PGDATA volume.
   let stopped = false;

@@ -139,7 +139,38 @@ discover_app() {
   for id in "$server" "$postgres"; do
     [ "$(label "$id" com.docker.compose.project)" = "$project" ] || die "container project mismatch."
   done
+  # The app container's own image ID, never its tag: the one-off container
+  # must run exactly the code the app runs.
   image="$(docker inspect -f '{{.Image}}' "$server")"
+  # A redeploy that rebuilt an identical image can retag the name to a new ID
+  # and drop the old one (Docker 29's containerd image store) while the
+  # running app still points at it. Falling back to the tag could run other
+  # code than the app's, so stop and say how to line the two up again.
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    local dir files file_args="" file
+    local -a config_files=()
+    dir="$(label "$server" com.docker.compose.project.working_dir 2>/dev/null || true)"
+    case "$dir" in
+      "" | "<no value>") dir="<the compose's directory>" ;;
+      *) dir="$(printf '%q' "$dir")" ;;
+    esac
+    # Every compose file the deploy used (overlays such as compose.vps.yaml or
+    # compose.backup.yaml included): without them the recreated app would lose
+    # its port mapping or /backups mount.
+    files="$(label "$server" com.docker.compose.project.config_files 2>/dev/null || true)"
+    case "$files" in
+      "" | "<no value>") file_args=" -f <each compose file the deploy uses>" ;;
+      *)
+        IFS=, read -r -a config_files <<<"$files"
+        for file in "${config_files[@]}"; do file_args+=" -f $(printf '%q' "$file")"; done
+        ;;
+    esac
+    die "the app container's image (${image:0:19}) is no longer on this machine: a redeploy
+  replaced it without recreating the app. Recreate the app from the current image
+  (it restarts the app), then re-run this command:
+    cd $dir && docker compose -p $(printf '%q' "$project")$file_args up -d --no-build --force-recreate app
+  (add the same --profile flags the deploy uses, e.g. --profile backup)"
+  fi
   volume="$(backups_volume "$server")"
   # Without compose.backup.yaml the app has no /backups, but the optional
   # backup scheduler (compose profile `backup`) keeps its local dumps in its
@@ -274,16 +305,18 @@ main() {
       )
       echo
       say "Restoring stops the app (${#writers[@]} running container(s): $(printf '%s ' "${writers[@]#* }"))"
-      say "and starts it again only if the restore is cancelled or refused before anything changed."
-      say "After a restore that ran (completed, failed or interrupted), the app stays stopped: recover"
-      say "the /data snapshot clones and check the keyring first; the helper then prints the start command."
+      say "and starts it again only if the database is unchanged: the restore was cancelled or refused"
+      say "before anything changed, or it failed and rolled back. After a restore that completed, or"
+      say "one whose outcome is uncertain, the app stays stopped: recover the /data snapshot clones and"
+      say "check the keyring first; the helper then prints the start command."
       say "If Auto Deploy is on in Dokploy, do not merge anything meanwhile. You will see a preview"
       say "and be asked once more before anything changes."
       confirm_stop
       # restore.mjs exit status: 0 restored; 3 (REFUSED_EXIT) refused or
-      # cancelled before anything changed; anything else failed or was
-      # interrupted while restoring: rolled back, or (after COMMIT was sent)
-      # uncertain. Only "nothing changed" starts the writers again. After a
+      # cancelled before anything changed; 4 (ROLLED_BACK_EXIT) started, failed
+      # and provably rolled back, so the database is unchanged; anything else
+      # failed with an uncertain outcome (or committed and then failed). Only
+      # "nothing changed" (3 or 4) starts the writers again. After a
       # completed restore the database no longer matches /data (snapshot clones
       # made since the backup are gone from it, older ones may need recovering)
       # and saved SSH keys decrypt only with the original keyring; after any
@@ -302,7 +335,7 @@ main() {
       restore_exit() {
         local exit_status=$?
         trap '' INT TERM HUP PIPE
-        if [ "$restore_invoked" = 0 ] || [ "$exit_status" -eq 3 ]; then
+        if [ "$restore_invoked" = 0 ] || [ "$exit_status" -eq 3 ] || [ "$exit_status" -eq 4 ]; then
           # `docker stop` first: an interrupted stop (Ctrl-C kills the client,
           # the daemon keeps stopping) would make a bare `docker start` a no-op
           # on a container that then exits. Stopping waits for that; it is a
@@ -313,6 +346,8 @@ main() {
           done
           if [ "$restore_invoked" = 0 ]; then
             note "Restore was not invoked; nothing was changed."
+          elif [ "$exit_status" -eq 4 ]; then
+            note "Restore failed and was rolled back; the database is unchanged (the restore output above says why)."
           else
             note "Cancelled or refused; nothing was changed."
           fi
@@ -338,10 +373,9 @@ main() {
             # but a wait failure can also follow a started one.
             note "docker run failed (exit $exit_status): the restore container may not have started."
           fi
-          note "Restore failed or its outcome is uncertain (exit $exit_status): the restore output above says which. The app stays stopped."
-          note "The restore output above says whether it was rolled back (nothing changed) or, if it"
-          note "failed after COMMIT was sent, that the outcome is uncertain (\"confirmed COMMIT, then"
-          note "failed\" means it is restored). Inspect the database first. If it is restored, or may be,"
+          note "Restore failed and its outcome is uncertain, or it committed and a later step failed (exit $exit_status): the restore output above says which. The app stays stopped."
+          note "\"Is restored\" in the restore output means it committed; otherwise the outcome is"
+          note "uncertain. Inspect the database first (bash $0 list; the restore output above). If it is restored, or may be,"
           note "also recover any separately protected /data snapshot clones and check the original"
           note "COCKPIT_CONTEXT_ENCRYPTION_KEYS keyring (docs/backup-restore.md, Offline restore step 5)."
           if [ ${#writers[@]} -gt 0 ]; then

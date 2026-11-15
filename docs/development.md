@@ -24,6 +24,8 @@ New env vars require schema and manifest edits followed by `pnpm env:sync`. Gene
 
 Run `pnpm verify:fast` before handoff; full `pnpm verify` runs in CI/release, and template/tooling self-tests run through `pnpm verify:tooling`. Use focused Vitest tests for risky changed behavior, mocking database and import-time IO; unit tests never hit a real database. Use disposable Postgres only for explicit migration integration checks. Run `pnpm docs:check-citations`, `node scripts/check-agents-size.ts` and `node scripts/check-agent-rules.ts` for documentation/rule changes.
 
+The Docker test harnesses (`pnpm backup:test`, `pnpm db:test-migrations`, `pnpm runtime:test-operations`) name every container, network and throwaway image they create under one prefix: `--container-prefix <name>` wins, else `TEST_CONTAINER_PREFIX`, else each harness's own default. A chained or shared-machine run sets `TEST_CONTAINER_PREFIX` once; an empty or invalid value is an error. `backup:test` also publishes its server on `BACKUP_TEST_PG_PORT` (default 55432), so a parallel run needs its own port.
+
 After editing AGENTS run `pnpm sync:agent-docs`. UI error diagnostics from React Doctor block CI. Never bypass pre-commit hooks or disable a failing policy gate. Include unresolved failures and missing integration evidence in your PR.
 
 ## Local databases
