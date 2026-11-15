@@ -114,7 +114,8 @@ const children = new Set();
 /**
  * @param {string} command
  * @param {string[]} args
- * @param {{ env: NodeJS.ProcessEnv, capture?: boolean }} options
+ * @param {{ env: NodeJS.ProcessEnv, capture?: boolean, timeoutMs?: number }} options
+ *   timeoutMs: SIGKILL the child after this long and report code 124 (0: never)
  * @returns {Promise<{ code: number, stdout: string, stderr: string }>}
  */
 function run(command, args, { env, capture = true, timeoutMs = 0 }) {
@@ -125,12 +126,16 @@ function run(command, args, { env, capture = true, timeoutMs = 0 }) {
     });
     children.add(child);
     // A client stalled on a dead connection outlives any server-side timeout.
+    // Our ends of its pipes are closed too, so a descendant that inherited
+    // them cannot hold "close" (and the restore) open after the kill.
     let timedOut = false;
     const timer =
       timeoutMs > 0
         ? setTimeout(() => {
             timedOut = true;
             child.kill("SIGKILL");
+            child.stdout?.destroy();
+            child.stderr?.destroy();
           }, timeoutMs)
         : undefined;
     let stdout = "";
