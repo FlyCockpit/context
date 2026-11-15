@@ -42,8 +42,26 @@ describe("auth route session server helpers", () => {
         role: "admin",
         twoFactorEnabled: true,
         createdAt: new Date("2026-01-01").getTime(),
+        banned: false,
       },
     });
+  });
+
+  // Only the ban verdict crosses the boundary (never the reason or expiry);
+  // the admin route guard refuses it, as checkAdminAuthority does.
+  it("projects the ban verdict: active (permanent, future, cache-hit string) or lapsed", () => {
+    const banned = (banExpires: Date | string | null) =>
+      toRouteSession({ ...fullSession, user: { ...fullSession.user, banned: true, banExpires } })
+        ?.user.banned;
+    expect(banned(null)).toBe(true);
+    expect(banned(new Date(Date.now() + 60_000))).toBe(true);
+    expect(banned(new Date(Date.now() + 60_000).toISOString())).toBe(true);
+    expect(banned(new Date(Date.now() - 1000))).toBe(false);
+    const projected = toRouteSession({
+      ...fullSession,
+      user: { ...fullSession.user, banned: true, banExpires: null },
+    })?.user;
+    expect(Object.keys(projected ?? {})).not.toContain("banExpires");
   });
 
   // `createdAt` crosses the createServerFn boundary, so it travels as epoch
@@ -80,6 +98,7 @@ describe("auth route session server helpers", () => {
           role: "admin",
           twoFactorEnabled: true,
           createdAt: new Date("2026-01-01").getTime(),
+          banned: false,
         },
       },
     });

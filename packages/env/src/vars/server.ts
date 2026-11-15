@@ -156,20 +156,10 @@ export const serverVars = {
   // an unauthenticated lockout lever against that user's password reset.
   RATE_LIMIT_EMAIL_POINTS: z.coerce.number().int().min(0).default(3),
   RATE_LIMIT_EMAIL_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
-  // Number of reverse-proxy hops in front of the app, for deriving the real
-  // client IP used as the anonymous rate-limit key.
-  //
-  // Leave UNSET (the default) for zero-config behaviour that is correct for
-  // every deploy target in our docs (Render, Railway, Dokploy/nginx, Azure
-  // Container Apps): the app trusts the client IP that a proxy on a
-  // private/loopback network forwarded, and otherwise (bare deployment, local
-  // dev) keys on the real socket peer. See apps/server/src/client-ip.ts.
-  //
-  // Set this only when a proxy in front of the app has a PUBLIC IP (e.g.
-  // Cloudflare, a public load balancer) or your topology is fixed: it is the
-  // exact number of proxies between the client and the app. 0 disables
-  // X-Forwarded-For entirely and always keys on the socket peer.
-  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
+  // Exact number of trusted proxies. Default 0 ignores forwarded headers and
+  // uses the socket peer; set 1 behind Traefik/Dokploy. Restrict origin access
+  // to that chain. Missing/invalid selected hops fall back to the socket peer.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
   ADMIN_EMAILS: z.string().optional(),
   // TTL (seconds) for the in-memory SSR HTML cache of public pages
   // (apps/server/src/ssr-cache.ts). 0 disables the cache entirely; the

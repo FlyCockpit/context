@@ -18,6 +18,7 @@ const db = prisma as unknown as {
   user: { update: MockInstance; delete: MockInstance };
 };
 const { prepareUserDeletion, stopUserRuns } = await import("./user-deletion");
+const { onUserBanned } = await import("@cockpit-context/auth/ban");
 beforeEach(() => {
   vi.clearAllMocks();
   db.repository.findMany.mockResolvedValue([]);
@@ -48,4 +49,37 @@ it("stops runs through the engine's owner-scoped stop-all and drops the owner's 
   await stopUserRuns("u");
   expect(stopAll).toHaveBeenCalledExactlyOnceWith("u");
   expect(forgetAnswers).toHaveBeenCalledExactlyOnceWith("u");
+});
+
+it("bans, deletes sessions and announces the ban (closing live streams) before stopping runs", async () => {
+  const announced = vi.fn();
+  const stop = onUserBanned(announced);
+  try {
+    await prepareUserDeletion("u");
+  } finally {
+    stop();
+  }
+  expect(announced).toHaveBeenCalledWith("u", "application");
+  expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "u" } });
+  expect(db.user.update.mock.invocationCallOrder[0]).toBeLessThan(
+    announced.mock.invocationCallOrder[0]!,
+  );
+  expect(announced.mock.invocationCallOrder[0]).toBeLessThan(stopAll.mock.invocationCallOrder[0]!);
+});
+
+it("commits the ban and the session deletion together; a failed commit announces nothing", async () => {
+  const announced = vi.fn();
+  const stop = onUserBanned(announced);
+  const transaction = prisma.$transaction as unknown as MockInstance;
+  try {
+    transaction.mockRejectedValueOnce(new Error("deadlock"));
+    await expect(prepareUserDeletion("u")).rejects.toThrow("deadlock");
+    expect(announced).not.toHaveBeenCalled();
+    expect(stopAll).not.toHaveBeenCalled();
+    // The ban and the deletion are one batch, not two independent writes.
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(transaction.mock.calls[0]?.[0]).toHaveLength(2);
+  } finally {
+    stop();
+  }
 });

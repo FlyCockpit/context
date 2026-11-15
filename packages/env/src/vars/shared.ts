@@ -38,9 +38,14 @@ export const sharedVars = {
   // standalone scripts each open their own.
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-  // ---- Logical database backups. Dedicated writer and ListBucket-only
-  // monitor credentials keep dump access separate from freshness monitoring.
-  BACKUP_ENABLED: strictBooleanFlag(true),
+  // ---- Backups. BACKUP_ENABLED (strict true|false, default false) is the
+  // backup switch: the migration runner (scripts/db/migrate-runtime.mjs) takes
+  // its pre-migration / pre-drop dumps only when it is true (and then refuses
+  // to migrate without a destination), and the app monitors freshness only
+  // when it is true. Dedicated writer and ListBucket-only monitor credentials
+  // keep dump access separate from freshness monitoring; the image entrypoint
+  // unsets the writer keys before the server starts.
+  BACKUP_ENABLED: strictBooleanFlag(),
   BACKUP_S3_BUCKET: z.string().optional(),
   BACKUP_S3_ACCESS_KEY_ID: z.string().optional(),
   BACKUP_S3_SECRET_ACCESS_KEY: z.string().optional(),

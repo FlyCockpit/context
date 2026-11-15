@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, before, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   backupS3Config,
@@ -72,6 +74,31 @@ describe("backupS3Config", () => {
     );
     assert.throws(() => backupS3Config({ ...baseEnv, BACKUP_S3_REGION: "" }), /real AWS region/);
     assert.throws(() => backupS3Config({ ...baseEnv, BACKUP_S3_PREFIX: "/" }), /must not be empty/);
+  });
+  it("check-config CLI validates the settings only and never prints credentials", () => {
+    const cli = (env) =>
+      spawnSync(
+        process.execPath,
+        [fileURLToPath(new URL("./s3.mjs", import.meta.url)), "check-config"],
+        {
+          encoding: "utf8",
+          timeout: 10_000,
+          env: { PATH: process.env.PATH, ...env },
+        },
+      );
+    const ok = cli(baseEnv);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(ok.stdout + ok.stderr, "");
+    const missing = cli({
+      BACKUP_S3_BUCKET: "backups",
+      BACKUP_S3_SECRET_ACCESS_KEY: "backup-secret",
+    });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /^FATAL: \[backup\] .*ACCESS_KEY/);
+    assert.doesNotMatch(missing.stdout + missing.stderr, /backup-secret/);
+    const region = cli({ ...baseEnv, BACKUP_S3_REGION: "" });
+    assert.equal(region.status, 1);
+    assert.match(region.stderr, /real AWS region/);
   });
 });
 

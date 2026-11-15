@@ -26,7 +26,7 @@ const envMock: Record<string, number | undefined> = {
   RATE_LIMIT_RPC_WINDOW_SECONDS: 60,
   RATE_LIMIT_EMAIL_POINTS: 3,
   RATE_LIMIT_EMAIL_WINDOW_SECONDS: 3600,
-  TRUST_PROXY_HOPS: undefined,
+  TRUST_PROXY_HOPS: 0,
   // The MCP surfaces read their own COCKPIT_CONTEXT_MCP_*_PER_* counts at module load.
   ...cockpitContextRateBudgetEnvDefaults(),
 };
@@ -58,6 +58,7 @@ describe("createRateLimiterMiddleware", () => {
   let app: Hono;
 
   beforeEach(() => {
+    envMock.TRUST_PROXY_HOPS = 0;
     mockGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.1" } });
 
     // Fresh limiter + app per test so counters reset.
@@ -131,6 +132,7 @@ describe("createRateLimiterMiddleware", () => {
   });
 
   it("behind a private-network proxy, keys on the proxy-appended client IP — not the spoofable leftmost X-Forwarded-For", async () => {
+    envMock.TRUST_PROXY_HOPS = 1;
     // Socket peer is the proxy (private). A trusted proxy appends the real
     // client IP as the rightmost entry; the client controls only the left.
     mockGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.5" } });

@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { MAX_RATE_BUDGET_COUNT } from "../rate-budgets.js";
 import { serverVars } from "./server.js";
 
+describe("trusted proxy topology", () => {
+  it("defaults to direct socket peers and accepts explicit nonnegative hops", () => {
+    expect(serverVars.TRUST_PROXY_HOPS.parse(undefined)).toBe(0);
+    expect(serverVars.TRUST_PROXY_HOPS.parse("1")).toBe(1);
+    expect(serverVars.TRUST_PROXY_HOPS.parse("2")).toBe(2);
+    for (const value of ["-1", "1.5", "proxy"]) {
+      expect(serverVars.TRUST_PROXY_HOPS.safeParse(value).success).toBe(false);
+    }
+  });
+});
+
 describe.each([
   ["COCKPIT_CONTEXT_MAX_PENDING_PROPOSALS_PER_USER", 100],
   ["COCKPIT_CONTEXT_MAX_MCP_RESULT_WAITS_PER_USER", 10],

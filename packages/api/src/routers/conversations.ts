@@ -1,12 +1,12 @@
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { env } from "@cockpit-context/env/server";
 import { getRunEngine, partsFromJson, type RunEvent } from "@cockpit-context/runs";
-import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 
 import { protectedProcedure } from "../index";
 import { ACTIVE_RUN_STATUSES, ongoingWhere } from "../lib/conversation-activity";
 import { reasonError, withDomainErrors } from "../lib/domain-errors";
+import { openLiveStream } from "../lib/live-streams";
 import { findOwnedOrThrow } from "../lib/ownership";
 import { lower } from "../lib/packages";
 import {
@@ -56,41 +56,6 @@ const consumeSteerBudget = createProcedureBudget({
   unavailableMessage: "Steering is temporarily unavailable. Try again in a moment.",
   unavailableLog: "[conversations] steer budget unavailable, failing closed:",
 });
-
-/**
- * Live streams (`watch` + `activity`, combined) one user may hold open at
- * once: `COCKPIT_CONTEXT_MAX_LIVE_STREAMS_PER_USER`, read on every open. Each is a
- * long-lived HTTP response with a bus subscription behind it, and the `/rpc`
- * limiter counts only the request that opened it. One tab holds one
- * `activity` and at most one `watch`; the default 20 is a person with ten
- * tabs open. In-process, like every limiter here: one app replica
- * (docs/hosting.md).
- */
-const liveStreams = new Map<string, number>();
-
-/**
- * Takes one of the user's live-stream slots, or refuses with
- * `TOO_MANY_REQUESTS` (the web client retries with backoff, so a slot
- * freed by closing a tab is picked up). The returned release is idempotent;
- * call it in a `finally` that covers every exit, client abort included.
- */
-function acquireLiveStream(userId: string): () => void {
-  const open = liveStreams.get(userId) ?? 0;
-  if (open >= env.COCKPIT_CONTEXT_MAX_LIVE_STREAMS_PER_USER) {
-    throw new ORPCError("TOO_MANY_REQUESTS", {
-      message: "Too many live views are open. Close some tabs and try again.",
-    });
-  }
-  liveStreams.set(userId, open + 1);
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    const remaining = (liveStreams.get(userId) ?? 1) - 1;
-    if (remaining > 0) liveStreams.set(userId, remaining);
-    else liveStreams.delete(userId);
-  };
-}
 
 /** A conversation is finished once none of its main runs is queued or running. */
 const finishedWhere = {
@@ -475,7 +440,8 @@ export const conversationsRouter = {
   /**
    * Live view: a `snapshot` (saved runs and turns, plus the engine's
    * in-memory phase, usage and in-flight assistant text), then every bus
-   * event for the conversation until the client disconnects. Ownership is
+   * event for the conversation until the client disconnects or the user is
+   * banned (then `UNAUTHORIZED`, ../lib/live-streams.ts). Ownership is
    * checked before subscribing; the subscription is opened before the
    * snapshot is read so nothing published in between is lost (a turn can
    * then arrive in both; the client dedupes by run id and `seq`).
@@ -488,22 +454,29 @@ export const conversationsRouter = {
     const ownerId = context.session.user.id;
     const conversation = await ownedConversation(context, input.id);
     const engine = getRunEngine();
-    const release = acquireLiveStream(ownerId);
+    const stream = await openLiveStream(ownerId, signal);
     try {
-      const events = engine.bus.iterate(conversation.id, { signal });
+      const events = engine.bus.iterate(conversation.id, { signal: stream.signal });
       try {
-        const detail = await loadConversationDetail(ownerId, conversation.id);
+        const detail = await stream.untilBanned(loadConversationDetail(ownerId, conversation.id));
+        stream.assertOpen();
         yield {
           type: "snapshot" as const,
           conversation: detail,
           live: engine.liveState(ownerId, conversation.id),
         };
-        for await (const event of events) yield toClientEvent(event);
+        // A ban ends the subscription (../lib/live-streams.ts): fail it like
+        // any other request of a banned user, and drop what the bus buffered.
+        for await (const event of events) {
+          stream.assertOpen();
+          yield toClientEvent(event);
+        }
       } finally {
         await events.return?.();
       }
+      stream.assertOpen();
     } finally {
-      release();
+      stream.release();
     }
   }),
 
@@ -518,17 +491,21 @@ export const conversationsRouter = {
   activity: protectedProcedure.handler(async function* ({ context, signal }) {
     const userId = context.session.user.id;
     const engine = getRunEngine();
-    const release = acquireLiveStream(userId);
+    const stream = await openLiveStream(userId, signal);
     try {
-      const events = engine.activity.iterate(userId, { signal });
+      const events = engine.activity.iterate(userId, { signal: stream.signal });
       try {
         yield { type: "ready" as const };
-        for await (const event of events) yield { type: "activity" as const, ...event };
+        for await (const event of events) {
+          stream.assertOpen();
+          yield { type: "activity" as const, ...event };
+        }
       } finally {
         await events.return?.();
       }
+      stream.assertOpen();
     } finally {
-      release();
+      stream.release();
     }
   }),
 

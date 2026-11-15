@@ -1,3 +1,4 @@
+import { announceUserBanned } from "@cockpit-context/auth/ban";
 import prisma from "@cockpit-context/db";
 import { deleteRepository } from "@cockpit-context/repos";
 import { getRunEngine } from "@cockpit-context/runs";
@@ -19,8 +20,14 @@ export async function stopUserRuns(ownerId: string): Promise<void> {
 /** Called before either oRPC or Better-Auth cascades the user's rows. */
 export async function prepareUserDeletion(userId: string): Promise<void> {
   // Block new authenticated work before stopping existing work and removing files.
-  await prisma.user.update({ where: { id: userId }, data: { banned: true, banExpires: null } });
-  await prisma.session.deleteMany({ where: { userId } });
+  // The ban and the session deletion commit together, and the ban is announced
+  // (closing open live streams and MCP exchanges) right after the commit: a
+  // failing deletion can no longer leave a committed ban unannounced.
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { banned: true, banExpires: null } }),
+    prisma.session.deleteMany({ where: { userId } }),
+  ]);
+  announceUserBanned(userId);
   await stopUserRuns(userId);
   await forEachPage(
     ({ take, afterId }) =>

@@ -284,7 +284,7 @@ try {
 
   step("restore: no --confirm → preview only, nothing changed", () => {
     const result = restore("restored_raw", raw);
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /preview only/);
     assert.match(result.out, /--confirm RESTORE:restored_raw/);
     assert.equal(
@@ -298,7 +298,7 @@ try {
 
   step("restore: wrong --confirm is refused", () => {
     const result = restore("restored_raw", raw, "--confirm", "RESTORE:app");
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /--confirm must be exactly RESTORE:restored_raw/);
     assert.equal(sql("restored_raw", "SELECT to_regclass('public.\"User\"') IS NULL"), "t");
   });
@@ -423,7 +423,7 @@ try {
 
   step("restore: non-empty target without --replace is refused", () => {
     const result = restore("restored_raw", raw, "--confirm", "RESTORE:restored_raw");
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /is not empty/);
     assert.equal(fingerprint("restored_raw"), sourcePrint);
   });
@@ -473,7 +473,7 @@ try {
       "postgres",
       "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'restored_gz' AND pid <> pg_backend_pid()",
     );
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /other connection\(s\)/);
     assert.equal(dumps("pre-restore-").length, 1, "a refused restore must not snapshot");
   });
@@ -498,7 +498,7 @@ try {
       "postgres",
       "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'restored_gz' AND pid <> pg_backend_pid()",
     );
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /Prisma migration is running/);
   });
 
@@ -522,7 +522,7 @@ try {
       "postgres",
       "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'restored_gz' AND pid <> pg_backend_pid()",
     );
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /migration runner .* is working on this database/);
   });
 
@@ -535,8 +535,30 @@ try {
       "--confirm",
       "RESTORE:restored_misc",
     );
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /plain-SQL dump/);
+  });
+
+  step("restore: an archive with large objects is refused before anything changes", () => {
+    sql("postgres", "CREATE DATABASE blob_src");
+    sql("blob_src", "CREATE TABLE t (id int); SELECT lo_from_bytea(0, 'blob'::bytea);");
+    const dump = tool("blob_src", ["sh", "-c", "pg_dump -Fc > /backups/blob.dump"]);
+    assert.equal(dump.code, 0, dump.out);
+    const result = restore(
+      "restored_misc",
+      "/backups/blob.dump",
+      "--confirm",
+      "RESTORE:restored_misc",
+    );
+    assert.equal(result.code, 3, result.out);
+    assert.match(result.out, /contains large objects/);
+    assert.equal(
+      sql(
+        "restored_misc",
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'",
+      ),
+      "0",
+    );
   });
 
   step("restore: a truncated archive is refused before anything changes", () => {
@@ -550,7 +572,7 @@ try {
       "--confirm",
       "RESTORE:restored_misc",
     );
-    assert.equal(result.code, 1, result.out);
+    assert.equal(result.code, 3, result.out);
     assert.match(result.out, /incomplete or corrupt|rejected the archive/);
     assert.equal(
       sql(
@@ -586,7 +608,12 @@ try {
       "RESTORE:restored_misc",
     );
     assert.equal(result.code, 1, result.out);
-    assert.match(result.out, /rolled back/);
+    // psql stops at the failing COPY, but restore cannot tell whether it read
+    // the COMMIT written after the last statement: it says "rolled back" only
+    // when COMMIT was never sent, and otherwise "uncertain". Either way it must
+    // never report a completed restore, and the target must be unchanged.
+    assert.match(result.out, /restore failed|rolled back/);
+    assert.doesNotMatch(result.out, /Restore complete/i);
     assert.equal(fingerprint("restored_misc"), sourcePrint);
     assert.equal(sql("restored_misc", "SELECT to_regclass('public.ok') IS NULL"), "t");
   });
@@ -651,7 +678,8 @@ try {
       "--confirm",
       "RESTORE:restored_misc",
     );
-    assert.equal(result.code, 1, result.out);
+    // 1 when the restore transaction was cut, 3 if the lock session ended first.
+    assert.notEqual(result.code, 0, result.out);
     assert.doesNotMatch(result.out, /Restore complete/);
     spawnSync("sleep", ["3"]);
     assert.equal(sql("postgres", "SELECT string_agg(got::text, ',') FROM lock_probe"), "false");

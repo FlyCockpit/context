@@ -13,12 +13,21 @@
  *   - every table the archive has data for exists in the restored database;
  *   - Prisma's history has applied migrations and none unfinished;
  * and prints each table's row count and the backup's age. Exit 0 = PASS.
+ *
+ * The archive's table list is read for every source kind the restore accepts:
+ * a local raw archive directly, a gzip-wrapped one after unwrapping it, and an
+ * s3:// object after downloading the same pinned object again. A drill that
+ * cannot read the list FAILS: it never reports PASSED without the comparison.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
+import { createReadStream, createWriteStream, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtemp, open } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import { pgEnvFromUrl, pickLatest } from "./lib.mjs";
+import { createGunzip } from "node:zlib";
+import { detectArchiveFormat, parseS3Source, pgEnvFromUrl, pickLatest } from "./lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DRILL_DATABASE = "restore_drill";
@@ -50,18 +59,30 @@ export function archiveCreatedAt(listing) {
 }
 
 /**
- * @param {{ expected: string[], counts: Map<string, number>,
- *   migrations: { applied: number, unfinished: number } | null }} result
+ * @param {{ expected: string[] | null, counts: Map<string, number>,
+ *   migrations: { applied: number, unfinished: number } | null,
+ *   listingError?: string | null }} result
+ *   expected: the archive's tables with data, or null when the list could not be read.
  * @returns {{ pass: boolean, problems: string[] }}
  */
-export function drillVerdict({ expected, counts, migrations }) {
+export function drillVerdict({ expected, counts, migrations, listingError = null }) {
   const problems = [];
+  // The runner's control tables: present in every restore of this app, whatever
+  // the archive's list says.
   const required = [
     "public._cockpit_context_migration",
     "public._cockpit_context_instance",
     "public._cockpit_context_hold",
   ];
-  const missing = [...new Set([...expected, ...required])].filter((table) => !counts.has(table));
+  if (!expected)
+    problems.push(
+      `could not read the archive's table list${listingError ? ` (${listingError})` : ""}, so the restored data was not checked`,
+    );
+  else if (!expected.length)
+    problems.push("the archive holds no table data: this is not a backup of this app's data");
+  const missing = [...new Set([...(expected ?? []), ...required])].filter(
+    (table) => !counts.has(table),
+  );
   if (missing.length) problems.push(`tables missing after the restore: ${missing.join(", ")}`);
   if (!migrations) problems.push("no _prisma_migrations table: this is not a backup of this app");
   else {
@@ -142,6 +163,19 @@ async function main(argv) {
     PGCONNECT_TIMEOUT: "10",
   };
 
+  // Pick `latest` ONCE: restore and the table check below must read the same
+  // archive even if a scheduled or pre-migration dump lands in between.
+  if (source === "latest") {
+    const newest = resolveLocal("latest");
+    if (!newest) {
+      console.log(
+        "DRILL FAILED: there is no backup in /backups to drill (is the volume mounted?).",
+      );
+      return 1;
+    }
+    source = newest;
+    console.log(`Newest backup: ${source}`);
+  }
   console.log(`== Restore drill: ${source} → throwaway database "${DRILL_DATABASE}" ==`);
   const restoreArgs = [
     path.join(HERE, "restore.mjs"),
@@ -173,17 +207,17 @@ async function main(argv) {
     const [schema, table] = row.split(/\.(.*)/s);
     counts.set(row, Number(psql(env, `SELECT count(*) FROM ${ident(schema)}.${ident(table)}`)));
   }
-  // The tables the archive has data for (local raw archives; a gzip-wrapped
-  // or S3 source skips this comparison).
-  let expected = [];
+  // The tables the archive has data for, for every source kind.
+  /** @type {string[] | null} */
+  let expected = null;
   let createdAt = null;
-  const archivePath = source.startsWith("s3://") ? null : resolveLocal(source);
-  if (archivePath) {
-    const listing = spawnSync("pg_restore", ["--list", archivePath], { env, encoding: "utf8" });
-    if (listing.status === 0) {
-      expected = archiveTables(listing.stdout);
-      createdAt = archiveCreatedAt(listing.stdout);
-    }
+  let listingError = null;
+  try {
+    const listing = await archiveListing(source, pins, env);
+    expected = archiveTables(listing);
+    createdAt = archiveCreatedAt(listing);
+  } catch (error) {
+    listingError = error instanceof Error ? error.message : String(error);
   }
   const hasHistory =
     psql(env, "SELECT to_regclass('public._prisma_migrations') IS NOT NULL") === "t";
@@ -209,7 +243,7 @@ async function main(argv) {
         "WARNING: the newest backup is more than a day old. Check that scheduled backups are running.",
       );
   }
-  const verdict = drillVerdict({ expected, counts, migrations });
+  const verdict = drillVerdict({ expected, counts, migrations, listingError });
   if (verdict.pass) {
     console.log(
       "\nDRILL PASSED: the backup restores and holds this app's data. Record the date, the backup and this result in your deployment recovery log.",
@@ -218,6 +252,77 @@ async function main(argv) {
   }
   console.log(`\nDRILL FAILED:\n  - ${verdict.problems.join("\n  - ")}`);
   return 1;
+}
+
+/** `--etag` / `--version-id` values from parseDrillArgs' flat pins. */
+function pinValues(pins) {
+  const map = new Map();
+  for (let i = 0; i + 1 < pins.length; i += 2) map.set(pins[i], pins[i + 1]);
+  return { etag: map.get("--etag") ?? null, versionId: map.get("--version-id") ?? null };
+}
+
+/**
+ * `pg_restore --list` of the archive the restore read: a local file as is, an
+ * s3:// object downloaded again by its pinned ETag (and version), and a gzip
+ * wrapper unwrapped first — the same unwrapping restore.mjs does.
+ * @param {string} source @param {string[]} pins @param {NodeJS.ProcessEnv} env
+ * @param {{ download?: (args: { location: { bucket: string, key: string }, eTag: string,
+ *   versionId: string | null, dest: string }) => Promise<unknown>,
+ *   list?: (file: string) => { status: number | null, stdout: string, stderr: string } }} [deps]
+ * @returns {Promise<string>}
+ */
+export async function archiveListing(source, pins, env, deps = {}) {
+  const workDir = await mkdtemp(path.join(tmpdir(), "restore-drill-"));
+  try {
+    let file;
+    const location = parseS3Source(source);
+    if (location) {
+      const { etag, versionId } = pinValues(pins);
+      if (!etag) throw new Error("an s3:// source needs --etag");
+      file = path.join(workDir, "source.download");
+      const download =
+        deps.download ??
+        (async (args) => {
+          const s3 = await import("./s3.mjs");
+          return s3.downloadObject({ ...args, versionId: args.versionId ?? undefined });
+        });
+      await download({ location, eTag: etag, versionId, dest: file });
+    } else {
+      file = resolveLocal(source);
+      if (!file) throw new Error("no backup file found for latest in /backups");
+    }
+    if (detectArchiveFormat(await readHead(file)) === "gzip") {
+      const unwrapped = path.join(workDir, "source.unwrapped");
+      await pipeline(
+        createReadStream(file),
+        createGunzip(),
+        createWriteStream(unwrapped, { mode: 0o600 }),
+      );
+      file = unwrapped;
+    }
+    const listing = deps.list
+      ? deps.list(file)
+      : spawnSync("pg_restore", ["--list", file], { env, encoding: "utf8" });
+    if (listing.status !== 0)
+      throw new Error(
+        `pg_restore --list failed: ${(listing.stderr || "").trim() || `exit ${listing.status}`}`,
+      );
+    return listing.stdout;
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+/** @param {string} file */
+async function readHead(file) {
+  const handle = await open(file, "r");
+  try {
+    const buffer = Buffer.alloc(512);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** The local file `restore` read for <source> (the same pick for `latest`). */

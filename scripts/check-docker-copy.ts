@@ -456,6 +456,12 @@ function imageErrors(file: string, text: string, dev = false): string[] {
   if (!runner.includes("chmod 0700 /data") || !runner.includes("chown node:node /data"))
     found.push(`${file}: /data must be node-owned, mode 0700.`);
   if (!/^USER node$/m.test(runner)) found.push(`${file}: runtime must use USER node.`);
+  // The entrypoint itself is PID 1 while the runner holds the backup writer
+  // keys, then execs tini with the cleaned environment (docker-entrypoint.sh).
+  if (!/^ENTRYPOINT \["docker-entrypoint\.sh"\]$/m.test(runner))
+    found.push(`${file}: ENTRYPOINT must be ["docker-entrypoint.sh"] (it execs tini itself).`);
+  if (!aptPackages(text, "base").has("tini"))
+    found.push(`${file}: install tini; the entrypoint execs the CMD under it.`);
   const grace = healthcheckStartPeriod(text);
   const required = startupRequirement(
     [
@@ -504,6 +510,8 @@ function composeErrors(file: string, text: string, production = false): string[]
     found.push(`${file}: app listener must be 3000.`);
   if (!app.some((line) => /MIGRATE_ON_START:/.test(line)))
     found.push(`${file}: set the migration startup policy.`);
+  if (app.some((line) => /:\/backups/.test(line)))
+    found.push(`${file}: backup storage must be opt-in through compose.backup.yaml.`);
   if (!app.some((line) => /cockpit-context-data:\/data/.test(line)))
     found.push(`${file}: persist /data.`);
   if (!postgres.some((line) => /cockpit-context-postgres:\/var\/lib\/postgresql$/.test(line)))
@@ -605,6 +613,14 @@ function verify(): string[] {
     '# Loopback HTTP for a host reverse proxy such as Caddy.\nservices:\n  app:\n    ports: ["127.0.0.1:${COCKPIT_CONTEXT_HTTP_PORT:-3000}:3000"]'
   )
     found.push("compose.vps.yaml: overlay may add only the loopback app port.");
+  const backupOverlay = readFileSync(resolve(ROOT, "compose.backup.yaml"), "utf8");
+  if (
+    backupOverlay
+      .split("\n")
+      .filter((line) => line && !line.startsWith("#"))
+      .join("\n") !== "services:\n  app:\n    volumes:\n      - cockpit-context-backups:/backups"
+  )
+    found.push("compose.backup.yaml: overlay may add only the app backup volume.");
   const ignore = readFileSync(resolve(ROOT, ".dockerignore"), "utf8");
   for (const item of [".docker-volumes/", "!LICENSE", "!THIRD-PARTY-LICENSES.md"])
     if (!ignore.split("\n").includes(item)) found.push(`.dockerignore: missing ${item}.`);
@@ -624,6 +640,8 @@ if (process.argv.includes("--self-test")) {
     ["--start-period=510s", "--start-period=300s"],
     ["chmod 0700 /data", "chmod 0777 /data"],
     ["COPY package.json scripts/install-pnpm.mjs /tmp/pnpm-bootstrap/", ""],
+    ['ENTRYPOINT ["docker-entrypoint.sh"]', 'ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]'],
+    ["  tini \\\n", ""],
   ]) {
     if (imageErrors("fixture", text.replace(before!, after!)).length === 0)
       throw new Error(`Mutation escaped: ${before}`);
@@ -636,6 +654,10 @@ if (process.argv.includes("--self-test")) {
     compose.replace("@cockpit-context-postgres:", "@postgres:"),
     compose.replace("      BACKUP_KEEP:", "      BETTER_AUTH_SECRET:"),
     compose.replace("    internal: true", "    internal: false"),
+    compose.replace(
+      "      - cockpit-context-data:/data",
+      "      - cockpit-context-data:/data\n      - cockpit-context-backups:/backups",
+    ),
     compose.replace("      internal:\n        aliases:", "      egress:\n        aliases:"),
     compose.replace("      - ALL", "      - NET_RAW"),
     compose.replace("  app:", "  app:\n    deploy:\n      replicas: 2"),

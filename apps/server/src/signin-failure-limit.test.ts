@@ -30,7 +30,7 @@ vi.mock("@cockpit-context/env/server", () => ({
     RATE_LIMIT_RPC_WINDOW_SECONDS: 60,
     RATE_LIMIT_EMAIL_POINTS: 3,
     RATE_LIMIT_EMAIL_WINDOW_SECONDS: 3600,
-    TRUST_PROXY_HOPS: undefined,
+    TRUST_PROXY_HOPS: 1,
     // The MCP surfaces read their own COCKPIT_CONTEXT_MCP_*_PER_* counts at module load.
     ...cockpitContextRateBudgetEnvDefaults(),
   },
@@ -308,27 +308,36 @@ describe("signinFailureLimit — block expiry", () => {
     // The anti-lever property in the other direction: the block is SHORT, so
     // the worst an attacker achieves is a minutes-long blip for the victim —
     // there is no admin unlock, no permanent lock, and no retry-extension.
-    const real = memoryLimiter(2, { blockDuration: 0.08 }); // 80 ms, in seconds
-    const { app } = buildApp(real, () => 401);
-    const email = "victim@example.com";
+    // Fake clock (rate-limiter-flexible's memory store reads Date.now and
+    // expires keys with setTimeout), so the block cannot lapse mid-test on a
+    // slow machine and the wait below costs no real time.
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const real = memoryLimiter(2, { blockDuration: 60 }); // seconds
+      const { app } = buildApp(real, () => 401);
+      const email = "victim@example.com";
 
-    expect((await signIn(app, email)).status).toBe(401);
-    expect((await signIn(app, email)).status).toBe(401);
-    expect((await signIn(app, email)).status).toBe(429);
+      expect((await signIn(app, email)).status).toBe(401);
+      expect((await signIn(app, email)).status).toBe(401);
+      expect((await signIn(app, email)).status).toBe(429);
 
-    // Retries while blocked do not extend the sentence (rate-limiter-flexible
-    // applies the block TTL on the first overshoot only) — but even if they
-    // did, the wait below is what proves time heals this on its own.
-    expect((await signIn(app, email)).status).toBe(429);
+      // Retries while blocked do not extend the sentence (rate-limiter-flexible
+      // applies the block TTL on the first overshoot only): a retry just before
+      // it ends is still blocked, and the original deadline still frees it.
+      vi.advanceTimersByTime(59_000);
+      expect((await signIn(app, email)).status).toBe(429);
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+      vi.advanceTimersByTime(1_001);
 
-    // Block expired: the key is gone, the account starts a fresh count (it can
-    // fail again and be re-blocked) — bounded per-account forever, locked out
-    // never. points=2, so it takes two fresh failures before the next 429.
-    expect((await signIn(app, email)).status).toBe(401);
-    expect((await signIn(app, email)).status).toBe(401);
-    expect((await signIn(app, email)).status).toBe(429);
+      // Block expired: the key is gone, the account starts a fresh count (it can
+      // fail again and be re-blocked) — bounded per-account forever, locked out
+      // never. points=2, so it takes two fresh failures before the next 429.
+      expect((await signIn(app, email)).status).toBe(401);
+      expect((await signIn(app, email)).status).toBe(401);
+      expect((await signIn(app, email)).status).toBe(429);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

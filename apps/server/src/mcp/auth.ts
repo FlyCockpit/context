@@ -1,4 +1,5 @@
 import { requireMcpAuth } from "@better-auth/mcp";
+import { onUserBanned } from "@cockpit-context/auth/ban";
 import {
   MCP_RESOURCE_SCOPE,
   MCP_RESOURCE_SCOPES,
@@ -105,8 +106,16 @@ function canonicalMcpRequest(raw: Request, publicOrigin: string, signal: AbortSi
   return new Request(url, init);
 }
 
-/** Wrap a response so `onDone` runs once its body is fully sent or cancelled. */
-export function releaseWhenBodyEnds(response: Response, onDone: () => void): Response {
+/**
+ * Wrap a response so `onDone` runs once its body is fully sent or cancelled.
+ * When `endOn` aborts (the user was banned), the body is ended with an error
+ * at once and the inner stream is cancelled, so a long SSE response stops.
+ */
+export function releaseWhenBodyEnds(
+  response: Response,
+  onDone: () => void,
+  endOn?: AbortSignal,
+): Response {
   if (response.body === null) {
     onDone();
     return response;
@@ -116,9 +125,25 @@ export function releaseWhenBodyEnds(response: Response, onDone: () => void): Res
   const finish = () => {
     if (done) return;
     done = true;
+    endOn?.removeEventListener("abort", end);
     onDone();
   };
+  let end = () => {};
   const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      end = () => {
+        if (done) return;
+        try {
+          controller.error(endOn?.reason ?? new Error("MCP exchange ended"));
+        } catch {
+          // Already closed or errored.
+        }
+        void reader.cancel(endOn?.reason).catch(() => undefined);
+        finish();
+      };
+      if (endOn?.aborted) end();
+      else endOn?.addEventListener("abort", end, { once: true });
+    },
     async pull(controller) {
       try {
         const chunk = await reader.read();
@@ -172,8 +197,27 @@ export function createMcpRequestHandler(options: CreateMcpRequestHandlerOptions)
     const onClientAbort = () => owned.abort();
     clientSignal.addEventListener("abort", onClientAbort, { once: true });
     let handedOff = false;
+    // Cancel-on-ban: once the identity is known, a ban of its user aborts the
+    // exchange (tools and transport see `owned.signal`) and ends a streamed
+    // body (`releaseWhenBodyEnds`). Admission re-checks the ban per request;
+    // this covers the request already in flight (packages/auth/src/ban.ts).
+    // The listener is registered BEFORE the credential is resolved (where the
+    // ban is read): a ban announced between that read and the identity being
+    // known is remembered and applied once it is.
+    const banned = new AbortController();
+    let exchangeUserId: string | undefined;
+    const bannedBeforeIdentity = new Set<string>();
+    const endForBan = () => {
+      banned.abort(new Error("MCP user banned"));
+      owned.abort();
+    };
+    const stopWatchingBan = onUserBanned((userId) => {
+      if (exchangeUserId === undefined) bannedBeforeIdentity.add(userId);
+      else if (userId === exchangeUserId) endForBan();
+    });
     const release = () => {
       clientSignal.removeEventListener("abort", onClientAbort);
+      stopWatchingBan();
       admission.release();
     };
 
@@ -188,6 +232,12 @@ export function createMcpRequestHandler(options: CreateMcpRequestHandlerOptions)
           return refusalResponse(result, options.resourceUrl);
         }
         const { identity } = result;
+        exchangeUserId = identity.userId;
+        if (bannedBeforeIdentity.has(identity.userId)) {
+          endForBan();
+          return mcpRequestAbortedResponse();
+        }
+        bannedBeforeIdentity.clear();
         const quota = await options.consumeIdentityQuota(credentialKey(identity.credential));
         if (!quota.ok) return mcpTooManyRequestsResponse(quota.retryAfterSeconds);
         if (signal.aborted) return mcpRequestAbortedResponse();
@@ -241,7 +291,7 @@ export function createMcpRequestHandler(options: CreateMcpRequestHandlerOptions)
       if (signal.aborted && response.body === null) return mcpRequestAbortedResponse();
       handedOff = true;
       // Merge through Hono so headers set earlier in the chain survive.
-      const held = releaseWhenBodyEnds(response, release);
+      const held = releaseWhenBodyEnds(response, release, banned.signal);
       return c.newResponse(held.body, held);
     } catch (error) {
       mcpSanitizedLog(`internal error (${errorClass(error)})`, { requestId });

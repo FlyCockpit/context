@@ -1,16 +1,8 @@
 // Shared private/non-routable IP predicates.
 //
-// Used both by the git layer's SSRF guard (./address-policy.ts, which adds a
-// few git-specific ranges on top) — where a private result means "refuse to
-// connect" — and by the server's client-IP resolver (apps/server/src/client-ip.ts)
-// — where a private result means "this hop is our own infra, a trusted proxy,
-// not the real client."
-//
-// Both callers fail closed: anything we can't positively classify as public is
-// treated as private. The IPv6 path works on the eight numeric groups (so no
-// alternative spelling slips past a string comparison), unwraps IPv4-mapped
-// and IPv4-compatible addresses and reuses the IPv4 predicate so the two never
-// drift.
+// Used by the git SSRF guard and the client-IP configuration warning.
+// Private addresses never grant trust to forwarded headers. The warning uses
+// the narrower isInfraIp predicate; SSRF checks keep their existing policy.
 
 import { isIP } from "node:net";
 
@@ -67,6 +59,19 @@ function isPrivateIpv6(address: string): boolean {
   if ((g0 & 0xffc0) === 0xfe80) return true;
 
   return false;
+}
+
+/** Infrastructure addresses, only for warning about an uncounted proxy. */
+export function isInfraIp(address: string, family: number): boolean {
+  if (family === 4) return isPrivateIpv4(address);
+  if (family !== 6) return false;
+  const groups = expandIpv6(address);
+  if (!groups) return false;
+  const [g0 = 0, g1 = 0, g2 = 0, g3 = 0, g4 = 0, g5 = 0, g6 = 0, g7 = 0] = groups;
+  const first80Zero = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0;
+  if (first80Zero && g5 === 0xffff) return isPrivateIpv4(ipv4FromGroups(g6, g7));
+  if (first80Zero && g5 === 0 && g6 === 0 && (g7 === 0 || g7 === 1)) return true;
+  return (g0 & 0xfe00) === 0xfc00 || (g0 & 0xffc0) === 0xfe80;
 }
 
 /** Dotted IPv4 form of two 16-bit groups. */

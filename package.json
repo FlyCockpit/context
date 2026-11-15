@@ -90,7 +90,7 @@
     "backup:test-unit": "node --test scripts/backup/*.test.mjs",
     "backup:test": "node scripts/backup/test-backup-restore.mjs",
     "deploy:check": "node scripts/deploy-check.mjs",
-    "deploy:test-unit": "node --test scripts/deploy-check.test.mjs scripts/build-commit.test.mjs"
+    "deploy:test-unit": "node --test scripts/deploy-check.test.mjs scripts/build-commit.test.mjs scripts/docker-entrypoint.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "catalog:",

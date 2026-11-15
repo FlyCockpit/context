@@ -63,7 +63,7 @@ For production use [the deployment guide](./docs/deploy.md). It covers PostgreSQ
 
 Required production inputs include `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, the exact HTTPS `BETTER_AUTH_URL`, `ADMIN_EMAILS` and `COCKPIT_CONTEXT_ENCRYPTION_KEYS`. Real investigations also require `OPENROUTER_API_KEY` and `COCKPIT_CONTEXT_MODEL`. Optional SMTP enables verification and email resets/invites; optional OIDC SSO requires provider configuration.
 
-Keep signup closed by default and invite developers. Configure storage/concurrency budgets, retention, proxy hops and backups for your deployment. Source excerpts and questions may be sent to your model provider. See [all operator settings](./docs/deploy.md#configuration) and [backup/key custody](./docs/backup-restore.md).
+Keep signup closed by default and invite developers. Configure storage/concurrency budgets, retention and proxy hops for your deployment. Backups default off; storage, migration dumps and the daily scheduler are opt-in. Source excerpts and questions may be sent to your model provider. See [all operator settings](./docs/deploy.md#configuration) and [backup/key custody](./docs/backup-restore.md).
 
 ## Usage
 

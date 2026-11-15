@@ -6,6 +6,7 @@ import { describe, test } from "node:test";
 import {
   classify,
   MIGRATION_RUNNER_LOCK_KEY,
+  migrationInFlight,
   PRISMA_ADVISORY_LOCK,
   pgConnectionString,
   prismaSchemaName,
@@ -207,4 +208,13 @@ test("out-of-order applied history is a checksum-matched subset, never a require
     classify(base, local, [row("3_shipped_first", { checksum: "edited" })], false).checksumMismatch,
     ["3_shipped_first"],
   );
+});
+
+test("migrationInFlight names Prisma's lock, then the runner lock, else null", () => {
+  assert.equal(migrationInFlight({ inProgress: false, runnerActive: false }), null);
+  assert.match(
+    migrationInFlight({ inProgress: true, runnerActive: true }) ?? "",
+    /Prisma's migration lock/,
+  );
+  assert.match(migrationInFlight({ inProgress: false, runnerActive: true }) ?? "", /runner lock/);
 });

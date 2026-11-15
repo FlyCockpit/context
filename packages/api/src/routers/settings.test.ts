@@ -312,7 +312,7 @@ describe("settingsRouter", () => {
       }
     });
 
-    it("reports backups configured only with a bucket, the writer pair and a distinct monitor pair", async () => {
+    it("reports backups configured only with a bucket and a usable monitor pair, never needing the writer pair", async () => {
       const client = createRouterClient(settingsRouter, { context: admin() });
       const configured = async () => (await client.runtimeConfig()).backupsConfigured;
 
@@ -321,8 +321,6 @@ describe("settingsRouter", () => {
 
       for (const missing of [
         "BACKUP_S3_BUCKET",
-        "BACKUP_S3_ACCESS_KEY_ID",
-        "BACKUP_S3_SECRET_ACCESS_KEY",
         "BACKUP_MONITOR_S3_ACCESS_KEY_ID",
         "BACKUP_MONITOR_S3_SECRET_ACCESS_KEY",
       ]) {
@@ -330,6 +328,13 @@ describe("settingsRouter", () => {
         delete mockEnv[missing];
         await expect(configured(), missing).resolves.toBe(false);
       }
+
+      // The running server never sees the dump-writer pair: the entrypoint
+      // unsets it before the server starts.
+      Object.assign(mockEnv, COMPLETE_BACKUP_ENV);
+      delete mockEnv.BACKUP_S3_ACCESS_KEY_ID;
+      delete mockEnv.BACKUP_S3_SECRET_ACCESS_KEY;
+      await expect(configured()).resolves.toBe(true);
 
       Object.assign(mockEnv, COMPLETE_BACKUP_ENV, { BACKUP_ENABLED: false });
       await expect(configured()).resolves.toBe(false);

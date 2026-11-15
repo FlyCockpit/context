@@ -580,6 +580,33 @@ describe("usersRouter", () => {
       expect(db.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "other-user-id" } });
     });
 
+    it("announces the ban after the transaction, which closes the user's live streams", async () => {
+      const { onUserBanned } = await import("@cockpit-context/auth/ban");
+      db.user.findUnique.mockResolvedValue({ id: "other-user-id" });
+      const order: string[] = [];
+      db.$transaction.mockImplementation(async () => {
+        order.push("commit");
+        return [];
+      });
+      const stop = onUserBanned((userId) => order.push(`announce:${userId}`));
+      try {
+        const client = createRouterClient(usersRouter, { context: buildContext() });
+        await client.archive({ userId: "other-user-id" });
+      } finally {
+        stop();
+      }
+      expect(order).toEqual(["commit", "announce:other-user-id"]);
+    });
+
+    it("stops the runs of a user banned through the admin plugin, and only for that origin", async () => {
+      const { announceUserBanned: announce } = await import("@cockpit-context/auth/ban");
+      announce("app-banned-user");
+      expect(runStop).not.toHaveBeenCalledWith("app-banned-user");
+      const { announceUserBanned } = await import("@cockpit-context/auth/ban");
+      announceUserBanned("plugin-banned-user", "auth-plugin");
+      await vi.waitFor(() => expect(runStop).toHaveBeenCalledWith("plugin-banned-user"));
+    });
+
     it("revokes every MCP token and OAuth connection in the same transaction", async () => {
       db.user.findUnique.mockResolvedValue({ id: "other-user-id" });
       db.$transaction.mockResolvedValue([]);

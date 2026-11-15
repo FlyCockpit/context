@@ -171,6 +171,65 @@ export async function readMigrationState({
   }
 }
 
+/**
+ * Why touching a `failed` row right now would be unsafe, or null. A row with
+ * no finished_at is only a failure when nobody is still applying it: while
+ * Prisma's lock is held its migration is mid-flight, and while the runner lock
+ * is held a deploy runner (or a restore) owns the history. Marking such a row
+ * rolled back would let a second `migrate deploy` re-run a migration that is
+ * still executing. `db:migrate:apply` refuses on it; the production runner
+ * applies the same rule to Prisma's lock (it waits, then refuses) and is itself
+ * the runner-lock holder.
+ * @param {{ inProgress: boolean, runnerActive: boolean }} state
+ */
+export function migrationInFlight(state) {
+  if (state.inProgress)
+    return "another session holds Prisma's migration lock (Prisma Migrate is applying a migration right now)";
+  if (state.runnerActive)
+    return "another session holds the migration runner lock (a deploy runner or a restore is working on this database)";
+  return null;
+}
+
+/**
+ * Take the migration runner lock without waiting, on a dedicated session, for
+ * a local wrapper that resolves or deploys migrations. Production runners and
+ * restore.mjs take the same key, so while it is held none of them can start.
+ * @param {{ databaseUrl: string, pg: typeof import("pg"), applicationName?: string,
+ *   connectTimeoutMs?: number }} options
+ * @returns {Promise<{ release: () => Promise<void> } | null>} null when another session holds it
+ */
+export async function tryHoldRunnerLock({
+  databaseUrl,
+  pg,
+  applicationName = "cockpit-context-db-apply",
+  connectTimeoutMs = 10_000,
+}) {
+  const client = new pg.Client({
+    connectionString: pgConnectionString(databaseUrl),
+    connectionTimeoutMillis: connectTimeoutMs,
+    application_name: applicationName,
+  });
+  try {
+    await client.connect();
+    const result = await client.query(
+      `SELECT pg_try_advisory_lock(${MIGRATION_RUNNER_LOCK_KEY}) AS acquired`,
+    );
+    if (!result.rows[0]?.acquired) {
+      await client.end().catch(() => {});
+      return null;
+    }
+  } catch (error) {
+    await client.end().catch(() => {});
+    throw new Error(`cannot take the migration runner lock (${safeError(error)})`);
+  }
+  return {
+    release: async () => {
+      await client.query(`SELECT pg_advisory_unlock(${MIGRATION_RUNNER_LOCK_KEY})`).catch(() => {});
+      await client.end().catch(() => {});
+    },
+  };
+}
+
 /** Pure classification, exported for unit tests. */
 export function classify(base, local, rows, lockHeld) {
   const localNames = new Set(local.map((m) => m.name));

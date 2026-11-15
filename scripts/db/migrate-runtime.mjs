@@ -5,7 +5,10 @@ import { spawn } from "node:child_process";
  *
  *   node scripts/db/migrate-runtime.mjs apply   (default)
  *     The `migrate` image command and MIGRATE_ON_START=true. Classifies the
- *     database, refuses unsafe states, runs the optional pre-migration backup,
+ *     database, refuses unsafe states, runs the pre-migration backup when
+ *     BACKUP_ENABLED=true (the hook with --required: no destination, or a
+ *     failed dump, refuses the migration, a brand-new database too;
+ *     BACKUP_ENABLED unset/false skips the hook and migrates without one),
  *     then `prisma migrate deploy`. Exits 0 only when the DB is up to date.
  *
  *     Everything from the first classification to the final check runs while
@@ -186,6 +189,8 @@ export async function run(options = {}) {
   const databaseUrl = env.DATABASE_URL;
   try {
     if (!databaseUrl) throw new Refusal("DATABASE_URL is not set.");
+    if (env.BACKUP_ENABLED && !["true", "false"].includes(env.BACKUP_ENABLED))
+      throw new Refusal("BACKUP_ENABLED must be true or false.");
     const role = options.role ?? "server";
     if (role !== "server" && role !== "worker")
       throw new Refusal(`--role must be "server" or "worker" (got "${role}").`);
@@ -897,11 +902,19 @@ async function applyDue(ctx, client, lock, { migrations, run, level, now, inputs
   }
   if (!valid.length) return;
   let backup = run.backup?.label ?? null;
-  if (!run.fresh && !run.backup?.ran) {
+  // BACKUP_ENABLED unset/false (default): no pre-drop dump; deletions run
+  // without one. True: the hook runs with --required, so a missing destination
+  // (or hook) skips the deletions exactly like a failed dump.
+  if (ctx.env.BACKUP_ENABLED === "true" && !run.fresh && !run.backup?.ran) {
     lock.assertHeld("the pre-drop backup");
-    const result = await runBackupHook(ctx, ["--label", "pre-drop", "--keep", "5"]);
-    if (result.missing) warn("no backup hook in this image; deleting without a pre-drop backup.");
-    else if (result.code !== 0) {
+    const result = await runBackupHook(ctx, ["--label", "pre-drop", "--keep", "5", "--required"]);
+    if (result.missing) {
+      loud([
+        "BACKUP_ENABLED=true but this image has no backup hook; scheduled deletions skipped this run.",
+      ]);
+      return;
+    }
+    if (result.code !== 0) {
       loud([
         `the configured pre-drop backup failed (exit ${result.code}); scheduled deletions skipped this run.`,
         "Fix the backup configuration (docs/backup-restore.md).",
@@ -1055,8 +1068,8 @@ async function reportReplayError(ctx, migration) {
 
 /**
  * Run scripts/backup/pre-migrate.sh with `args`, teeing its output, and read
- * the dump's file name from its "Verified" line (null when no destination is
- * configured: the hook warns and exits 0).
+ * the dump's file name from its "Verified" line (null when no dump was
+ * written).
  * @returns {Promise<{ missing: boolean, code: number, label: string | null }>}
  */
 async function runBackupHook(ctx, args = []) {
@@ -1079,23 +1092,28 @@ async function runBackupHook(ctx, args = []) {
   return { missing: false, code, label: verified ? path.basename(verified) : null };
 }
 
-/** @returns {Promise<{ ran: boolean, label: string | null }>} */
+/**
+ * Off (default): no hook, no IO — migrations never wait on or refuse for
+ * backups. On: the hook runs with --required, so a missing destination fails
+ * exactly like a failed dump, on a brand-new database too (no exemption).
+ * @returns {Promise<{ ran: boolean, label: string | null }>}
+ */
 async function preMigrateBackup(ctx) {
+  if (ctx.env.BACKUP_ENABLED !== "true") return { ran: false, label: null };
   if (!existsSync(ctx.backupHook)) {
-    warn(
-      `pre-migration backup hook ${path.relative(ROOT, ctx.backupHook)} is not in this image; migrating without a pre-migration backup.`,
+    throw new Refusal(
+      `BACKUP_ENABLED=true but the pre-migration backup hook ${path.relative(ROOT, ctx.backupHook)} is not in this image; refusing to migrate without a backup.`,
     );
-    return { ran: false, label: null };
   }
   log("running the pre-migration backup hook…");
-  const { code, label } = await runBackupHook(ctx);
+  const { code, label } = await runBackupHook(ctx, ["--required"]);
   if (code !== 0) {
     throw new Refusal(
-      `the configured pre-migration backup failed (exit ${code}); refusing to migrate without it. ` +
-        "Fix the backup configuration (docs/backup-restore.md) or remove it deliberately.",
+      `BACKUP_ENABLED=true and the pre-migration backup failed (exit ${code}); refusing to migrate without it. ` +
+        "Fix the backup destination (docs/backup-restore.md), or set BACKUP_ENABLED=false to migrate without backups.",
     );
   }
-  return { ran: true, label };
+  return { ran: label !== null, label };
 }
 
 async function deploy(ctx) {

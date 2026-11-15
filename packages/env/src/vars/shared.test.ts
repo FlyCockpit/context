@@ -27,6 +27,13 @@ describe("migration entrypoint controls", () => {
 });
 
 describe("backup scheduling controls", () => {
+  it("defaults migration backups and monitoring off, with a strict opt-in", () => {
+    expect(sharedVars.BACKUP_ENABLED.parse(undefined)).toBe(false);
+    expect(sharedVars.BACKUP_ENABLED.parse("true")).toBe(true);
+    expect(sharedVars.BACKUP_ENABLED.parse("false")).toBe(false);
+    expect(sharedVars.BACKUP_ENABLED.safeParse("yes").success).toBe(false);
+  });
+
   it("requires an explicit daily schedule and a valid UTC hour", () => {
     expect(sharedVars.BACKUP_SCHEDULE.parse(undefined)).toBe("off");
     expect(sharedVars.BACKUP_SCHEDULE.parse("daily")).toBe("daily");

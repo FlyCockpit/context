@@ -1,0 +1,6 @@
+# Opt-in local storage for app pre-migration dumps and the backup scheduler.
+# Add -f compose.backup.yaml; set BACKUP_ENABLED=true for migration dumps.
+services:
+  app:
+    volumes:
+      - cockpit-context-backups:/backups

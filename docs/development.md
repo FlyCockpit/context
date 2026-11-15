@@ -26,6 +26,10 @@ Run `pnpm verify:fast` before handoff; full `pnpm verify` runs in CI/release, an
 
 After editing AGENTS run `pnpm sync:agent-docs`. UI error diagnostics from React Doctor block CI. Never bypass pre-commit hooks or disable a failing policy gate. Include unresolved failures and missing integration evidence in your PR.
 
+## Local databases
+
+Each checkout has its own local database (`pnpm db:worktree`). `pnpm db:reset:local` rebuilds only that exact name on localhost, refuses `EXPECTED_DB`, and drops only a database carrying the disposable-local mark that `pnpm db:worktree` or a fresh dev compose volume writes. A person adopts an older local database once with `pnpm db:worktree --adopt` (interactive terminal, typed confirmation); agents never run it, never write the mark (`COMMENT ON DATABASE`), and never run a raw `prisma migrate resolve`. The Claude hook denies the direct spellings of all three; it is defence in depth, not a guarantee (it cannot read SQL in a file passed to `psql -f` or piped from one). `pnpm db:migrate:apply` refuses, changing nothing, while another session holds the migration runner lock or Prisma's lock. See [schema-changes-recipe § Local database troubleshooting](./schema-changes-recipe.md#local-database-troubleshooting).
+
 ## Schema conventions
 
 Use the [migration workflow](./schema-migrations.md) and [change recipe](./schema-changes-recipe.md). Projections are disclosure boundaries: typed Prisma selects, no result casts that conceal over-disclosure. Monetary values are integer minor units; public slugs are human-readable. Models need stable IDs/timestamps and indexed ownership/foreign-key relations. Use mapped database names for renames and two releases for type transitions.

@@ -8,6 +8,9 @@
  *   node s3.mjs upload <file>   → uploads to <BACKUP_S3_PREFIX>/<file name> with a
  *                                 no-overwrite condition and prints the restore
  *                                 command for that exact object.
+ *   node s3.mjs check-config    → validates the BACKUP_S3_* settings only (no
+ *                                 network, nothing printed but the error); the
+ *                                 startup check with BACKUP_ENABLED=true.
  *
  * restore.mjs imports describeObject/downloadObject directly.
  *
@@ -383,8 +386,19 @@ export async function downloadObject({
 
 async function main() {
   const [command, file] = process.argv.slice(2);
+  if (command === "check-config") {
+    // Startup check (pre-migrate.sh --startup-notice with BACKUP_ENABLED=true):
+    // validate the settings only — no network, no credentials printed.
+    try {
+      backupS3Config();
+    } catch (error) {
+      console.error(`FATAL: [backup] ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (command !== "upload" || !file) {
-    console.error("usage: node s3.mjs upload <file>");
+    console.error("usage: node s3.mjs upload <file> | node s3.mjs check-config");
     process.exitCode = 2;
     return;
   }

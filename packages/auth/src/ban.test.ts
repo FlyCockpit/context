@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { isUserBanned } from "./ban";
+import { announceIfUserBanned, announceUserBanned, isUserBanned, onUserBanned } from "./ban";
 
 describe("isUserBanned", () => {
   it("is false for a user who was never banned", () => {
@@ -38,5 +38,43 @@ describe("isUserBanned", () => {
   it("stays banned when banExpires is unparseable", () => {
     // Fail closed: this predicate only ever gates access.
     expect(isUserBanned({ banned: true, banExpires: "not-a-date" })).toBe(true);
+  });
+});
+
+describe("ban announcements", () => {
+  it("reaches every listener, even after one throws, and stops after unsubscribe", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const second = vi.fn();
+    const stopFirst = onUserBanned(first);
+    const stopSecond = onUserBanned(second);
+    try {
+      announceUserBanned("u-1");
+      expect(first).toHaveBeenCalledWith("u-1", "application");
+      expect(second).toHaveBeenCalledWith("u-1", "application");
+      expect(error).toHaveBeenCalledOnce();
+    } finally {
+      stopFirst();
+      stopSecond();
+      error.mockRestore();
+    }
+    announceUserBanned("u-2");
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("announceIfUserBanned announces only a ban in force", () => {
+    const listener = vi.fn();
+    const stop = onUserBanned(listener);
+    try {
+      announceIfUserBanned({ id: "a", banned: false });
+      announceIfUserBanned({ id: "b", banned: true, banExpires: new Date(Date.now() - 1_000) });
+      announceIfUserBanned({ id: "c", banned: true, banExpires: null });
+    } finally {
+      stop();
+    }
+    // The admin plugin path: listeners learn it stopped nothing itself.
+    expect(listener.mock.calls).toEqual([["c", "auth-plugin"]]);
   });
 });

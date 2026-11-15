@@ -14,6 +14,13 @@ type RouteSessionUser = {
    * window is measured from it — see `apps/web/src/utils/two-factor-policy.ts`.
    */
   createdAt: number | null;
+  /**
+   * `isUserBanned(user)` evaluated on the server when the projection is built
+   * (a lapsed temporary ban is `false`). Only the verdict crosses the
+   * serialization boundary, never the reason or expiry. The admin guard below
+   * refuses it, as `checkAdminAuthority` does for every admin procedure.
+   */
+  banned: boolean;
 };
 
 export type RouteSession = {
@@ -91,7 +98,7 @@ export function decideAnonymousOnlyRouteAccess(
 export function decideAdminRouteAccess(resolution: RouteSessionResolution): AdminRouteDecision {
   if (resolution.status === "error") return { kind: "error" };
   const user = resolution.session?.user;
-  if (!resolution.session || !user?.emailVerified || !isAdminRole(user.role)) {
+  if (!resolution.session || !user?.emailVerified || !isAdminRole(user.role) || user.banned) {
     return { kind: "not-found" };
   }
   return { kind: "allow", session: resolution.session };

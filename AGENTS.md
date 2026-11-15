@@ -8,7 +8,7 @@ Read [product boundaries](./docs/product.md), the [access matrix](./docs/access-
 
 The Dangerous Commands and Agent Safety Rules below override other repository documents. Stop for security-relevant ambiguity, new dependencies, irreversible actions, missing product/permission decisions, contradictory docs/code or a check whose only apparent fix weakens it. State the options and recommendation. Never run sudo; provide the command for the user instead. Do not request approval again for work already explicitly authorized.
 
-Prefer editing an existing component, hook, procedure or utility. Search `packages/ui/src/components/`, `apps/web/src/hooks/` and `packages/api/src/lib/` before adding one. Keep changes scoped; no unrelated refactors, formatting or dependency bumps. Extract an abstraction at three call sites. Authorization is the exception: a second router needing a permission check uses a registered builder/middleware in `packages/api/src/index.ts` (`procedureAccessLevels` / `middlewareAccessLevels`).
+Prefer editing an existing component, hook, procedure or utility. Search `packages/ui/src/components/`, `apps/web/src/hooks/` and `packages/api/src/lib/` before adding one. Keep changes scoped; no unrelated refactors, formatting or dependency bumps. Extract an abstraction at three call sites. Authorization is the exception: a second router needing a permission check uses a registered builder/middleware in `packages/api/src/index.ts` (`procedureAccessLevels` / `middlewareAccessLevels`). Admin authority is the single `checkAdminAuthority` there; `admin-session-gate.ts` calls it rather than re-deriving the rule.
 
 Before handing back code run `pnpm verify:fast`; full `pnpm verify` runs in CI/release and `pnpm verify:tooling` nightly. Report actual checks and failures; never call unverified work verified. Cross-doc links are checked by `pnpm docs:check-citations`. Preserve section anchors or update all citations together.
 
@@ -66,7 +66,7 @@ Routes auto-split; never export a component function from a route file. Anchor e
 
 Prisma Migrate: committed SQL in `packages/db/prisma/migrations/`. Query projections are disclosure boundaries (`satisfies Prisma.<Model>Select`, no casting results). Money: integer minor units, never `Float`. Public URLs use a human-readable `slug` (no `@default(cuid(2))` on slugs). Renames: `@map` only; type changes take two PRs ([schema-changes-recipe](./docs/schema-changes-recipe.md)). `pnpm db:migrate` splits drops: `migration.sql` stays old-code-safe, `contract.sql` deletes ≥7 days later. In-place breaking changes are refused. Design fields for the long term; obsolete ones may be dropped ([schema-guidelines](./docs/development.md#schema-conventions)).
 
-Locally: `pnpm db:migrate <name>` (generates SQL only) → review/edit it (backfills) → `pnpm db:migrate:apply`. Each checkout has its own database (`pnpm db:worktree`); `pnpm db:reset:local` rebuilds it. A migration already on the default branch is immutable. Before merging, show the user the CI destructive-SQL summary. Production: the image's runner applies pending migrations at startup (Dokploy) or as a one-shot `migrate` job (container platforms). [schema-migrations](./docs/schema-migrations.md), [schema-changes-recipe](./docs/schema-changes-recipe.md), [schema-guidelines](./docs/development.md#schema-conventions), [backup-and-restore](./docs/backup-restore.md).
+Locally: `pnpm db:migrate <name>` (generates SQL only) → review/edit it (backfills) → `pnpm db:migrate:apply`. Each checkout has its own database (`pnpm db:worktree`); `pnpm db:reset:local` rebuilds it only when it carries the disposable-local mark (a person adopts older ones with `pnpm db:worktree --adopt`; `EXPECTED_DB` never widens it). A migration already on the default branch is immutable. Before merging, show the user the CI destructive-SQL summary. Production: the image's runner applies pending migrations at startup (Dokploy) or as a one-shot `migrate` job (container platforms). [schema-migrations](./docs/schema-migrations.md), [schema-changes-recipe](./docs/schema-changes-recipe.md), [schema-guidelines](./docs/development.md#schema-conventions), [backup-and-restore](./docs/backup-restore.md).
 
 ### Dangerous Commands — Never Run These
 
@@ -78,7 +78,7 @@ The following commands can destroy production data. **Never run them**, and neve
 - `prisma db drop` / `dropdb` — drops the entire database
 - Raw SQL `DROP DATABASE`, `DROP SCHEMA`, `DROP TABLE`, `TRUNCATE`, or `DELETE` without a `WHERE` clause — except inside a reviewed migration file (`packages/db/prisma/migrations/*/{migration,contract}.sql`), where `DROP TABLE`/`COLUMN`, `ALTER … TYPE`, `TRUNCATE`, and backfill `DELETE`/`UPDATE` are expected content (never `DROP DATABASE`/`DROP SCHEMA`)
 
-Allowed: `prisma migrate deploy` and `prisma migrate diff` through the wrappers and the image runner; `prisma migrate resolve` only in documented recovery/baseline steps ([schema-migrations](./docs/schema-migrations.md)).
+Allowed: `prisma migrate deploy` and `prisma migrate diff` through the wrappers and the image runner; `prisma migrate resolve` only in documented recovery/baseline steps ([schema-migrations](./docs/schema-migrations.md)); agents never run it raw (the hook denies it), and `pnpm db:migrate:apply` refuses while another session holds a migration lock.
 
 > **Sanctioned exceptions only** — `scripts/policy-checks.sh` records each reviewed destructive occurrence by exact path, complete-line SHA-256, and expected count. It never exempts a whole file: an edited, appended, or duplicated occurrence fails the gate. Do not add an occurrence without reviewing that manifest and this list together:
 >
@@ -93,7 +93,7 @@ Allowed: `prisma migrate deploy` and `prisma migrate diff` through the wrappers 
 - Schema changes → edit `packages/db/prisma/schema/`, `pnpm db:migrate <name>`, review SQL, `pnpm db:migrate:apply`, commit both ([schema-changes-recipe](./docs/schema-changes-recipe.md))
 - Destructive production changes → a reviewed migration; the drop waits in `contract.sql` ([schema-migrations § Expand and contract](./docs/schema-migrations.md#expand-and-contract))
 - Seed data → `pnpm db:seed` (local Postgres only; guarded)
-- Reset this checkout's local DB → `pnpm db:reset:local`. Wiping the whole dev stack → `bash scripts/compose.sh -f docker-compose.dev.yml down -v && pnpm dev:services && pnpm db:migrate:apply`; `dev:services:stop` does **not** destroy the volume. If the DB is unreachable, see `pnpm doctor`.
+- Reset this checkout's local DB → `pnpm db:reset:local` (refuses an unmarked database; agents never run `--adopt` or write the mark). Wiping the whole dev stack → `bash scripts/compose.sh -f docker-compose.dev.yml down -v && pnpm dev:services && pnpm db:migrate:apply`; `dev:services:stop` does **not** destroy the volume. If the DB is unreachable, see `pnpm doctor`.
 
 ### Agent Safety Rules
 
@@ -132,7 +132,7 @@ Tests use Vitest, colocated beside source. Mock `@cockpit-context/db` with `mock
 
 One app replica is mandatory; jobs, rate limiters and event buses are process-local. Give each hard-hittable surface a distinct limiter keyPrefix; spend-bearing procedures need a procedure budget because oRPC batches multiple procedures per request. Do not lower shared IP budgets blindly or widen a limiter to hide an undiagnosed 429.
 
-`Dockerfile` is the single runtime image. Keep Node/pnpm/PG pins and system upgrades aligned with `Dockerfile.dev`. Keep builder and production-dependency COPY lists complete when adding a workspace member. `pnpm docker:check-copy` checks packaging. Do not weaken runtime-tool or Landlock checks. No host ports in base Compose; loopback ports belong in the VPS overlay. Read [hosting](./docs/hosting.md) before changing deployment topology.
+`Dockerfile` is the single runtime image. Keep `ENTRYPOINT ["docker-entrypoint.sh"]`: it is PID 1 while migrating, then drops the backup writer keys and execs tini. Keep Node/pnpm/PG pins and system upgrades aligned with `Dockerfile.dev`. Keep builder and production-dependency COPY lists complete when adding a workspace member. `pnpm docker:check-copy` checks packaging. Do not weaken runtime-tool or Landlock checks. No host ports in base Compose; loopback ports belong in the VPS overlay. Read [hosting](./docs/hosting.md) before changing deployment topology.
 
 <!-- BEGIN:turborepo-agent-rules -->
 

@@ -4,7 +4,7 @@
  * booting the shared environment surface.
  */
 export type BackupConfig = {
-  /** Monitoring intent; independent from the optional daily writer. */
+  /** Opt-in migration dumps and monitoring; independent of the optional daily writer. */
   BACKUP_ENABLED?: boolean | undefined;
   /** Writer-only schedule settings; the app's monitor does not need them. */
   BACKUP_SCHEDULE?: "off" | "daily" | undefined;

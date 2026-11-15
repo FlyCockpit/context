@@ -4,7 +4,7 @@
 
 Use Docker Compose on a Linux host: one Node.js 26.13.1 app container and PostgreSQL 18 (the pinned image is 18.6). There is no Redis or standalone job worker. Run exactly one app replica and use stop-first replacement; in-process event delivery, rate limiters and concurrency are not distributed. See [hosting](./hosting.md).
 
-`compose.yaml` publishes no ports. PostgreSQL lives only on the project-private internal network with alias `cockpit-context-postgres`. App port 3000 is for the reverse proxy. PostgreSQL 18 mounts its parent `/var/lib/postgresql`, with PGDATA `/var/lib/postgresql/18/docker`. `/data` and `/backups` have their own persistent volumes.
+`compose.yaml` publishes no ports. PostgreSQL lives only on the project-private internal network with alias `cockpit-context-postgres`. App port 3000 is for the reverse proxy. PostgreSQL 18 mounts its parent `/var/lib/postgresql`, with PGDATA `/var/lib/postgresql/18/docker`. `/data` has a persistent volume. Backup storage is opt-in.
 
 Clone the public repository and use a unique project name such as `cockpit-context` on a server also running other services. Do not add `container_name` or global volume/network names. This keeps it separate from WS Sandbox Proxy and Knowledge Base, including their databases.
 
@@ -15,6 +15,8 @@ cp .env.example .env
 ```
 
 Edit `.env` privately. Generated examples contain placeholders, not deployment credentials. Do not use `.env.docker.defaults` for production. The supplied Compose file builds `Dockerfile` locally; a published release image is `ghcr.io/flycockpit/context:1.0.0`. To use a published image, override the app and optional backup image consistently and pull the selected release; prefer a digest for immutable deployments.
+
+A first deployment needs only `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `COCKPIT_CONTEXT_ENCRYPTION_KEYS` and `ADMIN_EMAILS`, plus `TRUST_PROXY_HOPS=1` behind Traefik/Dokploy or Caddy (the default `0` keys every request on the proxy). Compose supplies the database URL, production mode, storage path and migration defaults. Model credentials are needed when you want real answers. No backup settings, backup volume or scheduler are required: migrations run without a backup, and startup logs one notice explaining how to opt in.
 
 ## Configuration
 
@@ -32,7 +34,7 @@ Edit `.env` privately. Generated examples contain placeholders, not deployment c
 | `MIGRATE_ON_START` | True for normal startup; false only with an explicit prior migrate job. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, provider credentials | Optional production SMTP; enables email verification, resets and emailed invitations. Never use development Mailpit as a public relay. |
 | `SIGNUP_ENABLED` | Defaults false. True permits the runtime signup toggle; without SMTP it allows unverified addresses and logs a warning. |
-| `TRUST_PROXY_HOPS` | Match the actual trusted proxy chain; restrict direct origin access. |
+| `TRUST_PROXY_HOPS` | Defaults to **0**: use the socket peer and ignore forwarded headers (direct deployment). Set **N** to the exact number of trusted proxies, e.g. **1** behind Traefik/Dokploy or Caddy. Restrict origin access to that chain. Only the Nth entry from the right of X-Forwarded-For is used; a missing/invalid hop falls back to the socket peer. A proxy-appended IPv4 or bracketed IPv6 port is stripped. |
 | `CORS_ORIGIN` | Leave unset for same-origin use; no wildcard. |
 | `SSO_ENABLED`, OIDC client/secret/issuer/provider settings | Optional configured OIDC sign-in. Review `FORCE_SSO` before enabling; it changes available sign-in methods. |
 | `COCKPIT_CONTEXT_OPERATOR_NAME`, `COCKPIT_CONTEXT_OPERATOR_CONTACT_EMAIL` | Public operator identity for the privacy notice. |
@@ -64,7 +66,7 @@ The first administrator is created through `/signup` with an `ADMIN_EMAILS` addr
 
 Treat the boot log as secret until the first signup is done. The token makes a reachable form safe to leave up briefly, but finishing signup privately before routing the public domain is still the most conservative path. One concrete private setup uses a temporary local HTTPS origin:
 
-1. Keep the public domain unrouted and public app ingress closed. Set `BETTER_AUTH_URL=https://localhost:8443`, `COCKPIT_CONTEXT_HTTP_PORT=3036`, your `ADMIN_EMAILS`, secrets and model settings.
+1. Keep the public domain unrouted and public app ingress closed. Set `BETTER_AUTH_URL=https://localhost:8443`, `COCKPIT_CONTEXT_HTTP_PORT=3036`, `TRUST_PROXY_HOPS=1` for the Caddy proxy, your `ADMIN_EMAILS`, secrets and model settings.
 2. On the host, start with the loopback overlay:
 
    ```sh
@@ -110,7 +112,7 @@ Use your own domain, DNS and TLS configuration. Preserve `/mcp`, `/api/auth/*` a
 
 ## Dokploy Compose
 
-Create a distinct Compose project for this repository, using `compose.yaml` alone. Its services have no host-port mappings. Set the production environment before first boot and finish the private administrator setup above. In the Dokploy domain UI add your domain for service **app**, container port **3000**, with HTTPS. Attach only the app to the proxy network through Dokploy's supported routing; keep Postgres on the project-private internal network. Do not attach the database to a shared proxy network or add a generic global `postgres` alias there.
+Create a distinct Compose project for this repository, using `compose.yaml` alone. Its services have no host-port mappings. Set the production environment before first boot and finish the private administrator setup above. In the Dokploy domain UI add your domain for service **app**, container port **3000**, with HTTPS. **Set `TRUST_PROXY_HOPS=1` yourself** in the Compose environment: this repository has no Dokploy config generator to set it, and the default `0` (direct deployment) makes every request behind Traefik look like it comes from the proxy, so per-IP rate limits and sign-in failure limits would be shared by all clients. Count any additional trusted proxy in front of Traefik too. Attach only the app to the proxy network through Dokploy's supported routing; keep Postgres on the project-private internal network. Do not attach the database to a shared proxy network or add a generic global `postgres` alias there.
 
 Use a unique project name alongside WS Sandbox Proxy and Knowledge Base, and project-scoped networks/volumes. Keep one app replica and stop-first replacement. Configure proxy timeout/streaming for MCP. This is Dokploy **Compose**, not a separate Swarm Application or db-applier image.
 
@@ -149,9 +151,11 @@ Leave disk headroom for in-progress clones and PostgreSQL/backups beyond the cac
 
 ## Upgrades, migrations and backups
 
-Before upgrading, read the changelog, take a verified backup, preserve keys and protect snapshot clones. Stop the old app and optional scheduler. Build/pull the reviewed version, then start one app so the startup runner applies pending committed migrations. With one-shot deployment, run image command `migrate` first and use `MIGRATE_ON_START=false` for the app. Never bypass startup admission or edit merged migration history to force an older image to run. PostgreSQL major upgrades need their own tested dump/restore plan; changing an image tag does not upgrade an existing data directory.
+Before upgrading, read the changelog, preserve keys and protect snapshot clones. A verified backup is recommended and remains an operator opt-in. Stop the old app and optional scheduler. Build/pull the reviewed version, then start one app so the startup runner applies pending committed migrations. With one-shot deployment, run image command `migrate` first and use `MIGRATE_ON_START=false` for the app. Never bypass startup admission or edit merged migration history to force an older image to run. PostgreSQL major upgrades need their own tested dump/restore plan; changing an image tag does not upgrade an existing data directory.
 
-Configure the optional backup profile and test restore before relying on it. The scheduler defaults off, and an unconfigured pre-migration backup hook warns and skips dumping. See [schema migrations](./schema-migrations.md), [change recipes](./schema-changes-recipe.md) and [backup/restore](./backup-restore.md) for exact commands, confirmation and scope. A documentation/check pass is not proof of a successful deployment or production restore.
+Backups default off (`BACKUP_ENABLED=false`, `BACKUP_SCHEDULE=off`): migration and pre-drop hooks are skipped, readiness stays healthy, and one startup notice (`NOTICE: [backup] Backups are OFF …`, printed by the entrypoint's backups check for the app and for a `migrate` job alike) explains how to enable backups. To opt in, configure storage and `BACKUP_ENABLED=true`; add `compose.backup.yaml` for local app dumps and profile `backup` with `BACKUP_SCHEDULE=daily` for the scheduler. `BACKUP_ENABLED` is strict: any value other than `true`/`false` stops the start. With `true`, every migrating start (the app with `MIGRATE_ON_START=true`, or the `migrate` job) first checks for a usable destination (a writable `/backups` mount and/or valid `BACKUP_S3_*` settings) and fails without one, even when nothing is pending and on a brand-new database; the runner then requires the pre-migration dump (a failed dump refuses the migration) and the pre-drop dump (a failed one skips that start's scheduled deletions). With backups off, a configured but unused destination gets a startup warning in place of that notice. The manual `backup` command, the daily service and the pre-restore snapshot need a destination whatever the switch says. Test restore before relying on backups.
+
+The image's entrypoint is PID 1 while it validates the environment, runs the startup check and the migration runner (both as supervised children: a `docker stop` during them stops them and exits 143, 130 for INT, 129 for HUP, and the app never starts). Only that phase sees the dump-writer keys `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY`: the entrypoint then unsets them and execs `tini` with the server, so `/proc/1/environ` and the server's environment are clean. The non-secret `BACKUP_S3_*` location settings stay for the freshness monitor, which uses its own ListBucket-only `BACKUP_MONITOR_S3_*` key. One-shot commands (`migrate`, `backup`, `backup-schedule`, `restore`, `restore-drill`, `hold-deletions`) run under `tini` and keep the writer keys. Docker's container configuration (`docker inspect`, a `docker exec` shell) still contains every configured variable; unsetting them in the process is not removal from container metadata. See [schema migrations](./schema-migrations.md), [change recipes](./schema-changes-recipe.md) and [backup/restore](./backup-restore.md) for exact commands, confirmation and scope. A documentation/check pass is not proof of a successful deployment or production restore.
 
 ## Troubleshooting
 

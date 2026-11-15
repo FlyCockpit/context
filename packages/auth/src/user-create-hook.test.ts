@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin } from "better-auth/plugins";
@@ -17,6 +18,17 @@ const PASSWORD = "correct-horse-battery";
 afterEach(() => {
   revokeBootstrapToken();
 });
+
+// Better-Auth's default scrypt hash is deliberately CPU-heavy: several hashes
+// per test made these tests' duration depend on machine load (timeouts under
+// a busy parallel run). The token, binding and hook logic under test does not
+// depend on the hash, so use a cheap deterministic one.
+const fastPassword = {
+  hash: async (password: string) =>
+    `test-sha256:${createHash("sha256").update(password).digest("hex")}`,
+  verify: async ({ hash, password }: { hash: string; password: string }) =>
+    hash === `test-sha256:${createHash("sha256").update(password).digest("hex")}`,
+};
 
 function buildAuth(opts: { emailConfigured: boolean; signupOpen: boolean; usersExist?: boolean }) {
   const db: Record<string, unknown[]> & { user: unknown[] } = {
@@ -41,6 +53,7 @@ function buildAuth(opts: { emailConfigured: boolean; signupOpen: boolean; usersE
       enabled: true,
       requireEmailVerification: opts.emailConfigured,
       minPasswordLength: 12,
+      password: fastPassword,
     },
     ...(opts.emailConfigured
       ? { emailVerification: { sendVerificationEmail, sendOnSignUp: true, sendOnSignIn: true } }

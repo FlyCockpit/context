@@ -44,7 +44,7 @@ export const DEPLOY_TARGETS = [
     label: "VPS (docker compose)",
     doc: "docs/deploy.md",
     injects: [],
-    note: "The compose stack builds DATABASE_URL from POSTGRES_PASSWORD (generate with openssl rand -hex 24); leave DATABASE_URL blank. Configure off-site backups in a private S3-compatible bucket.",
+    note: "The compose stack builds DATABASE_URL from POSTGRES_PASSWORD (generate with openssl rand -hex 24); leave DATABASE_URL blank. Backups are optional and default off; opt in with BACKUP_ENABLED=true and durable backup storage.",
   },
   {
     id: "other",
@@ -227,10 +227,14 @@ export const ENV_GROUPS: EnvGroup[] = [
     id: "backups",
     title: "Database backups — [shared]",
     prompt: "Configure off-site database backups (S3/R2)?",
-    default: true,
+    default: false,
     comment: [
-      "Verified pg_dump backups are saved to /backups before migrations.",
-      "BACKUP_SCHEDULE=daily also takes a daily dump. Set a private S3 bucket",
+      "Backups default off; migrations proceed without a dump or backup storage.",
+      "Opt in with BACKUP_ENABLED=true for pre-migration backups and monitoring",
+      "(it then needs a destination, or a migrating start fails).",
+      "The dump-writer keys reach only the startup migration runner and explicit",
+      "backup/restore jobs; the entrypoint unsets them before the server starts.",
+      "BACKUP_SCHEDULE=daily enables the optional daily writer. Set a private S3 bucket",
       "for off-site copies and a lifecycle rule to expire old objects.",
       "Use dedicated backup writer credentials and a separate ListBucket-only",
       "BACKUP_MONITOR_S3_* identity for the app's freshness check.",
@@ -453,13 +457,19 @@ export const ENV_VARS: EnvVar[] = [
   {
     key: "BACKUP_ENABLED",
     group: "backups",
-    source: "default",
-    default: "true",
+    source: "enable",
+    default: "false",
     choices: [{ value: "true" }, { value: "false" }],
-    example: "true",
+    example: "false",
     comment: [
-      "Enable the app's off-site backup freshness monitoring. This switch does",
-      "not disable the daily or pre-migration dump writer.",
+      "Backup switch (true|false, default false; anything else refuses to start).",
+      "true: the migration runner takes a pre-migration and pre-drop dump",
+      "(`pre-migrate.sh --required`), a migrating start FAILS when no destination",
+      "(/backups volume via compose.backup.yaml, or BACKUP_S3_BUCKET) is configured,",
+      "and the app monitors backup freshness. false: no automatic backups and no",
+      "monitoring, even if storage is configured. The explicit `backup` command,",
+      "the daily writer (BACKUP_SCHEDULE=daily) and the pre-restore snapshot work",
+      "either way.",
     ],
   },
   {
@@ -546,15 +556,15 @@ export const ENV_VARS: EnvVar[] = [
     key: "TRUST_PROXY_HOPS",
     advanced: true,
     group: "auth",
-    source: "manual",
-    example: "1",
+    source: "default",
+    default: "0",
+    example: "0",
     comment: [
-      "Number of reverse-proxy hops in front of the app, for deriving the real",
-      "client IP used as the anonymous rate-limit key. LEAVE UNSET — the default",
-      "auto-detects a client behind a private-network proxy (e.g. Dokploy/nginx)",
-      "and keys on the socket peer otherwise. Set it only",
-      "when a proxy in front of the app has a PUBLIC IP (e.g. Cloudflare): the",
-      "exact hop count. 0 disables X-Forwarded-For entirely.",
+      "Exact number of trusted reverse proxies. Default 0 uses the socket peer",
+      "and ignores X-Forwarded-For. Set 1 behind Traefik/Dokploy, or N for N",
+      "trusted proxies, and restrict direct origin access to that chain.",
+      "Only the Nth entry from the right is used. A proxy-appended port is",
+      "stripped; a missing/invalid selected hop falls back to the socket peer.",
     ],
   },
 
@@ -1123,17 +1133,17 @@ export const ENV_VARS: EnvVar[] = [
   // --- backups -------------------------------------------------------------
   {
     // A compose variable, not an app one: compose reads it from this file and
-    // starts the db-backup service (compose.yaml). The only compose-only key
+    // starts the backup service (compose.yaml). The only compose-only key
     // in this manifest, listed so the backup switch sits next to its settings.
     key: "COMPOSE_PROFILES",
     group: "backups",
     source: "manual",
     inSchema: false,
-    example: "db-backup",
+    example: "backup",
     comment: [
-      "docker compose only: db-backup starts the S3 backup service. Set it",
-      "once the bucket and dump-writer keys below are filled in (the service",
-      "refuses to start without them and would restart in a loop).",
+      "docker compose only: backup starts the optional daily writer.",
+      "Set BACKUP_SCHEDULE=daily and configure durable storage before enabling.",
+      "Add compose.backup.yaml to also mount backup storage on the app.",
     ],
   },
   {

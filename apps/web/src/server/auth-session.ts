@@ -1,3 +1,4 @@
+import { isUserBanned } from "@cockpit-context/auth/ban";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 
@@ -17,6 +18,8 @@ type BetterAuthRouteSession = {
     role?: string | null;
     twoFactorEnabled?: boolean | null;
     createdAt?: Date | string | number | null;
+    banned?: boolean | null;
+    banExpires?: Date | string | null;
   };
 };
 
@@ -67,6 +70,7 @@ export function toRouteSession(session: BetterAuthRouteSession | null): RouteSes
       role: session.user.role,
       twoFactorEnabled: session.user.twoFactorEnabled,
       createdAt: toEpochMs(session.user.createdAt),
+      banned: isUserBanned(session.user),
     },
   };
 }

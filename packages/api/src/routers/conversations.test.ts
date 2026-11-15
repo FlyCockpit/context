@@ -43,12 +43,15 @@ const { default: prisma } = await import("@cockpit-context/db");
 const { RunEngineError } = await import("@cockpit-context/runs/errors");
 const { RepoError } = await import("@cockpit-context/repos/errors");
 const { conversationsRouter } = await import("./conversations");
+const { announceUserBanned } = await import("@cockpit-context/auth/ban");
+const { liveStreamCount } = await import("../lib/live-streams");
 
 const db = prisma as unknown as {
   conversation: { findMany: MockInstance; findFirst: MockInstance; deleteMany: MockInstance };
   agentRun: { findMany: MockInstance; groupBy: MockInstance };
   runTurn: { findMany: MockInstance };
   package: { findFirst: MockInstance };
+  user: { findUnique: MockInstance };
 };
 
 const NOW = new Date("2026-10-01T00:00:00Z");
@@ -113,6 +116,8 @@ describe("conversationsRouter", () => {
     db.agentRun.groupBy.mockResolvedValue([]);
     db.agentRun.findMany.mockResolvedValue([]);
     db.runTurn.findMany.mockResolvedValue([]);
+    // The live-stream registry re-reads the ban state on every open.
+    db.user.findUnique.mockResolvedValue({ banned: false, banExpires: null });
   });
 
   it("requires a session", async () => {
@@ -571,6 +576,141 @@ describe("conversationsRouter", () => {
         envMock.COCKPIT_CONTEXT_MAX_LIVE_STREAMS_PER_USER = original;
         for (const iterator of open) await iterator.return?.();
       }
+    });
+  });
+
+  describe("ban closes live streams", () => {
+    async function openActivity(userId = "user-a") {
+      const iterator = await client(sessionContext({ id: userId })).activity();
+      expect((await iterator.next()).value).toEqual({ type: "ready" });
+      return iterator;
+    }
+
+    async function openWatch() {
+      db.conversation.findFirst
+        .mockResolvedValueOnce({ id: "c-1" })
+        .mockResolvedValueOnce(conversationRow("c-1", "RUNNING"));
+      const iterator = await client().watch({ id: "c-1" });
+      expect((await iterator.next()).value).toMatchObject({ type: "snapshot" });
+      return iterator;
+    }
+
+    it("ends the user's open watch and activity with UNAUTHORIZED, and only theirs", async () => {
+      const watch = await openWatch();
+      const feed = await openActivity();
+      const other = await openActivity("user-b");
+      const watchNext = watch.next();
+      const feedNext = feed.next();
+      expect(liveStreamCount("user-a")).toBe(2);
+
+      announceUserBanned("user-a");
+
+      await expect(watchNext).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      await expect(feedNext).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      expect(bus.listenerCount("c-1")).toBe(0);
+      expect(activity.listenerCount("user-a")).toBe(0);
+      expect(liveStreamCount("user-a")).toBe(0);
+
+      // Another user's stream is untouched and still relays.
+      const pending = other.next();
+      activity.publish("user-b", { conversationId: "c-2", runId: "r-2", change: "finished" });
+      expect((await pending).value).toMatchObject({ type: "activity", conversationId: "c-2" });
+      await other.return?.();
+      expect(liveStreamCount("user-b")).toBe(0);
+    });
+
+    it("delivers nothing the bus had buffered once the ban lands", async () => {
+      const feed = await openActivity();
+      // Published while the client is not reading: the bus buffers them.
+      activity.publish("user-a", { conversationId: "c-1", runId: "r-1", change: "progress" });
+      activity.publish("user-a", { conversationId: "c-1", runId: "r-1", change: "finished" });
+      announceUserBanned("user-a");
+      await expect(feed.next()).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      expect(liveStreamCount("user-a")).toBe(0);
+    });
+
+    it("ends a watch whose snapshot read is still pending, without sending the snapshot", async () => {
+      let finishRead: (value: unknown) => void = () => {};
+      db.conversation.findFirst.mockResolvedValueOnce({ id: "c-1" }).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishRead = resolve;
+        }),
+      );
+      const watch = await client().watch({ id: "c-1" });
+      const first = watch.next();
+      await vi.waitFor(() => expect(liveStreamCount("user-a")).toBe(1));
+      await vi.waitFor(() => expect(db.conversation.findFirst).toHaveBeenCalledTimes(2));
+      announceUserBanned("user-a");
+      await expect(first).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      expect(liveStreamCount("user-a")).toBe(0);
+      expect(bus.listenerCount("c-1")).toBe(0);
+      // The late result goes nowhere.
+      finishRead(conversationRow("c-1", "RUNNING"));
+    });
+
+    it("refuses to open a stream for a user the database says is banned", async () => {
+      // The session that admitted the request can be a cookie-cache copy from
+      // before the ban; the registry's own read is what refuses it.
+      db.user.findUnique.mockResolvedValue({ banned: true, banExpires: null });
+      await expect((await client().activity()).next()).rejects.toSatisfy(
+        expectReason("UNAUTHORIZED"),
+      );
+      db.conversation.findFirst.mockResolvedValueOnce({ id: "c-1" });
+      await expect((await client().watch({ id: "c-1" })).next()).rejects.toSatisfy(
+        expectReason("UNAUTHORIZED"),
+      );
+      expect(activity.listenerCount("user-a")).toBe(0);
+      expect(bus.listenerCount("c-1")).toBe(0);
+      expect(liveStreamCount("user-a")).toBe(0);
+      expect(db.user.findUnique).toHaveBeenCalledWith({
+        where: { id: "user-a" },
+        select: { banned: true, banExpires: true },
+      });
+    });
+
+    it("refuses a deleted user, and admits a lapsed temporary ban", async () => {
+      db.user.findUnique.mockResolvedValueOnce(null);
+      await expect((await client().activity()).next()).rejects.toSatisfy(
+        expectReason("UNAUTHORIZED"),
+      );
+      db.user.findUnique.mockResolvedValueOnce({
+        banned: true,
+        banExpires: new Date(Date.now() - 60_000),
+      });
+      const iterator = await openActivity();
+      await iterator.return?.();
+      expect(liveStreamCount("user-a")).toBe(0);
+    });
+
+    it("refuses a stream whose ban is announced while its ban-state read is in flight", async () => {
+      let resolveRead: (value: unknown) => void = () => {};
+      db.user.findUnique.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRead = resolve;
+        }),
+      );
+      const iterator = await client().activity();
+      const first = iterator.next();
+      await vi.waitFor(() => expect(liveStreamCount("user-a")).toBe(1));
+      // The read started before the ban committed and returns the old state.
+      announceUserBanned("user-a");
+      resolveRead({ banned: false, banExpires: null });
+      await expect(first).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      expect(activity.listenerCount("user-a")).toBe(0);
+      expect(liveStreamCount("user-a")).toBe(0);
+    });
+
+    it("frees the slot when the ban-state read fails, and fails closed", async () => {
+      db.user.findUnique.mockRejectedValueOnce(new Error("db down"));
+      await expect((await client().activity()).next()).rejects.toThrow();
+      expect(liveStreamCount("user-a")).toBe(0);
+      expect(activity.listenerCount("user-a")).toBe(0);
+    });
+
+    it("a client disconnect is still a normal end, not UNAUTHORIZED", async () => {
+      const iterator = await openActivity();
+      await expect(iterator.return?.()).resolves.toMatchObject({ done: true });
+      expect(liveStreamCount("user-a")).toBe(0);
     });
   });
 

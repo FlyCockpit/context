@@ -215,6 +215,10 @@ else {
 }
 `;
   for (const name of ["node", "bash"]) writeFileSync(join(dir, name), stub, { mode: 0o755 });
+  // The entrypoint execs the CMD and the one-shot jobs under tini.
+  writeFileSync(join(dir, "tini"), '#!/bin/sh\n[ "$1" = -- ] && shift\nexec "$@"\n', {
+    mode: 0o755,
+  });
   const entry = fileURLToPath(new URL("./docker-entrypoint.sh", import.meta.url));
   return (args, extra = {}) => {
     const result = spawnSync("/bin/sh", [entry, ...args], {
@@ -227,7 +231,10 @@ else {
         .trim()
         .split("\n")
         .filter(Boolean)
-        .map((line) => JSON.parse(line)),
+        .map((line) => JSON.parse(line))
+        // The backups startup check (pre-migrate.sh --startup-notice) is
+        // covered by scripts/docker-entrypoint.test.mjs.
+        .filter((call) => !call.args.includes("--startup-notice")),
     };
   };
 }

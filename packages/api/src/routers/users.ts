@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { auth } from "@cockpit-context/auth";
+import { announceUserBanned, onUserBanned } from "@cockpit-context/auth/ban";
 import {
   clearInviteEmailDelivered,
   createSetPasswordToken,
@@ -32,6 +33,17 @@ import { oauthRevocationWrites } from "./mcp-connections";
 
 // Wire Better-Auth admin/remove-user through the same cleanup as users.remove.
 registerUserDeletionCleanup(prepareUserDeletion);
+// The admin plugin's `/admin/ban-user` and `/admin/update-user` ban through
+// Better-Auth (announced by its update hook as `auth-plugin`) and stop
+// nothing themselves: stop the user's runs here. `archive` and account
+// removal await `stopUserRuns` directly.
+onUserBanned((userId, origin) => {
+  if (origin !== "auth-plugin") return;
+  stopUserRuns(userId).catch((error: unknown) => {
+    const label = error instanceof Error ? error.name : typeof error;
+    console.error("[users] stopping a banned user's runs failed:", label);
+  });
+});
 
 // Roles surfaced in the admin UI. Better-auth itself stores `role` as a free-
 // form string (and supports comma-separated lists), but the admin dashboard
@@ -399,6 +411,9 @@ export const usersRouter = {
         }),
         ...oauthRevocationWrites({ userId: input.userId }, now),
       ]);
+      // After the commit: closes their open live streams (watch/activity),
+      // which were admitted once and are not re-checked (lib/live-streams.ts).
+      announceUserBanned(input.userId);
       await stopUserRuns(input.userId);
       return { success: true };
     }),

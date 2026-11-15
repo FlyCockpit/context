@@ -6,13 +6,13 @@ Cockpit Context uses Prisma Migrate with reviewed, committed SQL. `packages/db/p
 
 | Command | Purpose |
 |---|---|
-| `pnpm db:worktree` | Create this checkout's local and shadow databases and configure its database URL. |
+| `pnpm db:worktree` | Create this checkout's local and shadow databases, mark each one it creates as disposable, and configure its database URL. `--adopt` (a person at a terminal) marks an older one. |
 | `pnpm db:migrate <name>` | Generate expand SQL and optional delayed contract; applies nothing. |
-| `pnpm db:migrate:apply` | Apply local migrations and regenerate the client; skips contracts. |
+| `pnpm db:migrate:apply` | Apply local migrations and regenerate the client; skips contracts. Takes the migration runner lock and refuses, changing nothing, while another session holds it or Prisma's lock. |
 | `pnpm db:migrate:rebase` | Reorder unmerged folders after rebasing and recheck consistency. |
-| `pnpm db:reset:local` | Explicitly rebuild only this checkout's disposable local DB, including contracts and seed. |
+| `pnpm db:reset:local` | Explicitly rebuild only this checkout's disposable local DB, including contracts and seed; refuses a database without the disposable-local mark, and `EXPECTED_DB`. |
 | `pnpm db:check-migrations --base <ref>` | Check migrations on a disposable CHECK_DATABASE_URL. |
-| `pnpm db:test-unit` / `pnpm db:test-migrations` | Database-free runner tests / isolated real-Postgres migration checks. |
+| `pnpm db:test-unit` / `pnpm db:test-migrations` | Database-free runner tests / isolated real-Postgres migration checks. `db:test-migrations` starts a throwaway `postgres:18` container named `<prefix>-<hex>` (`--container-prefix <prefix>` or `TEST_MIGRATIONS_CONTAINER_PREFIX`; default `cockpit-context-test-migrations`) and removes it at the end, also on Ctrl-C; `--server-url <superuser url>` uses a disposable server you already run. Every database and role it creates has a per-run random name, so it never touches `cockpit_context` or a checkout's database. |
 
 Wrappers require this checkout's exact local database/shadow names on localhost, 127.0.0.1 or ::1 and reject connection-redirect URL parameters. Never point generation, reset or checks at shared databases. The root checkout uses `cockpit_context` after setup; worktrees get a deterministic suffix. Do not bypass a missing native child guard.
 
@@ -35,17 +35,17 @@ docker compose -p cockpit-context run --rm --no-deps app migrate
 | Database state | Result |
 |---|---|
 | up-to-date | Register and start; the leader may run due safe contracts. |
-| pending | Validate, run backup hook, deploy pending SQL, then admit. |
+| pending | Validate, run the backup hook only when opted in, deploy pending SQL, then admit. |
 | db-ahead | Admit only if newer migrations remain rollback-safe and no corresponding contract ran. |
 | failed | Wait for an active runner or recover an intact transactional attempt once; otherwise refuse. |
 | no-history-nonempty | Refuse; never automatically adopt an existing database. |
 | unreachable | Refuse or wait until timeout, depending on mode. |
 
-The pre-migration hook uses database-only pg_dump archives. No configured destination means a warning and no dump; a configured backup failure blocks mutation. This is not a full-volume or encrypted-bundle requirement. Configure durable backups before production schema changes. See [backup/restore](./backup-restore.md).
+Backups default off (`BACKUP_ENABLED=false`): migrations and scheduled deletions never call the backup hook, even if storage is present. With `BACKUP_ENABLED=true` the runner calls `scripts/backup/pre-migrate.sh --required` (a database-only pg_dump archive) before every pending deploy, a fresh database included: there is no fresh-install exemption. No usable destination, a failed dump, or no hook in the image stops the migration before anything is applied. Before the first due scheduled deletion it calls `pre-migrate.sh --label pre-drop --keep 5 --required` unless this run already took the pre-migration backup; a failure, a missing destination or a missing hook skips every deletion this run (the app still starts). Durable backups are recommended but opt-in. See [backup/restore](./backup-restore.md).
 
 ## Expand and contract
 
-The generator preserves running-release compatibility in `migration.sql` and moves removals into `contract.sql`. Contracts wait at least seven days after the new release is ready, with no live older registration and no active hold. The runner checks checksums, templates, retired names and catalog state and calls the pre-drop backup hook. Main-run jobs and heartbeat stay in the single app process; no separate worker is introduced.
+The generator preserves running-release compatibility in `migration.sql` and moves removals into `contract.sql`. An enum value removal (`--remap 'E.OLD=NEW'`) adds a `BEFORE INSERT OR UPDATE` trigger per affected table that rewrites `OLD` to `NEW` during the overlap. It is named `0_cockpit_context_sync_<hash>`: BEFORE triggers on a table fire in name order (byte order), so it runs before every trigger with an unquoted name and every quoted one starting with a letter, and they see `NEW`, never `OLD`; only a quoted name starting with a space, punctuation or `0` could sort earlier. The contract drops it. Contracts wait at least seven days after the new release is ready, with no live older registration and no active hold. The runner checks checksums, templates, retired names and catalog state and calls the pre-drop backup hook only with `BACKUP_ENABLED=true`. Main-run jobs and heartbeat stay in the single app process; no separate worker is introduced.
 
 In-place breaking drops, renames and type changes on initialized databases are refused. There is no maintenance override. Use `@map`/`@@map`, generated contracts and the two-PR type-change recipe. Never reuse a retired database name.
 

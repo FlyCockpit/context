@@ -32,4 +32,10 @@ For enum removal use `--remap 'Enum.OLD=NEW'` and inspect the generated remap/sy
 
 Migration replay must match the Prisma schema and application catalog; new folders sort after the base branch; merged files remain byte-identical; realistic fixtures retain their invariants; and safety analysis rejects breaking SQL, invalid generated blocks, accidental renames and retired-name reuse. Rebase unmerged folders with `pnpm db:migrate:rebase`, never retimestamp a merged folder.
 
+## Local database troubleshooting
+
+**`db:reset:local` says the database is not marked as disposable.** Reset drops only a database carrying the disposable-local mark, which `pnpm db:worktree` writes on databases it creates and the dev compose stack writes on a fresh volume (`scripts/db/dev-postgres-init/10-mark-local.sh`). A localhost URL with the right name is not proof: an SSH tunnel or port-forward to another server passes every name and host check. Nothing was dropped. If it really is this checkout's own local database (one created before the mark existed), the user runs `pnpm db:worktree --adopt` once at a terminal and types the name back; agents hand that command to the user. `EXPECTED_DB` never widens a reset, and `--adopt` refuses it.
+
+**`db:migrate:apply` says another session holds a migration lock.** A deploy runner, a restore or another `prisma migrate deploy` holds the runner lock (72707370) or Prisma's lock (72707369). Nothing was changed; wait and re-run. A failed-looking row may belong to a migration that is still running, so the wrapper never resolves it then.
+
 For full commands, deployment admission and failed-transaction recovery see [schema migrations](./schema-migrations.md). For backup scope and confirmation see [backup/restore](./backup-restore.md).

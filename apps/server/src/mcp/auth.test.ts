@@ -8,6 +8,7 @@ vi.mock("@cockpit-context/db", () => ({ default: {} }));
 
 const { createMcpAdmissionGate } = await import("./admission");
 const { createMcpRequestHandler, releaseWhenBodyEnds } = await import("./auth");
+const { announceUserBanned } = await import("@cockpit-context/auth/ban");
 
 const ORIGIN = "http://localhost:3001";
 const ISSUER = `${ORIGIN}/api/auth`;
@@ -288,6 +289,51 @@ describe("createMcpRequestHandler", () => {
     push?.("data: 1\n\n");
     end?.();
     expect(await response.text()).toBe("data: 1\n\n");
+    expect(gate.outstanding).toBe(0);
+  });
+
+  it("applies a ban announced while the credential was being resolved", async () => {
+    const { app, transport, resolveAgentToken } = setup();
+    resolveAgentToken.mockImplementationOnce(async (): Promise<McpCredentialResult> => {
+      // The credential read saw the user as not banned; the ban commits and
+      // is announced before the identity reaches the handler.
+      announceUserBanned(identity.userId);
+      return { ok: true, identity };
+    });
+    const response = await post(app, `Bearer ${COCKPIT_CONTEXT_TOKEN}`);
+    expect(response.status).not.toBe(200);
+    expect(transport.fetch).not.toHaveBeenCalled();
+  });
+
+  it("ends an in-flight streamed exchange when its user is banned, and only theirs", async () => {
+    const gate = createMcpAdmissionGate();
+    let seen: AbortSignal | undefined;
+    const transport = {
+      fetch: async (request: Request) => {
+        seen = request.signal;
+        // A long SSE response (query_dependency progress) that never ends by itself.
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("data: progress\n\n"));
+            },
+          }),
+        );
+      },
+    };
+    const { app } = setup({ admissionGate: gate, transport });
+    const response = await post(app, `Bearer ${COCKPIT_CONTEXT_TOKEN}`);
+    const reader = response.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: progress\n\n");
+    expect(gate.outstanding).toBe(1);
+
+    announceUserBanned("someone-else");
+    expect(seen?.aborted).toBe(false);
+    expect(gate.outstanding).toBe(1);
+
+    announceUserBanned(identity.userId);
+    expect(seen?.aborted).toBe(true);
+    await expect(reader.read()).rejects.toThrow();
     expect(gate.outstanding).toBe(0);
   });
 });

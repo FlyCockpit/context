@@ -32,8 +32,12 @@ const forceTwoFactorKeys: readonly string[] = FORCE_2FA_SETTING_KEYS;
 
 /**
  * Off-site backups are configured in this server's environment: enabled, a
- * bucket, the dump-writer pair (the app leads schema, so it takes the
- * pre-apply dump) and a usable, distinct monitor pair for the freshness check.
+ * bucket and a usable monitor pair for the freshness check. The dump-writer
+ * pair is not checked here: the image entrypoint unsets
+ * BACKUP_S3_ACCESS_KEY_ID / BACKUP_S3_SECRET_ACCESS_KEY before it starts the
+ * server (only the startup migration runner and the explicit backup commands
+ * hold them; scripts/docker-entrypoint.sh), and a startup with
+ * BACKUP_ENABLED=true and an unusable destination never reaches the server.
  * It cannot see whether the `db-backup` container runs; the backup status card
  * on the admin overview reports whether dumps actually arrive.
  */
@@ -41,8 +45,6 @@ function backupsConfigured(): boolean {
   return (
     env.BACKUP_ENABLED &&
     Boolean(env.BACKUP_S3_BUCKET) &&
-    Boolean(env.BACKUP_S3_ACCESS_KEY_ID) &&
-    Boolean(env.BACKUP_S3_SECRET_ACCESS_KEY) &&
     backupMonitorConfigWarnings(env).length === 0
   );
 }

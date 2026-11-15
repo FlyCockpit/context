@@ -11,6 +11,8 @@ import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { admin, genericOAuth, twoFactor } from "better-auth/plugins";
 import { adminPluginAccess } from "./admin-access.js";
+import { announceIfUserBanned } from "./ban.js";
+import { bannedSessionGuard } from "./banned-session-guard.js";
 import { revokeBootstrapToken } from "./bootstrap-token.js";
 import { verifyInvitedEmailOnPasswordReset } from "./invite-verification.js";
 import { resolveMcpPlugins } from "./mcp-plugins.js";
@@ -176,7 +178,11 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
     // Short-lived signed cookie cache: skips the session DB lookup on most
-    // requests; revocations/role changes propagate within 60s.
+    // requests; revocations/role changes propagate within 60s. That is also
+    // the bound on a ban: every ban path deletes the user's sessions, but a
+    // request carrying a cache cookie signed before the ban still resolves
+    // the pre-ban user for up to `maxAge`. Closing it would need an
+    // authoritative DB read per request or no cache (docs/access-matrix.md).
     cookieCache: {
       enabled: true,
       maxAge: 60,
@@ -214,6 +220,10 @@ export const auth = betterAuth({
   // a `secondaryStorage` first — the defaults are not safe behind a proxy.
   rateLimit: { enabled: false },
   plugins: [
+    // First, so a banned user's surviving session is refused on every
+    // `/api/auth/*` route (sign-out excepted) before any other plugin's
+    // before hook runs (./banned-session-guard.ts).
+    bannedSessionGuard(),
     admin({
       defaultRole: "user",
       // No impersonation, admin password/email resets or session listing:
@@ -299,8 +309,14 @@ export const auth = betterAuth({
         },
       },
       update: {
-        after: async () => {
+        after: async (user) => {
           invalidateSignupAvailabilityCache();
+          // The admin plugin's `/admin/ban-user` and `/admin/update-user`
+          // ban through here. Better-Auth runs this hook after the write
+          // commits, so a listener that re-reads the user sees the ban.
+          // Closes the user's open subscriptions (./ban.ts).
+          // The adapter hands over null when the row vanished mid-update.
+          if (user) announceIfUserBanned(user);
         },
       },
       create: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPrivateIp } from "./private-ip";
+import { isInfraIp, isPrivateIp } from "./private-ip";
 
 describe("isPrivateIp (IPv4)", () => {
   it.each([
@@ -93,5 +93,34 @@ describe("isPrivateIp (IPv6)", () => {
 describe("isPrivateIp (unknown family)", () => {
   it("fails closed", () => {
     expect(isPrivateIp("8.8.8.8", 0)).toBe(true);
+  });
+});
+
+describe("isInfraIp (proxy configuration warning only)", () => {
+  it.each([
+    ["10.0.0.2", 4],
+    ["192.168.1.20", 4],
+    ["::1", 6],
+    ["0:0:0:0:0:0:0:1", 6],
+    ["fd00::1", 6],
+    ["febf::1", 6],
+    ["::ffff:10.0.0.2", 6],
+    ["::ffff:a00:2", 6],
+  ] as const)("recognizes infrastructure %s", (ip, family) => {
+    expect(isInfraIp(ip, family)).toBe(true);
+  });
+
+  it.each([
+    ["198.51.100.7", 4],
+    ["2001:db8::1", 6],
+    ["::ffff:8.8.8.8", 6],
+    ["::7f00:1", 6],
+    ["64:ff9b::a00:2", 6],
+    ["2002:a00:2::", 6],
+    ["fec0::1", 6],
+    ["garbage", 0],
+    ["garbage", 6],
+  ] as const)("does not infer a proxy from %s", (ip, family) => {
+    expect(isInfraIp(ip, family)).toBe(false);
   });
 });

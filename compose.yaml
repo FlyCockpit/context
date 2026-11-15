@@ -29,7 +29,6 @@ services:
       COCKPIT_CONTEXT_DATA_DIR: /data
     volumes:
       - cockpit-context-data:/data
-      - cockpit-context-backups:/backups
     depends_on:
       postgres:
         condition: service_healthy

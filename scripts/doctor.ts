@@ -485,6 +485,44 @@ function checkDockerDaemon() {
   });
 }
 
+function checkPreMigrationBackup() {
+  // BACKUP_ENABLED is the switch; a destination alone does not turn automatic
+  // backups on (scripts/db/migrate-runtime.mjs). It also turns on freshness
+  // monitoring. Values are compared, never printed (except an invalid switch).
+  const enabled = process.env.BACKUP_ENABLED;
+  if (enabled && enabled !== "true" && enabled !== "false") {
+    record({
+      name: "pre-migration backup",
+      status: "fail",
+      detail: `BACKUP_ENABLED must be true or false (got "${enabled}"); the image refuses to start`,
+      required: false,
+    });
+    return;
+  }
+  if (enabled === "true") {
+    record({
+      name: "pre-migration backup",
+      status: process.env.BACKUP_S3_BUCKET ? "ok" : "warn",
+      detail: process.env.BACKUP_S3_BUCKET
+        ? "BACKUP_ENABLED=true, BACKUP_S3_BUCKET is set"
+        : "BACKUP_ENABLED=true without BACKUP_S3_BUCKET: the app also needs a writable /backups volume (compose.backup.yaml), or its migrating start refuses",
+      required: false,
+    });
+    return;
+  }
+  record({
+    name: "pre-migration backup",
+    status: "ok",
+    detail: "off (default; migrations do not require backups)",
+    hint:
+      "In production, have the deploy take a backup before pending migrations: set BACKUP_ENABLED=true and add " +
+      "compose.backup.yaml (a /backups volume on the app) and/or set BACKUP_S3_BUCKET + BACKUP_S3_*, or take a " +
+      "provider snapshot first. With BACKUP_ENABLED=true and no destination a migrating start fails. " +
+      "See docs/backup-restore.md.",
+    required: false,
+  });
+}
+
 async function main() {
   checkNodeVersion();
   checkDockerDaemon();
@@ -499,6 +537,7 @@ async function main() {
 
   checkPortless();
   await checkEnv();
+  checkPreMigrationBackup();
   // Stop further checks if env failed — they would all fail with confusing
   // messages and the user needs to fix env first.
   const envOk = results.find((r) => r.name === "env (zod schema)")?.status === "ok";

@@ -18,6 +18,7 @@ const baseSession: RouteSession = {
     role: "user",
     twoFactorEnabled: false,
     createdAt: Date.UTC(2026, 0, 1),
+    banned: false,
   },
 };
 
@@ -93,5 +94,13 @@ describe("route session access decisions", () => {
     expect(decideAdminRouteAccess(resolvedRouteSession(baseSession))).toEqual({
       kind: "not-found",
     });
+  });
+
+  it("404-hides a banned admin, as every admin procedure refuses one", () => {
+    expect(
+      decideAdminRouteAccess(
+        resolvedRouteSession(sessionWith({ role: "admin", emailVerified: true, banned: true })),
+      ),
+    ).toEqual({ kind: "not-found" });
   });
 });

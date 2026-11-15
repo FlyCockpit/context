@@ -303,7 +303,12 @@ VOLUME ["/data"]
 # place its Landlock ruleset lets it write), removed when it stops.
 USER node
 
-ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
+# The entrypoint is PID 1 while it migrates (the runner, its child, holds the
+# backup writer keys), then unsets BACKUP_S3_ACCESS_KEY_ID /
+# BACKUP_S3_SECRET_ACCESS_KEY and execs tini with the CMD, so tini becomes
+# PID 1 with a clean environment; the one-shot image commands run under tini
+# too (scripts/docker-entrypoint.sh).
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 EXPOSE 3000
 

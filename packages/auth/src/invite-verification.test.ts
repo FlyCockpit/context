@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import type { MockInstance } from "vitest";
@@ -83,6 +84,16 @@ describe("invite email verification", () => {
 
 // The REAL Better-Auth reset endpoint (in-memory adapter, no SMTP) consuming a
 // token minted the way `users.invite` and `users.passwordLink` mint it.
+// Better-Auth's default scrypt hash is deliberately CPU-heavy: several hashes
+// per test made these tests' duration depend on machine load (timeouts under
+// a busy parallel run). The token, binding and hook logic under test does not
+// depend on the hash, so use a cheap deterministic one.
+const fastPassword = {
+  hash: async (password: string) =>
+    `test-sha256:${createHash("sha256").update(password).digest("hex")}`,
+  verify: async ({ hash, password }: { hash: string; password: string }) =>
+    hash === `test-sha256:${createHash("sha256").update(password).digest("hex")}`,
+};
 describe("set-password token (Better-Auth reset)", () => {
   const OLD_PASSWORD = "original-password-123";
   const NEW_PASSWORD = "chosen-password-456";
@@ -104,7 +115,7 @@ describe("set-password token (Better-Auth reset)", () => {
       baseURL: "http://localhost:3000",
       logger: { disabled: true },
       rateLimit: { enabled: false },
-      emailAndPassword: { enabled: true, minPasswordLength: 12 },
+      emailAndPassword: { enabled: true, minPasswordLength: 12, password: fastPassword },
     });
     const alice = await auth.api.signUpEmail({
       body: { email: "alice@example.com", password: OLD_PASSWORD, name: "Alice" },

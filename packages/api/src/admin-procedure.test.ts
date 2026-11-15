@@ -19,7 +19,14 @@ vi.mock("@cockpit-context/env/server", () => ({
 }));
 
 import type { Context } from "./context";
-import { adminOr404Procedure, adminProcedure, protectedProcedure } from "./index";
+import {
+  adminOr404Procedure,
+  adminProcedure,
+  authenticatedProcedure,
+  checkAdminAuthority,
+  checkSessionAccess,
+  protectedProcedure,
+} from "./index";
 import { invalidateForceTwoFactorSettingsCache } from "./lib/two-factor-policy";
 
 const { default: prisma } = await import("@cockpit-context/db");
@@ -42,6 +49,12 @@ const testRouter = {
 
 const protectedRouter = {
   ping: protectedProcedure.handler(async () => {
+    return { ok: true };
+  }),
+};
+
+const authenticatedRouter = {
+  ping: authenticatedProcedure.handler(async () => {
     return { ok: true };
   }),
 };
@@ -438,5 +451,207 @@ describe("admin gates and CLI credentials", () => {
       context: { ...buildContext(), credential: "api-key" },
     });
     await expect(client.ping()).resolves.toEqual({ ok: true });
+  });
+});
+
+// The single admin rule every admin gate maps (requireAdmin, requireAdminOr404,
+// apps/server/src/admin-session-gate.ts). The ORDER is part of the contract:
+// each gate's status and message depend on which check fails first.
+describe("checkAdminAuthority", () => {
+  const session = (user: Partial<Session["user"]>) => {
+    const ctx = buildContext({ user });
+    if (!ctx.session) throw new Error("expected a session");
+    return ctx.session;
+  };
+  const verifiedAdmin = { role: "admin", emailVerified: true, twoFactorEnabled: true };
+
+  it("admits a verified admin with a second factor and returns the same session", async () => {
+    const s = session(verifiedAdmin);
+    await expect(checkAdminAuthority(s)).resolves.toEqual({ ok: true, session: s });
+    await expect(checkAdminAuthority(s, "session-token")).resolves.toEqual({
+      ok: true,
+      session: s,
+    });
+  });
+
+  it("checks session, then ban, then API key, then email, then role, then 2FA", async () => {
+    await expect(checkAdminAuthority(null, "api-key")).resolves.toEqual({
+      ok: false,
+      reason: "unauthenticated",
+    });
+    // Every later check also fails here; the earliest one is reported.
+    const worst = session({ role: "user", emailVerified: false, twoFactorEnabled: false });
+    await expect(
+      checkAdminAuthority(session({ ...worst.user, banned: true }), "api-key"),
+    ).resolves.toEqual({ ok: false, reason: "banned" });
+    await expect(checkAdminAuthority(worst, "api-key")).resolves.toEqual({
+      ok: false,
+      reason: "api-key",
+    });
+    await expect(checkAdminAuthority(worst)).resolves.toEqual({ ok: false, reason: "unverified" });
+    await expect(
+      checkAdminAuthority(session({ role: "user", emailVerified: true, twoFactorEnabled: false })),
+    ).resolves.toEqual({ ok: false, reason: "not-admin" });
+    await expect(
+      checkAdminAuthority(session({ role: "admin", emailVerified: true, twoFactorEnabled: false })),
+    ).resolves.toEqual({ ok: false, reason: "two-factor" });
+  });
+
+  it("maps the earliest failure to requireAdmin's message", async () => {
+    const ctx = buildContext({ user: { role: "user", emailVerified: false } });
+    await expect(
+      createRouterClient(testRouter, { context: { ...ctx, credential: "api-key" } }).ping(),
+    ).rejects.toSatisfy((error: ORPCError) => {
+      expect(error.code).toBe("FORBIDDEN");
+      expect(error.message).toBe("API keys cannot be used for admin access.");
+      return true;
+    });
+  });
+
+  it("refuses a banned admin, permanent or with a future expiry, from a cache-hit string too", async () => {
+    const future = new Date(Date.now() + 60_000);
+    // A Better-Auth cookie-cache hit revives `banExpires` as an ISO string.
+    const revivedFromCache = future.toISOString() as unknown as Date;
+    for (const banExpires of [null, future, revivedFromCache]) {
+      const s = session({ ...verifiedAdmin, banned: true, banExpires });
+      await expect(checkAdminAuthority(s), String(banExpires)).resolves.toEqual({
+        ok: false,
+        reason: "banned",
+      });
+    }
+  });
+
+  it("admits an admin whose temporary ban has lapsed", async () => {
+    const s = session({ ...verifiedAdmin, banned: true, banExpires: new Date(Date.now() - 1000) });
+    await expect(checkAdminAuthority(s)).resolves.toEqual({ ok: true, session: s });
+  });
+
+  it("every oRPC admin gate refuses a banned admin", async () => {
+    const ctx = buildContext({ user: { ...verifiedAdmin, banned: true, banExpires: null } });
+    await expect(createRouterClient(testRouter, { context: ctx }).ping()).rejects.toSatisfy(
+      (error: ORPCError) => {
+        expect(error.code).toBe("UNAUTHORIZED");
+        return true;
+      },
+    );
+    await expect(createRouterClient(testRouter404, { context: ctx }).ping()).rejects.toSatisfy(
+      (error: ORPCError) => {
+        expect(error.code).toBe("NOT_FOUND");
+        return true;
+      },
+    );
+  });
+
+  it("requireAdmin answers UNAUTHORIZED to a missing session", async () => {
+    await expect(
+      createRouterClient(testRouter, { context: buildContext(null) }).ping(),
+    ).rejects.toSatisfy((error: ORPCError) => {
+      expect(error.code).toBe("UNAUTHORIZED");
+      return true;
+    });
+  });
+});
+
+// A ban ends access to every authenticated procedure, not only the admin ones.
+// The admin plugin refuses a banned user only when a session is created, so a
+// session issued before the ban keeps resolving through `getSession`; the
+// shared `checkSessionAccess` is what refuses it on every request.
+describe("banned users on every authenticated procedure", () => {
+  const future = () => new Date(Date.now() + 60_000);
+  // A Better-Auth cookie-cache hit revives `banExpires` as an ISO string.
+  const bans = () => [
+    { label: "permanent", banExpires: null },
+    { label: "future expiry", banExpires: future() },
+    { label: "cache-hit string", banExpires: future().toISOString() as unknown as Date },
+  ];
+  const routers = [
+    ["authenticatedProcedure", authenticatedRouter],
+    ["protectedProcedure", protectedRouter],
+    ["adminProcedure", testRouter],
+  ] as const;
+
+  it("checkSessionAccess refuses a missing session, then a ban, and admits anyone else", () => {
+    expect(checkSessionAccess(null)).toEqual({ ok: false, reason: "unauthenticated" });
+    expect(checkSessionAccess(undefined)).toEqual({ ok: false, reason: "unauthenticated" });
+    for (const { label, banExpires } of bans()) {
+      const ctx = buildContext({ user: { banned: true, banExpires } });
+      expect(checkSessionAccess(ctx.session), label).toEqual({ ok: false, reason: "banned" });
+    }
+    const ok = buildContext();
+    expect(checkSessionAccess(ok.session)).toEqual({ ok: true, session: ok.session });
+  });
+
+  it("answers UNAUTHORIZED from every authenticated builder to a banned user", async () => {
+    for (const [name, router] of routers) {
+      for (const { label, banExpires } of bans()) {
+        const ctx = buildContext({
+          user: {
+            role: "admin",
+            emailVerified: true,
+            twoFactorEnabled: true,
+            banned: true,
+            banExpires,
+          },
+        });
+        await expect(
+          createRouterClient(router, { context: ctx }).ping(),
+          `${name} / ${label}`,
+        ).rejects.toSatisfy((error: ORPCError) => {
+          expect(error).toBeInstanceOf(ORPCError);
+          expect(error.code).toBe("UNAUTHORIZED");
+          return true;
+        });
+      }
+    }
+  });
+
+  it("refuses a banned user on an API key or device-flow credential too", async () => {
+    for (const credential of ["api-key", "session-token"] as const) {
+      const ctx = { ...buildContext({ user: { banned: true, banExpires: null } }), credential };
+      await expect(
+        createRouterClient(protectedRouter, { context: ctx }).ping(),
+        credential,
+      ).rejects.toSatisfy((error: ORPCError) => {
+        expect(error.code).toBe("UNAUTHORIZED");
+        return true;
+      });
+    }
+  });
+
+  it("admits a user whose temporary ban has lapsed", async () => {
+    const ctx = buildContext({ user: { banned: true, banExpires: new Date(Date.now() - 1000) } });
+    for (const [name, router] of routers.slice(0, 2)) {
+      await expect(createRouterClient(router, { context: ctx }).ping(), name).resolves.toEqual({
+        ok: true,
+      });
+    }
+  });
+
+  it("refuses an existing session once its user is banned later", async () => {
+    // One session row, issued before the ban. Each request resolves it afresh
+    // (the context is built per request), and after the ban `getSession`
+    // returns the same session with the user now banned; nothing deleted it.
+    const issuedAt = new Date(Date.now() - 3_600_000);
+    let banned = false;
+    const resolveRequestContext = (): Context =>
+      buildContext({
+        user: { banned, banExpires: null },
+        session: { id: "pre-ban-session", createdAt: issuedAt, updatedAt: issuedAt },
+      });
+
+    for (const [name, router] of routers.slice(0, 2)) {
+      banned = false;
+      await expect(
+        createRouterClient(router, { context: resolveRequestContext }).ping(),
+        `${name} before the ban`,
+      ).resolves.toEqual({ ok: true });
+
+      banned = true;
+      const client = createRouterClient(router, { context: resolveRequestContext });
+      await expect(client.ping(), `${name} after the ban`).rejects.toSatisfy((error: ORPCError) => {
+        expect(error.code).toBe("UNAUTHORIZED");
+        return true;
+      });
+    }
   });
 });
