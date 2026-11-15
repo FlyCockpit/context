@@ -47,10 +47,10 @@
     "remark-gfm": "4.0.1",
     "sileo": "catalog:",
     "zod": "catalog:",
-    "zustand": "^5.0.16"
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "4.3.4",
+    "@tailwindcss/vite": "4.3.5",
     "@tanstack/react-query-devtools": "catalog:",
     "@tanstack/react-router-devtools": "catalog:",
     "@types/node": "catalog:",

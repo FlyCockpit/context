@@ -14,7 +14,7 @@
 //      the verified tarball) before writing it next to the wrapper;
 //   5. links `pnpm` in <bin-dir> to that native binary and checks the version.
 //
-// pnpm 12 tarball layout (verified on 12.17.0): bin/pnpm.mjs + bin/pnpx.mjs
+// pnpm 12 tarball layout (verified on 12.18.0): bin/pnpm.mjs + bin/pnpx.mjs
 // (Corepack entries), a `pnpm` sh placeholder, native-binary.mjs, and dist/
 // (bundled node-gyp + the get-pnpm downloader). There is no bin/pnpm.cjs.
 //

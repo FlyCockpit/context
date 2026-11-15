@@ -11,6 +11,7 @@ import { toast } from "@cockpit-context/ui/components/sileo";
 import { TextareaField, TextField } from "@cockpit-context/ui/components/text-field";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -35,7 +36,7 @@ function useInvalidateKeys() {
   return () => void queryClient.invalidateQueries({ queryKey: orpc.sshKeys.key() });
 }
 
-function nameSchema(t: (key: string, options?: Record<string, unknown>) => string) {
+function nameSchema(t: TFunction<["dashboard", "common"]>) {
   return z
     .string()
     .trim()

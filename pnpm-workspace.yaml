@@ -84,35 +84,35 @@ catalog:
   zod: ^4.6.7
   "@types/node": ^26.6.6
   hono: 4.13.18
-  "@orpc/server": ^1.16.1
-  "@orpc/openapi": ^1.16.1
-  "@orpc/zod": ^1.16.1
+  "@orpc/server": ^1.16.2
+  "@orpc/openapi": ^1.16.2
+  "@orpc/zod": ^1.16.2
   # Exact pins: the 1.7.x family must stay aligned so @better-auth/core and
   # plugin types resolve to a single copy. Bump the whole family together.
-  better-auth: 1.7.17
-  "@better-auth/oauth-provider": 1.7.17
-  "@better-auth/mcp": 1.7.17
-  "@better-auth/cimd": 1.7.17
+  better-auth: 1.7.18
+  "@better-auth/oauth-provider": 1.7.18
+  "@better-auth/mcp": 1.7.18
+  "@better-auth/cimd": 1.7.18
   # MCP SDK v2 (server transport), matching ws-model-proxy. Exact pin: the
   # handler/auth-adapter API surface is versioned with the protocol.
   "@modelcontextprotocol/server": 2.4.0
-  lucide-react: 1.68.0
+  lucide-react: 1.70.0
   next-themes: ^0.4.6
   # Web/UI React.
   react: ^19.3.1
   react-dom: ^19.3.1
   sileo: ^0.1.6
   # One Motion for @cockpit-context/ui and (via the sileo override above) sileo.
-  motion: 14.9.1
+  motion: 14.10.1
   "@prisma/client": ^7.10.1
   # Keep the Prisma CLI in lockstep with @prisma/client above — they must match.
   # Consumed by packages/db via `catalog:`.
   prisma: ^7.10.1
-  "@orpc/client": ^1.16.1
-  "@orpc/tanstack-query": ^1.16.1
+  "@orpc/client": ^1.16.2
+  "@orpc/tanstack-query": ^1.16.2
   "@types/react": ^19.3.0
   "@types/react-dom": ^19.3.0
-  tailwindcss: 4.3.4
+  tailwindcss: 4.3.5
   # TypeScript 7 is also the shipped TS/JS language server (`tsc --lsp`), and
   # pyright the Python one: @cockpit-context/explore spawns both, and apps/server declares
   # them as runtime dependencies so the bundled server resolves them in the
@@ -120,32 +120,32 @@ catalog:
   # and re-run `pnpm run lsp:smoke`.
   typescript: ^7.0.2
   pyright: 1.1.414
-  vite: ^8.3.5
+  vite: ^8.3.6
   "@vitejs/plugin-react": 6.2.1
   postcss: ^8.5.32
-  "@tanstack/ai": 1.1.0
-  "@tanstack/ai-anthropic": 1.1.0
-  "@tanstack/ai-openrouter": 1.1.0
+  "@tanstack/ai": 1.2.0
+  "@tanstack/ai-anthropic": 1.1.1
+  "@tanstack/ai-openrouter": 1.1.2
   "@tanstack/react-form": ^1.33.5
-  "@tanstack/react-query": 5.106.0
-  "@tanstack/react-query-devtools": 5.106.0
+  "@tanstack/react-query": 5.107.1
+  "@tanstack/react-query-devtools": 5.107.1
   "@tanstack/react-router": ^1.170.46
-  "@tanstack/react-router-devtools": ^1.167.2
+  "@tanstack/react-router-devtools": ^1.167.3
   "@tanstack/react-router-ssr-query": ^1.167.3
-  "@tanstack/react-start": ^1.169.4
+  "@tanstack/react-start": ^1.169.5
   tsx: ^4.23.15
   vitest: 5.1.0
   vitest-mock-extended: ^5.1.1
-  rate-limiter-flexible: 11.2.4
-  nodemailer: 10.3.1 # GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w / GHSA-85x2-q946-cp5h (address parser)
+  rate-limiter-flexible: 11.3.0
+  nodemailer: 10.4.0 # GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w / GHSA-85x2-q946-cp5h (address parser)
   "@types/nodemailer": ^8.0.2
-  tsdown: 0.23.5
-  "@aws-sdk/client-s3": 3.1162.0
-  i18next: 26.7.1
-  react-i18next: 17.1.12
+  tsdown: 0.23.7
+  "@aws-sdk/client-s3": 3.1164.0
+  i18next: 27.0.1
+  react-i18next: 18.0.0
   i18next-browser-languagedetector: 8.3.0
-  openai: 7.50.0
-  "@anthropic-ai/sdk": 1.5.0
+  openai: 7.53.0
+  "@anthropic-ai/sdk": 1.6.0
   "qrcode.react": ^4.2.0
   "@fontsource-variable/roboto": ^5.3.0
   "tailwind-merge": ^3.7.0
