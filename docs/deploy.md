@@ -14,7 +14,7 @@ cd cockpit-context
 cp .env.example .env
 ```
 
-Edit `.env` privately. Generated examples contain placeholders, not deployment credentials. Do not use `.env.docker.defaults` for production. The supplied Compose file builds `Dockerfile` locally; a published release image is `ghcr.io/flycockpit/context:1.0.0`. To use a published image, override the app and optional backup image consistently and pull the selected release; prefer a digest for immutable deployments.
+Edit `.env` privately. Generated examples contain placeholders, not deployment credentials. Do not use `.env.docker.defaults` for production. The supplied Compose file builds `Dockerfile` locally. No release image has been published yet; the manual Release workflow publishes each release as `ghcr.io/flycockpit/context:<version>`. To use a published image once one exists, override the app and optional backup image consistently and pull the selected release; prefer a digest for immutable deployments.
 
 A first deployment needs only `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `COCKPIT_CONTEXT_ENCRYPTION_KEYS` and `ADMIN_EMAILS`, plus `TRUST_PROXY_HOPS=1` behind Traefik/Dokploy or Caddy (the default `0` keys every request on the proxy). Compose supplies the database URL, production mode, storage path and migration defaults. Model credentials are needed when you want real answers. No backup settings, backup volume or scheduler are required: migrations run without a backup, and startup logs one notice explaining how to opt in.
 

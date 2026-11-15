@@ -38,7 +38,7 @@ The React web app and MCP clients connect to a Hono server. PostgreSQL stores ac
 
 Investigations use OpenRouter for model inference. They read dependency source through confined file-search/read tools and can use TypeScript/JavaScript and Python language servers. On supported Linux hosts, the language servers run under Landlock confinement; when the required sandbox is unavailable those tools are disabled and file-based investigation remains available. Source excerpts and questions sent to the model leave the instance, so choose a provider and model appropriate for your data.
 
-Repository reuse does not share users' conversations or imply a cross-user answer cache. Named organizational workspaces and separate service-account identities are not part of the documented 1.0.0 model; credentials act as the user who authorizes them.
+Repository reuse does not share users' conversations or imply a cross-user answer cache. Named organizational workspaces and separate service-account identities are not part of the current documented model; credentials act as the user who authorizes them.
 
 ## Quick start
 
