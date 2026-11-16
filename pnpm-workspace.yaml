@@ -103,7 +103,7 @@ catalog:
   react-dom: ^19.3.1
   sileo: ^0.1.6
   # One Motion for @cockpit-context/ui and (via the sileo override above) sileo.
-  motion: 14.10.1
+  motion: 14.11.0
   "@prisma/client": ^7.10.1
   # Keep the Prisma CLI in lockstep with @prisma/client above — they must match.
   # Consumed by packages/db via `catalog:`.
@@ -120,8 +120,8 @@ catalog:
   # and re-run `pnpm run lsp:smoke`.
   typescript: ^7.0.2
   pyright: 1.1.414
-  vite: ^8.3.6
-  "@vitejs/plugin-react": 6.2.1
+  vite: ^8.3.7
+  "@vitejs/plugin-react": 6.3.0
   postcss: ^8.5.32
   "@tanstack/ai": 1.2.0
   "@tanstack/ai-anthropic": 1.1.1
@@ -135,7 +135,7 @@ catalog:
   "@tanstack/react-start": ^1.169.5
   tsx: ^4.23.15
   vitest: 5.1.0
-  vitest-mock-extended: ^5.1.1
+  vitest-mock-extended: ^6.0.0
   rate-limiter-flexible: 11.4.0
   nodemailer: 10.4.0 # GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w / GHSA-85x2-q946-cp5h (address parser)
   "@types/nodemailer": ^8.0.2
