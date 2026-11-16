@@ -255,8 +255,8 @@ catalogs:
       specifier: 1.7.18
       version: 1.7.18
     dotenv:
-      specifier: ^18.0.9
-      version: 18.0.9
+      specifier: ^18.0.10
+      version: 18.0.10
     hono:
       specifier: 4.13.18
       version: 4.13.18
@@ -297,8 +297,8 @@ catalogs:
       specifier: ^4.2.0
       version: 4.2.0
     rate-limiter-flexible:
-      specifier: 11.3.0
-      version: 11.3.0
+      specifier: 11.4.0
+      version: 11.4.0
     react:
       specifier: ^19.3.1
       version: 19.3.1
@@ -306,8 +306,8 @@ catalogs:
       specifier: ^19.3.1
       version: 19.3.1
     react-i18next:
-      specifier: 18.0.0
-      version: 18.0.0
+      specifier: 18.0.1
+      version: 18.0.1
     sileo:
       specifier: ^0.1.6
       version: 0.1.6
@@ -357,7 +357,7 @@ importers:
         version: link:packages/i18n-translate
       dotenv:
         specifier: 'catalog:'
-        version: 18.0.9
+        version: 18.0.10
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -472,7 +472,7 @@ importers:
         version: 1.1.414
       rate-limiter-flexible:
         specifier: 'catalog:'
-        version: 11.3.0
+        version: 11.4.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -587,7 +587,7 @@ importers:
         version: 19.3.1(react@19.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 18.0.0(i18next@27.0.1(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
+        version: 18.0.1(@types/react@19.3.0)(i18next@27.0.1(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
       react-markdown:
         specifier: 10.1.0
         version: 10.1.0(@types/react@19.3.0)(react@19.3.1)
@@ -733,7 +733,7 @@ importers:
         version: 1.16.2(@opentelemetry/api@1.10.0)(@orpc/contract@1.16.2(@opentelemetry/api@1.10.0))(@orpc/server@1.16.2(@opentelemetry/api@1.10.0)(crossws@0.4.17(srvx@1.0.8)))(crossws@0.4.17(srvx@1.0.8))(zod@4.6.7)
       rate-limiter-flexible:
         specifier: 'catalog:'
-        version: 11.3.0
+        version: 11.4.0
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -803,7 +803,7 @@ importers:
         version: 7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2)
       dotenv:
         specifier: 'catalog:'
-        version: 18.0.9
+        version: 18.0.10
       pg:
         specifier: 'catalog:'
         version: 8.23.1
@@ -837,7 +837,7 @@ importers:
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)
       dotenv:
         specifier: 'catalog:'
-        version: 18.0.9
+        version: 18.0.10
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -5581,8 +5581,8 @@ packages:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
 
-  dotenv@18.0.9:
-    resolution: {integrity: sha512-3fVOW4cB02R066PUSwn8O4TJyz9NckQl7F81blIbaq9jKBm2tSmOKky7ZHIXzGvkVPXCSn6jkpziBPZdGFs8Tw==}
+  dotenv@18.0.10:
+    resolution: {integrity: sha512-89FAA1xchzK2mxVWdr5F/0rldwiueXs6zJM86rO66EzekR1iBdiXRthyG+m5GvkJaFH3C2LESzamTkgndmLT2A==}
     engines: {node: '>=12'}
     hasBin: true
 
@@ -7263,8 +7263,8 @@ packages:
     resolution: {integrity: sha512-h36JMxKRqrAxVD8201FrCpyeNuUY9Y5zZwujr20fFO77tpUtGa6EZzfKw/3WaiBX95fq7+MpsuMLNdSnORAwSA==}
     engines: {node: '>=14.18.0'}
 
-  rate-limiter-flexible@11.3.0:
-    resolution: {integrity: sha512-j9ajqvqkF+UqPanM0bKTu4uLg71Y3lOs5cDGMM4HL1lshE+Xur9NL3PGjrjOgEA52G0/VjaETA2aBBiDcvWJRg==}
+  rate-limiter-flexible@11.4.0:
+    resolution: {integrity: sha512-+RyuiXEG3odp5c9aZP83H8cld0L7swvz1FxlVzy/7N4zYo4i0GDy5tBhZlPFFOdXXwEilyBREKbVIKDq5bfjlw==}
 
   rc9@3.1.0:
     resolution: {integrity: sha512-ufjkNVzbRHKcCOmTahZkmVsyc3W+MSk3jY03m+a7tGHkIsdVMG9l10/3HvFbWkkKzY5VFp3pkRsIo/UYgmFL7Q==}
@@ -7279,14 +7279,17 @@ packages:
     peerDependencies:
       react: ^19.3.1
 
-  react-i18next@18.0.0:
-    resolution: {integrity: sha512-xXq/pcuMRwrW4iH0If/RjbPH3zuEqWVtaw4PjDsG54vx0FTook7aS3kop7DXy3g66wHkYUji8l7ZBrA8kfj67Q==}
+  react-i18next@18.0.1:
+    resolution: {integrity: sha512-kPWXI0E/lrPj3+/umcKNzYZVnWmEedLiamMzDIHfbs+5ANf6yzvlZsjKou8f7kaGkfMMDLIZBejV+4aSN1CyBw==}
     engines: {node: '>=22'}
     peerDependencies:
-      i18next: '>= 27.0.0'
+      '@types/react': '*'
+      i18next: '>= 27.0.1'
       react: '>= 18.0.0'
       typescript: ^5 || ^6 || ^7
     peerDependenciesMeta:
+      '@types/react':
+        optional: true
       typescript:
         optional: true
 
@@ -12544,7 +12547,7 @@ snapshots:
 
   dotenv@17.4.2: {}
 
-  dotenv@18.0.9: {}
+  dotenv@18.0.10: {}
 
   dts-resolver@3.0.0(oxc-resolver@11.24.2):
     optionalDependencies:
@@ -14457,7 +14460,7 @@ snapshots:
 
   radash@12.1.1: {}
 
-  rate-limiter-flexible@11.3.0: {}
+  rate-limiter-flexible@11.4.0: {}
 
   rc9@3.1.0:
     dependencies:
@@ -14499,12 +14502,13 @@ snapshots:
       react: 19.3.1
       scheduler: 0.28.0
 
-  react-i18next@18.0.0(i18next@27.0.1(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2):
+  react-i18next@18.0.1(@types/react@19.3.0)(i18next@27.0.1(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2):
     dependencies:
       html-parse-stringify: 4.0.1
       i18next: 27.0.1(typescript@7.0.2)
       react: 19.3.1
     optionalDependencies:
+      '@types/react': 19.3.0
       typescript: 7.0.2
 
   react-markdown@10.1.0(@types/react@19.3.0)(react@19.3.1):

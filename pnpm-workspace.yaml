@@ -80,7 +80,7 @@ allowBuilds:
 catalog:
   pg: ^8.23.1
   "@babel/parser": 8.1.0
-  dotenv: ^18.0.9
+  dotenv: ^18.0.10
   zod: ^4.6.7
   "@types/node": ^26.6.6
   hono: 4.13.18
@@ -136,13 +136,13 @@ catalog:
   tsx: ^4.23.15
   vitest: 5.1.0
   vitest-mock-extended: ^5.1.1
-  rate-limiter-flexible: 11.3.0
+  rate-limiter-flexible: 11.4.0
   nodemailer: 10.4.0 # GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w / GHSA-85x2-q946-cp5h (address parser)
   "@types/nodemailer": ^8.0.2
   tsdown: 0.23.7
   "@aws-sdk/client-s3": 3.1164.0
   i18next: 27.0.1
-  react-i18next: 18.0.0
+  react-i18next: 18.0.1
   i18next-browser-languagedetector: 8.3.0
   openai: 7.53.0
   "@anthropic-ai/sdk": 1.6.0
