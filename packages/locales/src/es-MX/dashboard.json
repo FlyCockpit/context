@@ -706,6 +706,12 @@
       "tokens": "{{input}} de entrada / {{output}} de salida",
       "status": "Estado"
     },
+    "cost": {
+      "partial": "≥ {{amount}}, algunas llamadas sin precio",
+      "partialShort": "≥ {{amount}}",
+      "unknown": "Desconocido, llamadas sin precio",
+      "unknownShort": "Desconocido"
+    },
     "transcript": {
       "label": "Transcripción",
       "youAsked": "Preguntaste",

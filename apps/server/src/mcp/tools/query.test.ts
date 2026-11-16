@@ -21,6 +21,7 @@ vi.mock("@cockpit-context/runs", () => ({ getRunEngine: vi.fn() }));
 const {
   progressText,
   queryResult,
+  queryUsage,
   repoErrorToToolError,
   runGetQueryResult,
   runQueryDependency,
@@ -31,6 +32,35 @@ const { createKeyedSlots } = await import("../admission");
 const { answerReuseKey, createAnswerReuse } = await import("@cockpit-context/runs/answer-reuse");
 
 type QueryDeps = NonNullable<Parameters<typeof runQueryDependency>[2]>;
+type QuerySpend = NonNullable<Awaited<ReturnType<QueryDeps["spendOf"]>>>;
+
+/** A priced investigation: 1.2345 USD over a main run and its helpers. */
+const PRICED_SPEND: QuerySpend = {
+  inputTokens: 12_000,
+  outputTokens: 3_400,
+  cachedInputTokens: 8_000,
+  costUsdMicros: 1_234_500,
+  unpricedCalls: 0,
+  model: "anthropic/claude-sonnet-5.5",
+};
+
+const PRICED_USAGE = {
+  cost_usd_micros: 1_234_500,
+  priced: true,
+  input_tokens: 12_000,
+  output_tokens: 3_400,
+  cached_input_tokens: 8_000,
+  model: "anthropic/claude-sonnet-5.5",
+};
+
+const NO_SPEND = {
+  cost_usd_micros: 0,
+  priced: true,
+  input_tokens: 0,
+  output_tokens: 0,
+  cached_input_tokens: 0,
+  model: null,
+};
 
 const identity: McpIdentity = {
   userId: "user-a",
@@ -51,7 +81,13 @@ function snapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
     stopReason: null,
     error: null,
     iterations: 4,
-    usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, costUsdMicros: 0 },
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      costUsdMicros: 0,
+      unpricedCalls: 0,
+    },
     ...overrides,
   };
 }
@@ -121,6 +157,7 @@ function deps(
     answerReuse: () => {
       throw new Error("answer reuse is off in this test");
     },
+    spendOf: async () => PRICED_SPEND,
   };
 }
 
@@ -203,6 +240,7 @@ describe("query_dependency", () => {
       status: "completed",
       content_trust: "untrusted_dependency_derived",
       answer: "Use escapeStringRegexp().",
+      usage: PRICED_USAGE,
     });
   });
 
@@ -214,12 +252,18 @@ describe("query_dependency", () => {
     expect(Date.now() - started).toBeLessThan(350);
     expect(first).toMatchObject({ query_id: "run-1", status: "running" });
     expect(first).not.toHaveProperty("answer");
+    // A running query's spend is not final: none is reported yet.
+    expect(first).not.toHaveProperty("usage");
     const second = await runGetQueryResult(
       { query_id: "run-1", wait_seconds: 2 },
       ctx,
       deps(engine, 5),
     );
-    expect(second).toMatchObject({ status: "completed", answer: "Use escapeStringRegexp()." });
+    expect(second).toMatchObject({
+      status: "completed",
+      answer: "Use escapeStringRegexp().",
+      usage: PRICED_USAGE,
+    });
   });
 
   it("never waits longer than the server maximum, whatever wait_seconds asks", async () => {
@@ -610,13 +654,39 @@ describe("answer reuse", () => {
       query_id: "run-1",
       status: "completed",
       answer: "answer of run-1",
+      usage: PRICED_USAGE,
     });
+    expect(first).not.toHaveProperty("original_usage");
+    // The joined investigation is billed once: this call spent nothing new.
     expect(second).toMatchObject({
       query_id: "run-1",
       status: "completed",
       answer: "answer of run-1",
       reused: "running_query",
+      usage: NO_SPEND,
+      original_usage: PRICED_USAGE,
     });
+  });
+
+  it("a call that joins a running query and times out spends nothing and has no original usage yet", async () => {
+    const fake = reuseEngine();
+    const { dependencies } = reuseDeps(fake);
+    const first = runQueryDependency(INPUT, asToken("tok-1"), dependencies);
+    await new Promise((r) => setTimeout(r, 20));
+    const joined = await runQueryDependency(
+      { ...INPUT, wait_seconds: 0.05 },
+      asToken("tok-2"),
+      dependencies,
+    );
+    expect(joined).toMatchObject({
+      query_id: "run-1",
+      status: "running",
+      reused: "running_query",
+      usage: NO_SPEND,
+    });
+    expect(joined).not.toHaveProperty("original_usage");
+    fake.finish();
+    await first;
   });
 
   it("different owners asking the same question get two investigations", async () => {
@@ -639,7 +709,13 @@ describe("answer reuse", () => {
     await runQueryDependency(INPUT, asToken("tok-1"), dependencies);
     await new Promise((r) => setTimeout(r, 10));
     const again = await runQueryDependency(INPUT, asToken("tok-2"), dependencies);
-    expect(again).toMatchObject({ query_id: "run-1", reused: "answer", answer: "answer of run-1" });
+    expect(again).toMatchObject({
+      query_id: "run-1",
+      reused: "answer",
+      answer: "answer of run-1",
+      usage: NO_SPEND,
+      original_usage: PRICED_USAGE,
+    });
     expect(fake.engine.startConversation).toHaveBeenCalledTimes(1);
 
     state.notes = "We pin v6 now.";
@@ -680,6 +756,195 @@ describe("answer reuse", () => {
     await expect(runQueryDependency(INPUT, context().ctx, deps(engine))).rejects.toMatchObject({
       code: "BUSY",
       message: expect.stringMatching(/waiting for an investigation slot/),
+    });
+  });
+});
+
+describe("query usage", () => {
+  /** The mocked run-row reads behind the production `querySpend`. */
+  async function mockedRuns() {
+    return (await import("@cockpit-context/db")).default as unknown as {
+      agentRun: {
+        aggregate: ReturnType<typeof vi.fn>;
+        findFirst: ReturnType<typeof vi.fn>;
+      };
+    };
+  }
+
+  it("reports an unpriced query as unknown cost, never $0", async () => {
+    const engine = fakeEngine({ finishAfterMs: 0 });
+    const spend = { ...PRICED_SPEND, costUsdMicros: 0, unpricedCalls: 3 };
+    const result = await runQueryDependency(INPUT, context().ctx, {
+      ...deps(engine),
+      spendOf: async () => spend,
+    });
+    expect(result).toMatchObject({
+      status: "completed",
+      usage: { ...PRICED_USAGE, cost_usd_micros: null, priced: false },
+    });
+  });
+
+  it("treats a partly priced query as unknown: its priced cost is only a lower bound", () => {
+    expect(queryUsage({ ...PRICED_SPEND, unpricedCalls: 1 })).toMatchObject({
+      cost_usd_micros: null,
+      priced: false,
+    });
+    expect(queryUsage({ ...PRICED_SPEND, costUsdMicros: 0 })).toMatchObject({
+      cost_usd_micros: 0,
+      priced: true,
+    });
+  });
+
+  it("reads the whole query's spend for the caller, owner-scoped", async () => {
+    const engine = fakeEngine({ finishAfterMs: 0 });
+    const spendOf = vi.fn(async () => PRICED_SPEND);
+    await runGetQueryResult({ query_id: "run-1" }, context().ctx, { ...deps(engine), spendOf });
+    expect(spendOf).toHaveBeenCalledWith("user-a", "run-1");
+  });
+
+  it("reports the spend of a query that failed after spending, without the provider's error", async () => {
+    const engine = fakeEngine({ finishAfterMs: 0 });
+    engine.waitForRun.mockResolvedValue(
+      snapshot({
+        status: "failed",
+        phase: null,
+        stopReason: "model-error",
+        error: "402 from provider: key sk-or-123 has no credit",
+      }),
+    );
+    const result = await runGetQueryResult({ query_id: "run-1" }, context().ctx, deps(engine));
+    expect(result).toMatchObject({ status: "failed", usage: PRICED_USAGE });
+    expect(JSON.stringify(result)).not.toContain("sk-or-123");
+  });
+
+  it("reports no usage for a query that ended before it spent anything", async () => {
+    const engine = fakeEngine({ finishAfterMs: 0 });
+    engine.waitForRun.mockResolvedValue(
+      snapshot({ status: "failed", phase: null, stopReason: "checkout-failed" }),
+    );
+    const zero = { ...PRICED_SPEND, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
+    const result = await runGetQueryResult({ query_id: "run-1" }, context().ctx, {
+      ...deps(engine),
+      spendOf: async () => ({ ...zero, costUsdMicros: 0 }),
+    });
+    expect(result).toMatchObject({ status: "failed" });
+    expect(result).not.toHaveProperty("usage");
+  });
+
+  it("still answers when the spend cannot be read, with usage null", async () => {
+    const engine = fakeEngine({ finishAfterMs: 0 });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await runQueryDependency(INPUT, context().ctx, {
+      ...deps(engine),
+      spendOf: async () => {
+        throw new Error("connection reset");
+      },
+    });
+    expect(result).toMatchObject({
+      status: "completed",
+      answer: "Use escapeStringRegexp().",
+      usage: null,
+    });
+    expect(error).toHaveBeenCalledOnce();
+    error.mockRestore();
+  });
+
+  it("sums the main run and its helper runs from the run rows", async () => {
+    const prisma = await mockedRuns();
+    prisma.agentRun.aggregate.mockResolvedValue({
+      _count: { _all: 3 },
+      _sum: {
+        inputTokens: 10_000 + 2_000,
+        outputTokens: 3_000 + 400,
+        cachedInputTokens: 8_000,
+        costUsdMicros: 1_000_000 + 234_500,
+        unpricedCalls: 0,
+      },
+    });
+    prisma.agentRun.findFirst.mockResolvedValue({ model: "anthropic/claude-sonnet-5.5" });
+    const engine = fakeEngine({ finishAfterMs: 0 });
+    const { querySpend } = await import("./query");
+    // The production spend reader, over the mocked run rows.
+    const result = await runGetQueryResult({ query_id: "run-1" }, context().ctx, {
+      ...deps(engine),
+      spendOf: querySpend,
+    });
+    expect(prisma.agentRun.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { ownerId: "user-a", OR: [{ id: "run-1" }, { parentRunId: "run-1" }] },
+      }),
+    );
+    expect(prisma.agentRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "run-1", ownerId: "user-a" } }),
+    );
+    expect(result).toMatchObject({ usage: PRICED_USAGE });
+  });
+
+  it("reads a run deleted before its spend was read as unavailable, never as $0", async () => {
+    const prisma = await mockedRuns();
+    prisma.agentRun.aggregate.mockResolvedValue({
+      _count: { _all: 0 },
+      _sum: {
+        inputTokens: null,
+        outputTokens: null,
+        cachedInputTokens: null,
+        costUsdMicros: null,
+        unpricedCalls: null,
+      },
+    });
+    prisma.agentRun.findFirst.mockResolvedValue(null);
+    const { querySpend } = await import("./query");
+    expect(await querySpend("user-a", "run-1")).toBeNull();
+    const engine = fakeEngine({ finishAfterMs: 0 });
+    const result = await runGetQueryResult({ query_id: "run-1" }, context().ctx, {
+      ...deps(engine),
+      spendOf: querySpend,
+    });
+    expect(result).toMatchObject({ status: "completed", usage: null });
+  });
+
+  it("reads a run deleted between its two reads as unavailable, never as $0", async () => {
+    const prisma = await mockedRuns();
+    // The main row was still there for the first read; the aggregate saw nothing.
+    prisma.agentRun.findFirst.mockResolvedValue({ model: "anthropic/claude-sonnet-5.5" });
+    prisma.agentRun.aggregate.mockResolvedValue({
+      _count: { _all: 0 },
+      _sum: {
+        inputTokens: null,
+        outputTokens: null,
+        cachedInputTokens: null,
+        costUsdMicros: null,
+        unpricedCalls: null,
+      },
+    });
+    const { querySpend } = await import("./query");
+    expect(await querySpend("user-a", "run-1")).toBeNull();
+  });
+
+  it("marks a query unpriced when only a helper run went unpriced", async () => {
+    const prisma = await mockedRuns();
+    // The main run was priced; one helper dispatch was not.
+    prisma.agentRun.aggregate.mockResolvedValue({
+      _count: { _all: 2 },
+      _sum: {
+        inputTokens: 500,
+        outputTokens: 50,
+        cachedInputTokens: null,
+        costUsdMicros: 900,
+        unpricedCalls: 1,
+      },
+    });
+    prisma.agentRun.findFirst.mockResolvedValue({ model: null });
+    const { querySpend } = await import("./query");
+    const spend = await querySpend("user-a", "run-1");
+    expect(spend).not.toBeNull();
+    expect(spend && queryUsage(spend)).toEqual({
+      cost_usd_micros: null,
+      priced: false,
+      input_tokens: 500,
+      output_tokens: 50,
+      cached_input_tokens: 0,
+      model: null,
     });
   });
 });

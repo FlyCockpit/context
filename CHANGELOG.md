@@ -11,6 +11,7 @@ All notable changes are documented here using [Keep a Changelog](https://keepach
 - OAuth and revocable per-user API tokens, private SSH dependencies and one-time-key snapshots.
 - Confined search/read and sandboxed TypeScript/JavaScript and Python language-server tools, bounded runs and cache pruning.
 - Single-container application with PostgreSQL metadata, in-process jobs, administrator controls, committed schema migrations and database backup/restore tooling.
+- MCP `query_dependency` and `get_query_result` results report the finished query's model spend as `usage` (`cost_usd_micros`, `priced`, input, output and cached input tokens, `model`), summed over the main run and its helper runs. An unpriced model call makes the cost unknown (`priced: false`, `cost_usd_micros: null`), never 0; runs record unpriced calls in `agent_run.unpricedCalls`, and a model call that fails after reporting usage keeps its tokens. The dashboard's conversation header and list rows mark such a cost as a lower bound (`≥ $0.04, some calls unpriced`) or unknown, never as a plain total. A reused result reports zero new spend in `usage` and the shared investigation's spend in `original_usage`; callers count a query's `usage` once per `query_id` ([docs/mcp.md](./docs/mcp.md#query-cost)).
 
 ### Changed
 

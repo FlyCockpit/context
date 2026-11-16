@@ -17,8 +17,10 @@ export interface RunUsageView {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
-  /** Integer millionths of a US dollar. */
+  /** Integer millionths of a US dollar: the priced dispatches only. */
   costUsdMicros: number;
+  /** Dispatches whose provider reported no cost; any at all makes the cost unknown. */
+  unpricedCalls: number;
 }
 
 export interface TurnView {

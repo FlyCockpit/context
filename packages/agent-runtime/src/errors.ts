@@ -1,3 +1,44 @@
+import { fromSpecTokenUsage, type SpecTokenUsage } from "@tanstack/ai";
+
+/** TanStack's `TokenUsage` (not exported by name). */
+export type ProviderTokenUsage = NonNullable<ReturnType<typeof fromSpecTokenUsage>>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const isTokenUsage = (value: unknown): value is ProviderTokenUsage =>
+  isRecord(value) &&
+  !Array.isArray(value) &&
+  typeof value.promptTokens === "number" &&
+  typeof value.completionTokens === "number";
+
+const isSpecUsageList = (value: unknown): value is SpecTokenUsage[] =>
+  Array.isArray(value) && value.length > 0 && value.every(isRecord);
+
+/**
+ * The usage a terminal chunk (`RUN_ERROR`, `RUN_FINISHED`) reports: TanStack's legacy
+ * object, or the AG-UI array with the rest in `metadata.tanstack.usage`. On a failed
+ * call the provider may still have billed it, so it is counted.
+ */
+export const chunkUsage = (chunk: {
+  usage?: unknown;
+  metadata?: unknown;
+}): ProviderTokenUsage | undefined => {
+  if (isTokenUsage(chunk.usage)) return chunk.usage;
+  if (!isSpecUsageList(chunk.usage)) return undefined;
+  const tanstack = isRecord(chunk.metadata) ? chunk.metadata.tanstack : undefined;
+  const leftover = isRecord(tanstack) && isRecord(tanstack.usage) ? tanstack.usage : undefined;
+  return fromSpecTokenUsage(chunk.usage, leftover);
+};
+
+/**
+ * The usage a failed model call reported, carried on its error as `usage` (the
+ * TanStack convention: adapters that fail after the provider answered attach it, and
+ * {@link errorFromRunErrorChunk} keeps a `RUN_ERROR` chunk's).
+ */
+export const errorUsage = (error: unknown): ProviderTokenUsage | undefined =>
+  isRecord(error) && isTokenUsage(error.usage) ? error.usage : undefined;
+
 export class FatalToolError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -26,13 +67,16 @@ const NON_RETRYABLE_RUN_ERROR_CODES: Record<string, number> = { context_overflow
  * (the HTTP status as a string, when there was one). This turns it back into a thrown error
  * with a numeric `status`, so the retry rules (`isTransientModelError`) and the run
  * engine's classification see what they would have seen from a throw. `code: "aborted"`
- * becomes an `AbortError`.
+ * becomes an `AbortError`. Usage the failed stream reported stays on the error as
+ * `usage` ({@link errorUsage}), so its tokens are still counted.
  */
 export const errorFromRunErrorChunk = (chunk: {
   message?: unknown;
   code?: unknown;
   error?: unknown;
   rawEvent?: unknown;
+  usage?: unknown;
+  metadata?: unknown;
 }): Error => {
   const asRecord = (value: unknown): { message?: unknown; code?: unknown } =>
     typeof value === "object" && value !== null ? value : {};
@@ -45,7 +89,11 @@ export const errorFromRunErrorChunk = (chunk: {
   const message = [nested.message, chunk.message].find(
     (value): value is string => typeof value === "string" && value.length > 0,
   );
-  if (code === "aborted") return Object.assign(new Error("aborted"), { name: "AbortError" });
+  const usage = chunkUsage(chunk);
+  const withUsage = usage ? { usage } : {};
+  if (code === "aborted") {
+    return Object.assign(new Error("aborted"), { name: "AbortError", ...withUsage });
+  }
   const status =
     code !== undefined && /^\d{3}$/.test(code)
       ? Number(code)
@@ -56,5 +104,6 @@ export const errorFromRunErrorChunk = (chunk: {
     name: "ModelRunError",
     ...(status !== undefined ? { status } : {}),
     ...(code !== undefined ? { code } : {}),
+    ...withUsage,
   });
 };

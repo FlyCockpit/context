@@ -706,6 +706,12 @@
       "tokens": "{{input}} in / {{output}} out",
       "status": "Status"
     },
+    "cost": {
+      "partial": "≥ {{amount}}, some calls unpriced",
+      "partialShort": "≥ {{amount}}",
+      "unknown": "Unknown, calls unpriced",
+      "unknownShort": "Unknown"
+    },
     "transcript": {
       "label": "Transcript",
       "youAsked": "You asked",

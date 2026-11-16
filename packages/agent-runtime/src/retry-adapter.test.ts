@@ -325,6 +325,65 @@ describe("createRetryFailoverAdapter — RUN_ERROR chunks", () => {
     expect(chunks.map((chunk) => chunk.type)).toEqual(["RUN_FINISHED"]);
   });
 
+  it("reports the usage of a failed attempt, both a retried one and a final one", async () => {
+    const reported: Array<[unknown, string]> = [];
+    let calls = 0;
+    const primary = makeAdapter("primary", async function* () {
+      calls += 1;
+      yield { type: "RUN_STARTED", runId: "r", threadId: "t" } as unknown as StreamChunk;
+      yield {
+        type: "RUN_ERROR",
+        message: "boom",
+        rawEvent: { code: calls === 1 ? 503 : 400 },
+        usage: { promptTokens: calls, completionTokens: 1, totalTokens: calls + 1 },
+      } as unknown as StreamChunk;
+    });
+    const { adapter } = createRetryFailoverAdapter({
+      candidates: [{ adapter: primary, modelId: "primary" }],
+      sleep: async () => {},
+      onAttemptUsage: (usage, modelId) => reported.push([usage, modelId]),
+    });
+    await expect(drain(adapter)).rejects.toMatchObject({ status: 400 });
+    expect(calls).toBe(2);
+    expect(reported).toEqual([
+      [expect.objectContaining({ promptTokens: 1 }), "primary"],
+      [expect.objectContaining({ promptTokens: 2 }), "primary"],
+    ]);
+  });
+
+  it("reports the usage of a terminal chunk that arrives after the run was stopped", async () => {
+    const reported: unknown[] = [];
+    const stop = new AbortController();
+    const primary = makeAdapter("primary", async function* () {
+      yield { type: "RUN_STARTED", runId: "r", threadId: "t" } as unknown as StreamChunk;
+      stop.abort();
+      yield {
+        type: "RUN_ERROR",
+        message: "aborted",
+        code: "aborted",
+        usage: { promptTokens: 900, completionTokens: 0, totalTokens: 900 },
+      } as unknown as StreamChunk;
+    });
+    const { adapter } = createRetryFailoverAdapter({
+      candidates: [{ adapter: primary, modelId: "primary" }],
+      abortSignal: stop.signal,
+      onAttemptUsage: (usage) => reported.push(usage),
+    });
+    await expect(drain(adapter)).rejects.toMatchObject({ name: "AbortError" });
+    expect(reported).toEqual([expect.objectContaining({ promptTokens: 900 })]);
+  });
+
+  it("reports no usage for a failed attempt that carried none", async () => {
+    const onAttemptUsage = vi.fn();
+    const primary = makeAdapter("primary", () => runErrorStream(400));
+    const { adapter } = createRetryFailoverAdapter({
+      candidates: [{ adapter: primary, modelId: "primary" }],
+      onAttemptUsage,
+    });
+    await expect(drain(adapter)).rejects.toThrow();
+    expect(onAttemptUsage).not.toHaveBeenCalled();
+  });
+
   it("fails fast on a 4xx RUN_ERROR with the status attached", async () => {
     let calls = 0;
     const primary = makeAdapter("primary", () => {

@@ -84,6 +84,7 @@ export interface RunUpdate {
   outputTokens?: number;
   cachedInputTokens?: number;
   costUsdMicros?: number;
+  unpricedCalls?: number;
   iterations?: number;
   startedAt?: Date;
   finishedAt?: Date;
@@ -135,6 +136,7 @@ export interface RunRecord {
   outputTokens: number;
   cachedInputTokens: number;
   costUsdMicros: number;
+  unpricedCalls: number;
 }
 
 export interface RunStore {
@@ -330,6 +332,7 @@ const runSelect = {
   outputTokens: true,
   cachedInputTokens: true,
   costUsdMicros: true,
+  unpricedCalls: true,
 } satisfies Prisma.AgentRunSelect;
 
 type CheckoutRow = Prisma.CheckoutGetPayload<{ select: typeof checkoutSelect }>;

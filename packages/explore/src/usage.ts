@@ -17,6 +17,7 @@ export function sumUsage(a?: AgentUsage, b?: AgentUsage): AgentUsage {
       a?.costUsd !== undefined || b?.costUsd !== undefined
         ? (a?.costUsd ?? 0) + (b?.costUsd ?? 0)
         : undefined,
+    unpricedCalls: (a?.unpricedCalls ?? 0) + (b?.unpricedCalls ?? 0),
     model: a?.model ?? b?.model,
   };
 }

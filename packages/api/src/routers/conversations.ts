@@ -80,6 +80,7 @@ const runUsageSelect = {
   outputTokens: true,
   cachedInputTokens: true,
   costUsdMicros: true,
+  unpricedCalls: true,
 } satisfies Prisma.AgentRunSelect;
 
 const latestMainRunArgs = {
@@ -122,16 +123,29 @@ function usageOf(row: {
   outputTokens: number;
   cachedInputTokens: number;
   costUsdMicros: number;
+  unpricedCalls: number;
 }) {
   return {
     inputTokens: row.inputTokens,
     outputTokens: row.outputTokens,
     cachedInputTokens: row.cachedInputTokens,
+    /** The priced dispatches only: a lower bound when `unpricedCalls` > 0. */
     costUsdMicros: row.costUsdMicros,
+    /** Dispatches whose provider reported no cost; any at all makes the cost unknown. */
+    unpricedCalls: row.unpricedCalls,
   };
 }
 
-function serializeConversation(row: ConversationRow, totalCostUsdMicros: number) {
+/** A conversation's spend over every run (helpers included). */
+interface ConversationCost {
+  /** The priced part only: a lower bound when `unpricedCalls` > 0. */
+  costUsdMicros: number;
+  unpricedCalls: number;
+}
+
+const NO_COST: ConversationCost = { costUsdMicros: 0, unpricedCalls: 0 };
+
+function serializeConversation(row: ConversationRow, total: ConversationCost) {
   const latest = row.AgentRuns[0] ?? null;
   return {
     id: row.id,
@@ -151,7 +165,9 @@ function serializeConversation(row: ConversationRow, totalCostUsdMicros: number)
     lastActivityAt: row.lastActivityAt,
     /** Some main run is queued or running: the `ongoing` list segment's rule. */
     ongoing: row._count.AgentRuns > 0,
-    totalCostUsdMicros,
+    totalCostUsdMicros: total.costUsdMicros,
+    /** Any unpriced call makes `totalCostUsdMicros` a lower bound, never the whole cost. */
+    totalUnpricedCalls: total.unpricedCalls,
     latestRun: latest
       ? {
           id: latest.id,
@@ -170,16 +186,26 @@ function serializeConversation(row: ConversationRow, totalCostUsdMicros: number)
 async function totalCosts(
   ownerId: string,
   conversationIds: string[],
-): Promise<Map<string, number>> {
+): Promise<Map<string, ConversationCost>> {
   if (conversationIds.length === 0) return new Map();
   const sums = await prisma.agentRun.groupBy({
     by: ["conversationId"],
     where: { ownerId, conversationId: { in: conversationIds } },
-    _sum: { costUsdMicros: true },
+    _sum: { costUsdMicros: true, unpricedCalls: true },
   });
   return new Map(
     sums.flatMap((row) =>
-      row.conversationId ? [[row.conversationId, row._sum.costUsdMicros ?? 0] as const] : [],
+      row.conversationId
+        ? [
+            [
+              row.conversationId,
+              {
+                costUsdMicros: row._sum.costUsdMicros ?? 0,
+                unpricedCalls: row._sum.unpricedCalls ?? 0,
+              },
+            ] as const,
+          ]
+        : [],
     ),
   );
 }
@@ -270,7 +296,7 @@ async function loadConversationDetail(ownerId: string, conversationId: string) {
     turnsByRun.set(turn.runId, list);
   }
   for (const list of turnsByRun.values()) list.sort((a, b) => a.seq - b.seq);
-  const costs = (await totalCosts(ownerId, [conversation.id])).get(conversation.id) ?? 0;
+  const costs = (await totalCosts(ownerId, [conversation.id])).get(conversation.id) ?? NO_COST;
   return {
     ...serializeConversation(conversation, costs),
     runs: runs.map((run) => ({
@@ -426,7 +452,7 @@ export const conversationsRouter = {
         items.map((row) => row.id),
       );
       return {
-        items: items.map((row) => serializeConversation(row, costs.get(row.id) ?? 0)),
+        items: items.map((row) => serializeConversation(row, costs.get(row.id) ?? NO_COST)),
         next,
       };
     }),

@@ -3,13 +3,13 @@ import { cn } from "@cockpit-context/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
+import { ConversationCost } from "@/components/conversations/conversation-cost";
 import { RunStatusPill } from "@/components/run-status-pill";
 import { TimeAgo } from "@/components/time-ago";
 import {
   type ConversationListItem,
   conversationVersion,
   formatElapsed,
-  formatUsdMicros,
   isActive,
 } from "@/lib/conversations";
 
@@ -29,7 +29,7 @@ export function ConversationRow({
   /** The ticking clock for elapsed times (live rows only). */
   now: number;
 }) {
-  const { t, i18n } = useTranslation(["dashboard"]);
+  const { t } = useTranslation(["dashboard"]);
   const run = item.latestRun;
   const live = item.ongoing && run !== null && isActive(run.status);
   const version = conversationVersion(item);
@@ -84,13 +84,23 @@ export function ConversationRow({
             <span>
               {t("dashboard:conversations.row.steps", { count: run?.iterations ?? 0 })}
               {" · "}
-              {formatUsdMicros(item.totalCostUsdMicros, i18n.language)}
+              <ConversationCost
+                costUsdMicros={item.totalCostUsdMicros}
+                unpricedCalls={item.totalUnpricedCalls}
+                compact
+              />
             </span>
           </>
         ) : (
           <>
             <TimeAgo value={item.lastActivityAt} now={now} />
-            <span>{formatUsdMicros(item.totalCostUsdMicros, i18n.language)}</span>
+            <span>
+              <ConversationCost
+                costUsdMicros={item.totalCostUsdMicros}
+                unpricedCalls={item.totalUnpricedCalls}
+                compact
+              />
+            </span>
           </>
         )}
       </span>

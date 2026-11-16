@@ -1,7 +1,13 @@
 import type { AnyTextAdapter, StreamChunk } from "@tanstack/ai";
 
 import type { ModelAdapter } from "./adapters";
-import { AgentRuntimeError, errorFromRunErrorChunk } from "./errors";
+import {
+  AgentRuntimeError,
+  chunkUsage,
+  errorFromRunErrorChunk,
+  errorUsage,
+  type ProviderTokenUsage,
+} from "./errors";
 import {
   computeBackoffMs,
   DEFAULT_MAX_ATTEMPTS_PER_MODEL,
@@ -98,6 +104,12 @@ export type RetryFailoverOptions = {
   baseDelayMs?: number;
   /** Called when a successful dispatch used a non-primary model. */
   onFailover?: (servingModelId: string, primaryModelId: string) => void;
+  /**
+   * Called, synchronously, for each failed attempt whose error carries the usage the
+   * provider reported (retried or not): the provider may bill it, and neither the
+   * retry nor the final error reports it otherwise.
+   */
+  onAttemptUsage?: (usage: ProviderTokenUsage, modelId: string) => void;
   /** Test seam: override delay scheduling (receives ms). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Test seam: fixed random for deterministic backoff. */
@@ -193,7 +205,15 @@ export const createRetryFailoverAdapter = (
           );
           for await (const chunk of chunks) {
             if (options.abortSignal?.aborted) {
-              throw Object.assign(new Error("aborted"), { name: "AbortError" });
+              // A terminal chunk arriving after the stop still reports what was spent.
+              const usage =
+                chunk.type === "RUN_ERROR" || chunk.type === "RUN_FINISHED"
+                  ? chunkUsage(chunk)
+                  : undefined;
+              throw Object.assign(new Error("aborted"), {
+                name: "AbortError",
+                ...(usage ? { usage } : {}),
+              });
             }
             // The adapters report a failed call as this chunk instead of throwing.
             if (chunk.type === "RUN_ERROR") throw errorFromRunErrorChunk(chunk);
@@ -229,6 +249,8 @@ export const createRetryFailoverAdapter = (
           return;
         } catch (error) {
           lastError = error;
+          const attemptUsage = errorUsage(error);
+          if (attemptUsage) options.onAttemptUsage?.(attemptUsage, candidate.modelId);
           if (
             (error instanceof Error && error.name === "AbortError") ||
             options.abortSignal?.aborted

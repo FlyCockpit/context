@@ -106,6 +106,7 @@ export class MemoryRunStore implements RunStore {
       outputTokens: 0,
       cachedInputTokens: 0,
       costUsdMicros: 0,
+      unpricedCalls: 0,
       iterations: 0,
       finishedAt: null,
       answer: null,
@@ -162,6 +163,7 @@ export class MemoryRunStore implements RunStore {
       outputTokens: run.outputTokens,
       cachedInputTokens: run.cachedInputTokens,
       costUsdMicros: run.costUsdMicros,
+      unpricedCalls: run.unpricedCalls,
     };
   }
 

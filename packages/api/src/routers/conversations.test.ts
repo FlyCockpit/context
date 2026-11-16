@@ -130,7 +130,7 @@ describe("conversationsRouter", () => {
         .mockResolvedValueOnce([conversationRow("c-live", "RUNNING")])
         .mockResolvedValueOnce([conversationRow("c-old-1"), conversationRow("c-old-2")]);
       db.agentRun.groupBy.mockResolvedValue([
-        { conversationId: "c-live", _sum: { costUsdMicros: 4200 } },
+        { conversationId: "c-live", _sum: { costUsdMicros: 4200, unpricedCalls: 2 } },
       ]);
       const result = await client().list({ limit: 2 });
 
@@ -157,6 +157,12 @@ describe("conversationsRouter", () => {
         ["c-old-1", false],
       ]);
       expect(result.items[0]?.totalCostUsdMicros).toBe(4200);
+      expect(result.items[0]?.totalUnpricedCalls).toBe(2);
+      // A conversation with no runs summed reads as nothing spent, nothing unpriced.
+      expect(result.items[1]).toMatchObject({ totalCostUsdMicros: 0, totalUnpricedCalls: 0 });
+      expect(db.agentRun.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ _sum: { costUsdMicros: true, unpricedCalls: true } }),
+      );
       expect(result.items[0]?.origin).toBe("mcp");
       expect(result.next).toEqual({ segment: "finished", cursor: expect.any(String) });
       expect(db.agentRun.groupBy).toHaveBeenCalledWith(

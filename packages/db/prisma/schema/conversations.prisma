@@ -106,8 +106,12 @@ model AgentRun {
   inputTokens       Int             @default(0)
   outputTokens      Int             @default(0)
   cachedInputTokens Int             @default(0)
-  /// Cost in millionths of a US dollar. Never a float.
+  /// Cost in millionths of a US dollar. Never a float. Only the priced
+  /// dispatches: a lower bound when `unpricedCalls` > 0.
   costUsdMicros     Int             @default(0)
+  /// Model dispatches whose provider reported no cost. Any at all makes the
+  /// run's cost unknown (MCP reports `priced: false`), never $0.
+  unpricedCalls     Int             @default(0)
   iterations        Int             @default(0)
   startedAt         DateTime?
   finishedAt        DateTime?

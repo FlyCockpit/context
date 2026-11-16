@@ -11,8 +11,8 @@ Tokens and OAuth connections are managed in Cockpit Context under **Access → M
 | Tool | What it does |
 |---|---|
 | `list_dependencies` | Your packages: `identifier`, `display_name`, `ecosystem`, `default_ref`, and the versions already checked out |
-| `query_dependency` | `{ identifier, question, version?, ref?, wait_seconds? }`: resolves the version (cloning or fetching if needed), starts an investigation, sends progress about every 20 s, and waits up to `wait_seconds` (default and maximum `COCKPIT_CONTEXT_MCP_WAIT_SECONDS`, 900). Returns `status: "completed"` with the `answer` and `version_resolved: { sha, from }`, or `status: "running"` with a `query_id`. If a branch fetch failed and cached refs were used, `version_resolved.stale` is true with `fetched_at`; decide whether that source is fresh enough before relying on it |
-| `get_query_result` | `{ query_id, wait_seconds? }`: waits for a running query and returns its answer |
+| `query_dependency` | `{ identifier, question, version?, ref?, wait_seconds? }`: resolves the version (cloning or fetching if needed), starts an investigation, sends progress about every 20 s, and waits up to `wait_seconds` (default and maximum `COCKPIT_CONTEXT_MCP_WAIT_SECONDS`, 900). Returns `status: "completed"` with the `answer` and `version_resolved: { sha, from }`, or `status: "running"` with a `query_id`. If a branch fetch failed and cached refs were used, `version_resolved.stale` is true with `fetched_at`; decide whether that source is fresh enough before relying on it. A finished result also carries `usage` ([Query cost](#query-cost)) |
+| `get_query_result` | `{ query_id, wait_seconds? }`: waits for a running query and returns its answer, with `usage` once it has finished |
 | `propose_dependency` | `{ ecosystem, name, git_url?, version?, reason }`: asks you to add a package. It waits for your approval on the Proposals page unless the connection auto-approves (never for a package that needs an SSH key) |
 | `get_proposal` | `{ proposal_id }`: `pending`, `approved` (with the identifier) or `rejected` (with your reason) |
 
@@ -132,6 +132,34 @@ Agents of one person often ask the same thing. Cockpit Context reuses work **onl
 Exact versions, tags and full commit ids are also resolved to their commit once and reused for `COCKPIT_CONTEXT_VERSION_CACHE_TTL_SECONDS` (default 300; 0 = off), skipping the tag fetch and registry lookup. Any fetch of the repository (explicit or automatic) and any package edit drop these resolutions, and a resolution that was in progress during another caller's fetch is not stored. Branches always resolve afresh. A question refused for the engine's own reasons (`BUSY`, no model configured, shutting down) is refused before any of this resolution runs.
 
 Everything is in memory (one app replica) and starts empty after a restart. `COCKPIT_CONTEXT_ANSWER_CACHE_ENABLED=false` turns answer reuse off; the cache sizes are `COCKPIT_CONTEXT_ANSWER_CACHE_MAX_ENTRIES` (500) and `COCKPIT_CONTEXT_VERSION_CACHE_MAX_ENTRIES` (1000). The server logs `[mcp] query_dependency reuse=cache|in-flight run=<id>` for each reuse.
+
+## Query cost
+
+Every finished result (`completed`, and `failed`, `stopped` or `interrupted` when the run spent anything) carries the query's model spend in `usage`, both in the tool result's `structuredContent` and in its JSON text. A `running` result has none yet.
+
+```json
+{
+  "query_id": "…",
+  "status": "completed",
+  "answer": "…",
+  "usage": {
+    "cost_usd_micros": 41830,
+    "priced": true,
+    "input_tokens": 61200,
+    "output_tokens": 3100,
+    "cached_input_tokens": 48000,
+    "model": "anthropic/claude-sonnet-4.5"
+  }
+}
+```
+
+- **Whole query.** `usage` sums the main run and every helper run it delegated. Steering the owner sends into the run from the dashboard is part of that run, so it is included. A follow-up the owner sends later in the same conversation is a new run started from the web, not this query, and appears in no MCP result.
+- **Cost.** `cost_usd_micros` is integer millionths of a US dollar, as the provider billed it (OpenRouter's `usage.cost`). When any model call of the query came back without a price, the total is unknown: `priced: false` and `cost_usd_micros: null`, never 0. A call that failed or was stopped after reporting its usage keeps those tokens (and its cost, when the provider priced it); one the provider answered that failed or was stopped before reporting any counts as unpriced too, since it may have been billed. Token counts are still reported. `cached_input_tokens` is 0 when the provider reported no cache reads. `model` is the main run's model; helper runs may use `COCKPIT_CONTEXT_HELPER_MODEL`, and their spend is in the totals.
+- **`usage: null`.** The answer is returned even when its spend could not be read at that moment: call `get_query_result` with the `query_id` to read it. Treat it as unknown, never as 0 (if the conversation was deleted meanwhile, its spend is gone with it).
+- **Reuse is not billed twice.** A `reused: "answer"` or `reused: "running_query"` result spent nothing new: its `usage` is all zeros (`priced: true`, `model: null`), and the shared investigation's spend is in `original_usage` (once it has finished) for reference only. Never add `original_usage` to a total.
+- **Count once per `query_id`.** `usage` describes the query, not the call: every `get_query_result` for a finished query repeats the same figures. A harness that totals spend counts each `query_id`'s `usage` once, against the caller whose `query_dependency` started it (a result without `reused`). A `query_id` a caller first received with `reused` was someone else's investigation: count nothing for it, including from that caller's later `get_query_result` calls.
+
+The dashboard's conversation costs read the same run rows. When any call was unpriced, the conversation header and list rows show the priced part as a lower bound (`≥ $0.04, some calls unpriced`), or `Unknown` when nothing was priced, never as a plain total.
 
 ## How it works
 

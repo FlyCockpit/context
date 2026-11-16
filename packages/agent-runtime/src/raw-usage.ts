@@ -57,10 +57,13 @@ export interface UsageTap {
   wrap: FetchWrapper;
   /** The usage of the most recent model call, if its body carried any. */
   latest: () => RawUsage | undefined;
+  /** Attempts of this dispatch that got a successful response: the provider may bill each. */
+  answered: () => number;
 }
 
 export const createUsageTap = (): UsageTap => {
   let latest: RawUsage | undefined;
+  let answered = 0;
 
   const record = (text: string) => {
     if (!text.includes('"usage"')) return;
@@ -81,6 +84,7 @@ export const createUsageTap = (): UsageTap => {
     // attempt that answered may report.
     latest = undefined;
     const response = await next(input, init);
+    if (response.ok) answered += 1;
     if (!response.body) return response;
 
     const streaming = (response.headers.get("content-type") ?? "").includes("event-stream");
@@ -107,5 +111,5 @@ export const createUsageTap = (): UsageTap => {
     });
   };
 
-  return { wrap, latest: () => latest };
+  return { wrap, latest: () => latest, answered: () => answered };
 };

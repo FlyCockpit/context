@@ -26,6 +26,11 @@ export interface AgentUsage {
   outputTokens: number;
   /** Billed cost in USD, when the provider reports it (OpenRouter's `usage.cost`). */
   costUsd?: number;
+  /**
+   * Dispatches whose provider reported no cost. Any at all makes `costUsd` a lower
+   * bound, never the full bill: callers report such a cost as unknown, never as $0.
+   */
+  unpricedCalls?: number;
   /** Cached (read) input tokens the provider billed at the cache-hit rate, when reported. */
   cachedInputTokens?: number;
   /** Input tokens written to a new cache entry, when the provider reports it separately. */

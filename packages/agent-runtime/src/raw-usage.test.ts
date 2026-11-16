@@ -100,4 +100,14 @@ describe("createUsageTap", () => {
     await (await fetchFn("x")).text();
     expect(tap.latest()).toBeUndefined();
   });
+
+  it("counts the attempts of the dispatch that got a successful response", async () => {
+    const tap = createUsageTap();
+    expect(tap.answered()).toBe(0);
+    await tap.wrap(async () => new Response("busy", { status: 503 }))("x");
+    expect(tap.answered()).toBe(0);
+    await tap.wrap(async () => sse([]))("x");
+    await tap.wrap(async () => sse([]))("x");
+    expect(tap.answered()).toBe(2);
+  });
 });

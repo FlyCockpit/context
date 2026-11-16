@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { ConversationCost } from "@/components/conversations/conversation-cost";
 import { BACK_LINK_CLASS } from "@/components/page-shell";
 import { RunStatusPill } from "@/components/run-status-pill";
 import {
@@ -14,7 +15,6 @@ import {
   conversationTotals,
   conversationVersion,
   formatTokens,
-  formatUsdMicros,
   isActive,
   latestMainRun,
 } from "@/lib/conversations";
@@ -108,7 +108,10 @@ export function ConversationHeader({
         <div className="flex items-center gap-1 tabular-nums">
           <dt>{t("dashboard:conversation.header.cost")}</dt>
           <dd>
-            {formatUsdMicros(totals.costUsdMicros, i18n.language)}
+            <ConversationCost
+              costUsdMicros={totals.costUsdMicros}
+              unpricedCalls={totals.unpricedCalls}
+            />
             {" · "}
             {t("dashboard:conversation.header.tokens", {
               input: formatTokens(totals.inputTokens, i18n.language),

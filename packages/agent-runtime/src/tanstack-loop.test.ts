@@ -33,6 +33,8 @@ let toolCallDuringDispatch: { index: number; input: unknown } | null = null;
  * dispatch's initial messages so a test can keep or replace object identities.
  */
 let scriptedEmissions: ((initial: unknown[]) => unknown[][]) | null = null;
+/** Attempts per dispatch the provider answers over the wire (`wrapFetch` sees a 200) before its chunks. */
+let answeredAttempts = 0;
 
 vi.mock("@tanstack/ai", async (importOriginal) => {
   class StreamProcessor {
@@ -72,6 +74,12 @@ vi.mock("@tanstack/ai", async (importOriginal) => {
         ((options.messages ?? []) as Array<{ id: string }>).map((message) => message.id),
       );
       return (async function* () {
+        const wrap = options.wrapFetch as (
+          next: () => Promise<Response>,
+        ) => (input: string) => Promise<Response>;
+        for (let attempt = 0; attempt < answeredAttempts; attempt += 1) {
+          await (await wrap(async () => new Response("{}"))("https://provider.test")).text();
+        }
         if (toolCallDuringDispatch) {
           const { index, input } = toolCallDuringDispatch;
           // Mid-stream, exactly where a real tool call happens: the dispatch
@@ -127,6 +135,7 @@ beforeEach(() => {
   dispatchSnapshots.length = 0;
   scriptedChunks = [];
   chunkDelayMs = 0;
+  answeredAttempts = 0;
   scriptedAppends = [];
   dispatchIndex = 0;
   onProcessStart = null;
@@ -196,6 +205,7 @@ describe("executeTanstackLoop cache wiring", () => {
       outputTokens: 20,
       cachedInputTokens: 80,
       cacheCreationInputTokens: 15,
+      unpricedCalls: 1,
       model: "gpt-4o",
     });
     expect(result.usage.cachedInputTokens).toBe(80);
@@ -225,6 +235,7 @@ describe("executeTanstackLoop cache wiring", () => {
       outputTokens: 25,
       cachedInputTokens: 90,
       cacheCreationInputTokens: 15,
+      unpricedCalls: 1,
       model: "gpt-4o",
     });
     expect(result.usage).toEqual({
@@ -232,6 +243,7 @@ describe("executeTanstackLoop cache wiring", () => {
       outputTokens: 25,
       cachedInputTokens: 90,
       cacheCreationInputTokens: 15,
+      unpricedCalls: 1,
       model: "gpt-4o",
     });
     expect(result.finishReason).toBe("stop");
@@ -278,7 +290,12 @@ describe("executeTanstackLoop cache wiring", () => {
     ];
     const onUsage = vi.fn();
     await executeTanstackLoop(baseOptions({ onUsage }), new AbortController());
-    expect(onUsage).toHaveBeenCalledWith({ inputTokens: 10, outputTokens: 3, model: "gpt-4o" });
+    expect(onUsage).toHaveBeenCalledWith({
+      inputTokens: 10,
+      outputTokens: 3,
+      unpricedCalls: 1,
+      model: "gpt-4o",
+    });
   });
 
   it("invokes onBeforeDispatch once per model dispatch including the first", async () => {
@@ -997,10 +1014,12 @@ describe("executeTanstackLoop cost", () => {
       new AbortController(),
     );
     expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({ costUsd: 0.0015 }));
+    expect(onUsage).not.toHaveBeenCalledWith(expect.objectContaining({ unpricedCalls: 1 }));
     expect(result.usage.costUsd).toBeCloseTo(0.003, 10);
+    expect(result.usage.unpricedCalls).toBeUndefined();
   });
 
-  it("leaves costUsd unset when the provider reports none", async () => {
+  it("leaves costUsd unset and counts the dispatch unpriced when the provider reports no cost", async () => {
     scriptedChunks = [
       {
         type: "RUN_FINISHED",
@@ -1010,6 +1029,107 @@ describe("executeTanstackLoop cost", () => {
     ];
     const result = await executeTanstackLoop(baseOptions(), new AbortController());
     expect(result.usage.costUsd).toBeUndefined();
+    expect(result.usage.unpricedCalls).toBe(1);
+  });
+
+  it("counts an answered dispatch that failed before reporting usage as unpriced, keeping its error", async () => {
+    answeredAttempts = 1;
+    scriptedChunks = [{ type: "RUN_ERROR", error: { message: "upstream reset" } }];
+    const onUsage = vi.fn();
+    await expect(
+      executeTanstackLoop(baseOptions({ onUsage }), new AbortController()),
+    ).rejects.toThrow();
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith({
+      inputTokens: 0,
+      outputTokens: 0,
+      unpricedCalls: 1,
+      model: "gpt-4o",
+    });
+  });
+
+  it("counts an answered dispatch that ended without usage as unpriced", async () => {
+    answeredAttempts = 1;
+    scriptedChunks = [{ type: "RUN_FINISHED", finishReason: "stop" }];
+    const result = await executeTanstackLoop(baseOptions(), new AbortController());
+    expect(result.usage).toMatchObject({ inputTokens: 0, unpricedCalls: 1 });
+  });
+
+  it("counts an answered attempt that was retried as unpriced, next to the priced retry", async () => {
+    answeredAttempts = 2;
+    scriptedChunks = [
+      {
+        type: "RUN_FINISHED",
+        finishReason: "stop",
+        usage: { promptTokens: 1, completionTokens: 1, cost: 0.001 },
+      },
+    ];
+    const result = await executeTanstackLoop(baseOptions(), new AbortController());
+    expect(result.usage).toMatchObject({ costUsd: 0.001, unpricedCalls: 1 });
+  });
+
+  it("keeps the tokens a failed stream reported and counts it unpriced without a cost", async () => {
+    answeredAttempts = 1;
+    scriptedChunks = [
+      {
+        type: "RUN_ERROR",
+        error: { message: "upstream reset" },
+        usage: { promptTokens: 300, completionTokens: 25, totalTokens: 325 },
+      },
+    ];
+    const onUsage = vi.fn();
+    await expect(
+      executeTanstackLoop(baseOptions({ onUsage }), new AbortController()),
+    ).rejects.toThrow("upstream reset");
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith({
+      inputTokens: 300,
+      outputTokens: 25,
+      unpricedCalls: 1,
+      model: "gpt-4o",
+    });
+  });
+
+  it("keeps a failed stream's tokens and cost as priced when the provider reported a cost", async () => {
+    answeredAttempts = 1;
+    scriptedChunks = [
+      {
+        type: "RUN_ERROR",
+        error: { message: "cut off" },
+        usage: { promptTokens: 300, completionTokens: 25, totalTokens: 325, cost: 0.004 },
+      },
+    ];
+    const onUsage = vi.fn();
+    await expect(
+      executeTanstackLoop(baseOptions({ onUsage }), new AbortController()),
+    ).rejects.toThrow();
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith({
+      inputTokens: 300,
+      outputTokens: 25,
+      costUsd: 0.004,
+      model: "gpt-4o",
+    });
+  });
+
+  it("does not count a dispatch the provider never answered", async () => {
+    scriptedChunks = [{ type: "RUN_ERROR", error: { message: "connect refused" } }];
+    const onUsage = vi.fn();
+    await expect(
+      executeTanstackLoop(baseOptions({ onUsage }), new AbortController()),
+    ).rejects.toThrow();
+    expect(onUsage).not.toHaveBeenCalled();
+  });
+
+  it("counts a priced, answered dispatch once, as priced", async () => {
+    answeredAttempts = 1;
+    scriptedChunks = [
+      {
+        type: "RUN_FINISHED",
+        finishReason: "stop",
+        usage: { promptTokens: 1, completionTokens: 1, cost: 0.001 },
+      },
+    ];
+    const result = await executeTanstackLoop(baseOptions(), new AbortController());
+    expect(result.usage.costUsd).toBe(0.001);
+    expect(result.usage.unpricedCalls).toBeUndefined();
   });
 });
 

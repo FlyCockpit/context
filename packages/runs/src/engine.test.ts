@@ -1260,6 +1260,109 @@ describe("createRunEngine", () => {
       expect(main).toMatchObject({ inputTokens: 10, outputTokens: 2, costUsdMicros: 4_000 });
       expect(helper).toMatchObject({ inputTokens: 50, costUsdMicros: 20_000 });
     });
+
+    it("saves a helper's spend as it goes, so a helper that never finishes keeps it", async () => {
+      const gate = deferred();
+      const reported = deferred<string>();
+      exploreRun.mockImplementation(async (options) => {
+        const hooks = await options.onHelperStart?.({ index: 0, focus: "src", question: "?" });
+        hooks?.onUsage?.({ inputTokens: 40, outputTokens: 4, costUsd: 0.01 });
+        hooks?.onUsage?.({ inputTokens: 5, outputTokens: 1, unpricedCalls: 1 });
+        reported.resolve(hooks?.helperRunId ?? "");
+        await gate.promise;
+        return result(options, "It pads.");
+      });
+      const engine = makeEngine();
+      const started = await engine.startConversation({
+        ownerId: OWNER,
+        packageId: "pkg1",
+        text: "How do I pad?",
+        version: "1.3.0",
+        origin: "mcp",
+        mcp: { agentTokenId: "tok1", label: "Claude Code" },
+      });
+      const helperRunId = await reported.promise;
+      await vi.waitFor(() =>
+        expect(store.runs.get(helperRunId)).toMatchObject({
+          status: "running",
+          inputTokens: 45,
+          costUsdMicros: 10_000,
+          unpricedCalls: 1,
+          iterations: 2,
+        }),
+      );
+      gate.resolve();
+      await engine.waitForRun({ ownerId: OWNER, runId: started.runId, timeoutMs: 5_000 });
+    });
+
+    it("writes the spend of a helper that has no row of its own on the main run", async () => {
+      exploreRun.mockImplementation(async (options) => {
+        // Creating the helper's row failed: explore runs it without a run id.
+        await options.onHelperFinish?.({
+          index: 0,
+          focus: "src",
+          question: "?",
+          model: "vendor/helper",
+          stopReason: "completed" as const,
+          forcedFinal: false,
+          answer: "- src/a.ts:1",
+          usage: { inputTokens: 50, outputTokens: 5, costUsd: 0.02, unpricedCalls: 1 },
+          iterations: 1,
+        });
+        const ownUsage = { inputTokens: 10, outputTokens: 2, costUsd: 0.004 };
+        return result(options, "It pads.", { ownUsage });
+      });
+      const { started, snapshot } = await startAndFinish();
+      expect(snapshot.usage).toMatchObject({
+        inputTokens: 60,
+        costUsdMicros: 24_000,
+        unpricedCalls: 1,
+      });
+      expect(store.runs.get(started.runId)).toMatchObject({
+        inputTokens: 60,
+        outputTokens: 7,
+        costUsdMicros: 24_000,
+        unpricedCalls: 1,
+      });
+      expect([...store.runs.values()].some((run) => run.kind === "helper")).toBe(false);
+      // A watcher sees that spend on the main run as soon as the helper finishes.
+      expect(
+        events.find(
+          (entry) => entry.event.type === "run.progress" && entry.event.runId === started.runId,
+        )?.event,
+      ).toMatchObject({ usage: { inputTokens: 50, costUsdMicros: 20_000, unpricedCalls: 1 } });
+    });
+
+    it("records unpriced dispatches on the run that made them, main and helper alike", async () => {
+      exploreRun.mockImplementation(async (options) => {
+        await options.onUsage?.({ inputTokens: 10, outputTokens: 2, costUsd: 0.004 });
+        await options.onUsage?.({ inputTokens: 5, outputTokens: 1, unpricedCalls: 1 });
+        const hooks = await options.onHelperStart?.({ index: 0, focus: "src", question: "?" });
+        const helperUsage = { inputTokens: 50, outputTokens: 5, unpricedCalls: 2 };
+        hooks?.onUsage?.(helperUsage);
+        await options.onHelperFinish?.({
+          index: 0,
+          focus: "src",
+          question: "?",
+          helperRunId: hooks?.helperRunId,
+          model: "vendor/helper",
+          stopReason: "completed" as const,
+          forcedFinal: false,
+          answer: "- src/a.ts:1",
+          usage: helperUsage,
+          iterations: 1,
+        });
+        // The main run's own spend: one priced and one unpriced dispatch.
+        const ownUsage = { inputTokens: 15, outputTokens: 3, costUsd: 0.004, unpricedCalls: 1 };
+        return result(options, "It pads.", { ownUsage });
+      });
+      const { started, snapshot } = await startAndFinish();
+      expect(snapshot.usage).toMatchObject({ costUsdMicros: 4_000, unpricedCalls: 1 });
+      const main = store.runs.get(started.runId);
+      const helper = [...store.runs.values()].find((run) => run.kind === "helper");
+      expect(main).toMatchObject({ inputTokens: 15, costUsdMicros: 4_000, unpricedCalls: 1 });
+      expect(helper).toMatchObject({ inputTokens: 50, costUsdMicros: 0, unpricedCalls: 2 });
+    });
   });
 
   describe("activity", () => {

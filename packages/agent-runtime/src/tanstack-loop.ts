@@ -14,10 +14,15 @@ import {
 import { createModelAdapter, resolveMaxOutputTokens, resolvePromptCache } from "./adapters";
 import { pruneAgentMessages } from "./context-prune";
 import { isDeadlineAbort, startDeadline } from "./deadline";
-import { errorFromRunErrorChunk, FatalToolError } from "./errors";
+import {
+  errorFromRunErrorChunk,
+  errorUsage,
+  FatalToolError,
+  type ProviderTokenUsage,
+} from "./errors";
 import { isTruncatedFinish, normalizeFinishReason } from "./finish-reason";
 import { LoopGuard } from "./loop-guard";
-import { createUsageTap } from "./raw-usage";
+import { createUsageTap, type RawUsage } from "./raw-usage";
 import { MAX_FAILOVER_CANDIDATES } from "./retry";
 import { createRetryFailoverAdapter } from "./retry-adapter";
 import { executeToolWithAbort } from "./tool-execution";
@@ -239,6 +244,8 @@ export const executeTanstackLoop = async (
     0,
     MAX_FAILOVER_CANDIDATES,
   );
+  /** Set for the dispatch in flight: takes the usage a failed attempt reported. */
+  let recordFailedAttempt: ((attemptUsage: ProviderTokenUsage, model: string) => void) | undefined;
   const { adapter, modelOptions, getServingModelId } = createRetryFailoverAdapter({
     candidates: modelCandidates.map((model) => {
       const bundle = createModelAdapter(model, cacheOpts);
@@ -252,6 +259,7 @@ export const executeTanstackLoop = async (
     onFailover: (serving, primary) => {
       console.warn(`[agent-runtime] model failover: primary=${primary} serving=${serving}`);
     },
+    onAttemptUsage: (attemptUsage, model) => recordFailedAttempt?.(attemptUsage, model),
   });
 
   // Wall-clock backstop. Expiry aborts the same controller the dispatch already uses,
@@ -343,6 +351,92 @@ export const executeTanstackLoop = async (
 
       // Reads the wire usage alongside the adapter, for the fields it drops (raw-usage.ts).
       const usageTap = createUsageTap();
+      /** Attempts of this dispatch whose reported usage was counted (finished or failed). */
+      let attemptsWithUsage = 0;
+      let dispatchSettled = false;
+      /**
+       * Failed attempts that reported usage (a `RUN_ERROR` after the provider answered,
+       * retried or not). The adapter reports them synchronously; they are counted once
+       * the dispatch is over, with the wire usage the attempt left in the tap.
+       */
+      const failedAttempts: { usage: ProviderTokenUsage; model: string; wire?: RawUsage }[] = [];
+      recordFailedAttempt = (attemptUsage, model) => {
+        failedAttempts.push({ usage: attemptUsage, model, wire: usageTap.latest() });
+      };
+
+      /** Counts one attempt's reported usage; without a cost it is an unpriced call. */
+      const countUsage = async (
+        tokenUsage: ProviderTokenUsage,
+        model: string,
+        wire: RawUsage | undefined,
+      ) => {
+        attemptsWithUsage += 1;
+        const turnUsage: AgentUsage = {
+          inputTokens: tokenUsage.promptTokens,
+          outputTokens: tokenUsage.completionTokens,
+          model,
+        };
+        const rawUsage = tokenUsage as unknown as Record<string, unknown>;
+        const cachedInputTokens =
+          tokenUsage.promptTokensDetails?.cachedTokens ??
+          numericField(rawUsage, ["cachedTokens", "cached_tokens"]);
+        const cacheCreationInputTokens =
+          tokenUsage.promptTokensDetails?.cacheWriteTokens ??
+          numericField(rawUsage, [
+            "cacheCreationTokens",
+            "cache_creation_input_tokens",
+            "cacheCreationInputTokens",
+          ]) ??
+          wire?.cacheWriteTokens;
+        if (cachedInputTokens !== undefined) {
+          turnUsage.cachedInputTokens = cachedInputTokens;
+          usage.cachedInputTokens = (usage.cachedInputTokens ?? 0) + cachedInputTokens;
+        }
+        // OpenRouter reports the dispatch's billed cost in USD as `usage.cost`.
+        const costUsd = numericField(rawUsage, ["cost"]) ?? wire?.costUsd;
+        if (costUsd !== undefined) {
+          turnUsage.costUsd = costUsd;
+          usage.costUsd = (usage.costUsd ?? 0) + costUsd;
+        } else {
+          turnUsage.unpricedCalls = 1;
+          usage.unpricedCalls = (usage.unpricedCalls ?? 0) + 1;
+        }
+        if (cacheCreationInputTokens !== undefined) {
+          turnUsage.cacheCreationInputTokens = cacheCreationInputTokens;
+          usage.cacheCreationInputTokens =
+            (usage.cacheCreationInputTokens ?? 0) + cacheCreationInputTokens;
+        }
+        usage.inputTokens += turnUsage.inputTokens;
+        usage.outputTokens += turnUsage.outputTokens;
+        if (usage.model === undefined) usage.model = turnUsage.model;
+        await options.onUsage?.(turnUsage);
+      };
+
+      /**
+       * Once the dispatch is over: count the failed attempts' reported usage, then every
+       * other attempt the provider answered whose usage never arrived (it failed or was
+       * stopped mid-stream, was retried, or reported none). Those may still be billed:
+       * each counts as unpriced, so the cost reads as unknown, never as $0. Their tokens
+       * are unknown, so none are added.
+       */
+      const settleDispatchUsage = async () => {
+        if (dispatchSettled) return;
+        dispatchSettled = true;
+        recordFailedAttempt = undefined;
+        for (const failed of failedAttempts.splice(0)) {
+          await countUsage(failed.usage, failed.model, failed.wire);
+        }
+        const unreported = usageTap.answered() - attemptsWithUsage;
+        if (unreported <= 0) return;
+        usage.unpricedCalls = (usage.unpricedCalls ?? 0) + unreported;
+        if (usage.model === undefined) usage.model = getServingModelId();
+        await options.onUsage?.({
+          inputTokens: 0,
+          outputTokens: 0,
+          unpricedCalls: unreported,
+          model: getServingModelId(),
+        });
+      };
       const stream = chat({
         adapter,
         messages: convertMessagesToModelMessages(uiMessages),
@@ -361,7 +455,12 @@ export const executeTanstackLoop = async (
         for await (const chunk of stream) {
           // A failed dispatch arrives as a chunk, not a throw (see errorFromRunErrorChunk).
           // Without this the loop would end as `completed` with no answer.
-          if (chunk.type === "RUN_ERROR") throw errorFromRunErrorChunk(chunk);
+          if (chunk.type === "RUN_ERROR") {
+            const error = errorFromRunErrorChunk(chunk);
+            const failedUsage = errorUsage(error);
+            if (failedUsage) recordFailedAttempt?.(failedUsage, getServingModelId());
+            throw error;
+          }
           await options.onChunk?.(chunk);
           if (chunk.type === "RUN_FINISHED") {
             runCount += 1;
@@ -377,45 +476,7 @@ export const executeTanstackLoop = async (
             const tokenUsage = Array.isArray(chunk.usage)
               ? fromSpecTokenUsage(chunk.usage, chunk.metadata?.tanstack?.usage)
               : chunk.usage;
-            if (tokenUsage) {
-              const turnUsage: AgentUsage = {
-                inputTokens: tokenUsage.promptTokens,
-                outputTokens: tokenUsage.completionTokens,
-                model: getServingModelId(),
-              };
-              const rawUsage = tokenUsage as unknown as Record<string, unknown>;
-              const cachedInputTokens =
-                tokenUsage.promptTokensDetails?.cachedTokens ??
-                numericField(rawUsage, ["cachedTokens", "cached_tokens"]);
-              const wire = usageTap.latest();
-              const cacheCreationInputTokens =
-                tokenUsage.promptTokensDetails?.cacheWriteTokens ??
-                numericField(rawUsage, [
-                  "cacheCreationTokens",
-                  "cache_creation_input_tokens",
-                  "cacheCreationInputTokens",
-                ]) ??
-                wire?.cacheWriteTokens;
-              if (cachedInputTokens !== undefined) {
-                turnUsage.cachedInputTokens = cachedInputTokens;
-                usage.cachedInputTokens = (usage.cachedInputTokens ?? 0) + cachedInputTokens;
-              }
-              // OpenRouter reports the dispatch's billed cost in USD as `usage.cost`.
-              const costUsd = numericField(rawUsage, ["cost"]) ?? wire?.costUsd;
-              if (costUsd !== undefined) {
-                turnUsage.costUsd = costUsd;
-                usage.costUsd = (usage.costUsd ?? 0) + costUsd;
-              }
-              if (cacheCreationInputTokens !== undefined) {
-                turnUsage.cacheCreationInputTokens = cacheCreationInputTokens;
-                usage.cacheCreationInputTokens =
-                  (usage.cacheCreationInputTokens ?? 0) + cacheCreationInputTokens;
-              }
-              usage.inputTokens += turnUsage.inputTokens;
-              usage.outputTokens += turnUsage.outputTokens;
-              if (usage.model === undefined) usage.model = turnUsage.model;
-              await options.onUsage?.(turnUsage);
-            }
+            if (tokenUsage) await countUsage(tokenUsage, getServingModelId(), usageTap.latest());
           }
           yield chunk;
         }
@@ -424,9 +485,12 @@ export const executeTanstackLoop = async (
       try {
         await processor.process(observe());
       } catch (error) {
+        // Never let the accounting hook mask the dispatch's own error.
+        await settleDispatchUsage().catch(() => {});
         if (fatalError) throw fatalError;
         throw error;
       }
+      await settleDispatchUsage();
       if (fatalError) throw fatalError;
 
       currentMessages = fromUIMessages(processor.getMessages());

@@ -15,8 +15,18 @@ describe("sumUsage", () => {
       cachedInputTokens: 3,
       cacheCreationInputTokens: 0,
       costUsd: 0.75,
+      unpricedCalls: 0,
       model: "a",
     });
+  });
+
+  it("adds unpriced dispatches, so one unpriced side makes the sum unpriced", () => {
+    expect(
+      sumUsage(
+        { inputTokens: 1, outputTokens: 1, costUsd: 0.5 },
+        { inputTokens: 1, outputTokens: 1, unpricedCalls: 2 },
+      ),
+    ).toMatchObject({ costUsd: 0.5, unpricedCalls: 2 });
   });
 
   it("leaves costUsd undefined when neither side reported one", () => {

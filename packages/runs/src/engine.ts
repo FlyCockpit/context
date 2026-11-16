@@ -297,7 +297,12 @@ type LiveRun = {
   iterations: number;
   /** In-flight assistant messages by run id (the run itself and its helpers). */
   partials: Map<string, AgentMessage>;
-  helpers: Map<string, { iterations: number; usage: AgentUsage }>;
+  helpers: Map<string, HelperState>;
+  /**
+   * Spend of helpers that ran without a row of their own (creating it failed):
+   * written on the main run's row instead, so the query's total still has it.
+   */
+  rowlessHelperUsage: AgentUsage;
   /**
    * Helper run ids still executing in this process: the row exists and
    * `finishHelper` has not yet attempted its terminal write. The agent may
@@ -314,12 +319,16 @@ type LiveRun = {
   done: Promise<RunSnapshot>;
 };
 
+/** A helper run's live counters, and its background progress writes (awaited before its final update). */
+type HelperState = { iterations: number; usage: AgentUsage; progress: Promise<void> };
+
 function usageView(usage: AgentUsage): RunUsageView {
   return {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cachedInputTokens: usage.cachedInputTokens ?? 0,
     costUsdMicros: costMicros(usage.costUsd),
+    unpricedCalls: usage.unpricedCalls ?? 0,
   };
 }
 
@@ -331,7 +340,10 @@ export function costMicros(costUsd: number | undefined): number {
 
 function usageColumns(
   usage: AgentUsage,
-): Pick<RunUpdate, "inputTokens" | "outputTokens" | "cachedInputTokens" | "costUsdMicros"> {
+): Pick<
+  RunUpdate,
+  "inputTokens" | "outputTokens" | "cachedInputTokens" | "costUsdMicros" | "unpricedCalls"
+> {
   return usageView(usage);
 }
 
@@ -814,6 +826,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       iterations: 0,
       partials: new Map(),
       helpers: new Map(),
+      rowlessHelperUsage: ZERO,
       liveHelpers: new Set(),
       progress: Promise.resolve(),
       writer: null,
@@ -939,7 +952,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       stopReason: null,
       error,
       iterations: run.iterations,
-      usage: usageView(run.usage),
+      usage: usageView(liveUsage(run)),
     };
   }
 
@@ -949,11 +962,21 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
     return reason instanceof RunAbort ? reason.cause : "stop";
   }
 
+  /** A run's spend so far: its own plus that of helpers without a row (written on its row). */
+  function liveUsage(run: LiveRun): AgentUsage {
+    return sumUsage(run.usage, run.rowlessHelperUsage);
+  }
+
   /** Record per-dispatch usage live: event + a background write of the running totals. */
   function trackUsage(run: LiveRun, usage: AgentUsage): void {
     run.usage = sumUsage(run.usage, usage);
     run.iterations += 1;
-    const view = usageView(run.usage);
+    publishProgress(run);
+  }
+
+  /** Publish the run's running totals and save them in the background. */
+  function publishProgress(run: LiveRun): void {
+    const view = usageView(liveUsage(run));
     const iterations = run.iterations;
     publish(run.conversationId, {
       type: "run.progress",
@@ -1110,7 +1133,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
     const finish = async (
       status: RunStatus,
       fields: { answer?: string | null; stopReason?: string | null; error?: string | null },
-      usage: AgentUsage = run.usage,
+      ownUsage: AgentUsage = run.usage,
       iterations = run.iterations,
       fallback = false,
     ): Promise<RunSnapshot> => {
@@ -1118,6 +1141,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       for (const stream of helperStreams) stream.close();
       await writer.flush();
       await run.progress;
+      const usage = sumUsage(ownUsage, run.rowlessHelperUsage);
       let snapshot: RunSnapshot = {
         runId: run.runId,
         conversationId: conversation.id,
@@ -1440,7 +1464,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       publish(conversation.id, { type: "turn", runId: helperRunId, parentRunId, turn }),
     );
     const stream = deltaStream(run, helperRunId, parentRunId);
-    const state = { iterations: 0, usage: ZERO, writer };
+    const state: HelperState = { iterations: 0, usage: ZERO, progress: Promise.resolve() };
     run.helpers.set(helperRunId, state);
     helperWriters.set(helperRunId, writer);
     publish(conversation.id, {
@@ -1462,13 +1486,22 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
         onUsage: (usage: AgentUsage) => {
           state.usage = sumUsage(state.usage, usage);
           state.iterations += 1;
+          const view = usageView(state.usage);
+          const iterations = state.iterations;
           publish(conversation.id, {
             type: "run.progress",
             runId: helperRunId,
             parentRunId,
-            iterations: state.iterations,
-            usage: usageView(state.usage),
+            iterations,
+            usage: view,
           });
+          // Saved as it goes, like the main run's: a helper whose terminal write
+          // never lands (a crash, a failed write) still shows what it spent.
+          state.progress = state.progress
+            .then(() => store.updateRun(helperRunId, { ...view, iterations }))
+            .catch((error: unknown) => {
+              console.warn(`[runs] could not save progress of helper run ${helperRunId}`, error);
+            });
         },
       },
     };
@@ -1479,7 +1512,12 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
 
   async function finishHelper(run: LiveRun, helper: ExploreHelperRun): Promise<void> {
     const helperRunId = helper.helperRunId;
-    if (!helperRunId) return;
+    if (!helperRunId) {
+      run.rowlessHelperUsage = sumUsage(run.rowlessHelperUsage, helper.usage);
+      // Its spend shows on the main run at once, live and saved, like the main run's own.
+      publishProgress(run);
+      return;
+    }
     try {
       await writeHelperOutcome(run, helperRunId, helper);
     } finally {
@@ -1498,6 +1536,8 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
     helperWriters.delete(helperRunId);
     run.partials.delete(helperRunId);
     await writer?.flush();
+    // A progress write must never land after (and undo) the final one.
+    await run.helpers.get(helperRunId)?.progress;
     const cause = abortCause(run);
     const status: RunStatus =
       helper.stopReason === "aborted" || (cause && !helper.answer)
@@ -1898,12 +1938,13 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       error: row.error,
       iterations: current?.iterations ?? row.iterations,
       usage: current
-        ? usageView(current.usage)
+        ? usageView(liveUsage(current))
         : {
             inputTokens: row.inputTokens,
             outputTokens: row.outputTokens,
             cachedInputTokens: row.cachedInputTokens,
             costUsdMicros: row.costUsdMicros,
+            unpricedCalls: row.unpricedCalls,
           },
     };
   }
@@ -2102,7 +2143,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
         kind: "main",
         phase: main.phase,
         iterations: main.iterations,
-        usage: usageView(main.usage),
+        usage: usageView(liveUsage(main)),
         partial: main.partials.get(main.runId) ?? null,
       });
       for (const [helperRunId, helper] of main.helpers) {

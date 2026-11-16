@@ -9,6 +9,7 @@ import {
   composerMode,
   conversationTotals,
   conversationVersion,
+  costCertainty,
   dedupeConversations,
   formatElapsed,
   formatTokens,
@@ -26,7 +27,13 @@ import {
 } from "./conversations";
 
 const NOW = new Date("2026-10-24T12:00:00Z");
-const USAGE = { inputTokens: 100, outputTokens: 20, cachedInputTokens: 0, costUsdMicros: 1_500 };
+const USAGE = {
+  inputTokens: 100,
+  outputTokens: 20,
+  cachedInputTokens: 0,
+  costUsdMicros: 1_500,
+  unpricedCalls: 0,
+};
 
 type DetailRun = ConversationDetail["runs"][number];
 
@@ -71,6 +78,7 @@ function detail(
     lastActivityAt: NOW,
     ongoing: false,
     totalCostUsdMicros: 1_500,
+    totalUnpricedCalls: 0,
     latestRun: null,
     runs,
     truncated: false,
@@ -149,6 +157,23 @@ describe("applyWatchEvent", () => {
     });
     expect(composerMode(state)).toEqual({ kind: "steer" });
     expect(conversationTotals(state).costUsdMicros).toBe(15000);
+  });
+
+  it("carries unpriced calls from live runs and from runs outside the window", () => {
+    const state = fold([
+      snapshot(detail([], { totalCostUsdMicros: 12000, totalUnpricedCalls: 2 }), [
+        {
+          runId: "live-new",
+          parentRunId: null,
+          kind: "main",
+          phase: "running",
+          iterations: 1,
+          usage: { ...USAGE, costUsdMicros: 3000, unpricedCalls: 1 },
+          partial: null,
+        },
+      ]),
+    ]);
+    expect(conversationTotals(state)).toMatchObject({ costUsdMicros: 15000, unpricedCalls: 3 });
   });
 
   it("overlays the engine's live state on the saved rows", () => {
@@ -681,5 +706,17 @@ describe("display helpers", () => {
       { id: "a", n: 1 },
       { id: "b", n: 3 },
     ]);
+  });
+});
+
+describe("costCertainty", () => {
+  it("is a plain total only when every call was priced", () => {
+    expect(costCertainty(41_830, 0)).toBe("priced");
+    expect(costCertainty(0, 0)).toBe("priced");
+  });
+
+  it("is a lower bound when some calls were unpriced, and unknown when none were priced", () => {
+    expect(costCertainty(41_830, 1)).toBe("partial");
+    expect(costCertainty(0, 3)).toBe("unknown");
   });
 });

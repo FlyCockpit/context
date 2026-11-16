@@ -70,6 +70,8 @@ export interface ConversationViewState {
   truncated: boolean;
   /** Persisted cost of older runs outside the transcript window. */
   unloadedCostUsdMicros: number;
+  /** Persisted unpriced calls of older runs outside the transcript window. */
+  unloadedUnpricedCalls: number;
 }
 
 const ZERO_USAGE: RunUsage = {
@@ -77,6 +79,7 @@ const ZERO_USAGE: RunUsage = {
   outputTokens: 0,
   cachedInputTokens: 0,
   costUsdMicros: 0,
+  unpricedCalls: 0,
 };
 
 const ACTIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running"]);
@@ -165,7 +168,11 @@ function stateFromSnapshot(event: SnapshotEvent): ConversationViewState {
     0,
     conversation.totalCostUsdMicros - runs.reduce((sum, run) => sum + run.usage.costUsdMicros, 0),
   );
-  return { conversation, runs: views, truncated, unloadedCostUsdMicros };
+  const unloadedUnpricedCalls = Math.max(
+    0,
+    conversation.totalUnpricedCalls - runs.reduce((sum, run) => sum + run.usage.unpricedCalls, 0),
+  );
+  return { conversation, runs: views, truncated, unloadedCostUsdMicros, unloadedUnpricedCalls };
 }
 
 function updateRun(
@@ -280,8 +287,13 @@ export function conversationTotals(state: ConversationViewState): RunUsage {
       outputTokens: sum.outputTokens + run.usage.outputTokens,
       cachedInputTokens: sum.cachedInputTokens + run.usage.cachedInputTokens,
       costUsdMicros: sum.costUsdMicros + run.usage.costUsdMicros,
+      unpricedCalls: sum.unpricedCalls + run.usage.unpricedCalls,
     }),
-    { ...ZERO_USAGE, costUsdMicros: state.unloadedCostUsdMicros },
+    {
+      ...ZERO_USAGE,
+      costUsdMicros: state.unloadedCostUsdMicros,
+      unpricedCalls: state.unloadedUnpricedCalls,
+    },
   );
 }
 
@@ -841,6 +853,18 @@ function numberFormatter(locale: string, variant: NumberFormatVariant): Intl.Num
 export function formatUsdMicros(micros: number, locale: string): string {
   const usd = Math.max(0, micros) / 1_000_000;
   return numberFormatter(locale, usd > 0 && usd < 1 ? "usd4" : "usd2").format(usd);
+}
+
+/**
+ * How much of a cost is known. Any unpriced model call makes the total a
+ * lower bound (`partial`), or wholly `unknown` when nothing was priced; it is
+ * never shown as a plain total.
+ */
+export type CostCertainty = "priced" | "partial" | "unknown";
+
+export function costCertainty(costUsdMicros: number, unpricedCalls: number): CostCertainty {
+  if (unpricedCalls <= 0) return "priced";
+  return costUsdMicros > 0 ? "partial" : "unknown";
 }
 
 /** `12345` → `12K` (compact, in the active locale). */
