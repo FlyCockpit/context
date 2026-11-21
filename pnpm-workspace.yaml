@@ -9,25 +9,24 @@ minimumReleaseAgeIgnoreMissingTime: false
 supportedArchitectures:
   libc: [current]
 # Excludes for packages that fail the 7-day minimum-age check on re-resolution.
-# Each entry is scoped to the exact version that fixes an advisory
-# (`pkg@x.y.z`; quote scoped names), so no other version of that package —
-# including a newer, equally young one — bypasses the gate.
+# The hono 4.13.18 (GHSA-39q9-qp46-w8xg) and @hono/node-server 2.1.7
+# (GHSA-fj57-4f93-cfw6) carve-outs aged out on 2026-11-18. When the list
+# empties, delete the key; add it back if a future re-resolution flags a
+# security fix as too young. Each entry is scoped to the exact version that
+# fixes an advisory (`pkg@x.y.z`; quote scoped names), so no other version of
+# that package — including a newer, equally young one — bypasses the gate.
 # Security-fix carve-outs only; ordinary updates must satisfy the age gate.
 # Each entry MUST carry a `drop-after: YYYY-MM-DD` marker in its comment. That
 # date is enforced by `pnpm deps:check-excludes` (CI lint job) — once it passes,
 # the build fails until the entry is deleted. Without it a carve-out taken for a
 # one-week security window quietly becomes a permanent exemption from the gate.
-# Block sequence only, never flow style — the checker only parses blocks. The
-# marker applies to the one entry it precedes or trails; it does not carry over.
-minimumReleaseAgeExclude:
-  # GHSA-39q9-qp46-w8xg: hono 4.13.18 (released 2026-11-11) fixes reachable
-  # unauthenticated body-limit memory exhaustion and is <7 days old.
-  # drop-after: 2026-11-18
-  - hono@4.13.18
-  # GHSA-fj57-4f93-cfw6: @hono/node-server 2.1.7 (released 2026-11-11)
-  # is the security fix and is <7 days old.
-  # drop-after: 2026-11-18
-  - "@hono/node-server@2.1.7"
+# Restore as a block sequence, never flow style — the checker only parses
+# blocks. The marker applies to the one entry it precedes or trails:
+#   minimumReleaseAgeExclude:
+#     # GHSA-xxxx-yyyy-zzzz: <pkg> <x.y.z> (released YYYY-MM-DD) fixes <impact>
+#     # and is <7 days old.
+#     # drop-after: YYYY-MM-DD
+#     - <pkg>@<x.y.z>
 # Unfixable-advisory suppressions for `pnpm audit` — see
 # Only for a
 # high/critical advisory with NO patched release, reached solely through
