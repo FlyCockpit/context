@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@cockpit-context/agent-runtime": "workspace:*",
-    "minimatch": "11.0.5",
+    "minimatch": "11.0.8",
     "pyright": "catalog:",
     "typescript": "catalog:",
     "vscode-languageserver-protocol": "3.18.5",
