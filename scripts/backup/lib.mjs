@@ -7,6 +7,7 @@
  *   node lib.mjs pg-env   → prints NAME=value\0 pairs for libpq, parsed from
  *                           DATABASE_URL, so the password never reaches argv.
  */
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 // Prisma Migrate's advisory-lock key and the migration runner's lock key have
@@ -19,6 +20,38 @@ export {
 export const RESTORE_LOCK_KEY = 1381192786;
 
 export class UsageError extends Error {}
+
+/**
+ * The server's pg_xact_status() for an unconfirmed restore transaction. Waits
+ * while it is still "in progress" (the dead session's backend may still be
+ * finishing its COMMIT or its rollback), up to `waitMs` in total: each query
+ * and pause gets only what is left of it, so a status query stalled on a dead
+ * connection cannot hang the restore while the writers are stopped (it is
+ * killed and the outcome stays "uncertain").
+ * @param {string | null} xid digits only (parsed from the session's output)
+ * @param {(sql: string, timeoutMs: number) => Promise<string>} query one status
+ *   query, killed after `timeoutMs`; rejects when it fails or is killed
+ * @param {{ waitMs: number, now?: () => number, sleep?: (ms: number) => Promise<unknown> }} options
+ * @returns {Promise<string>} committed | aborted | still in progress | unknown | unavailable (…)
+ */
+export async function pollXactStatus(xid, query, { waitMs, now = Date.now, sleep = delay }) {
+  if (!xid || !/^\d+$/.test(xid)) return "unknown";
+  const deadline = now() + waitMs;
+  for (;;) {
+    // Every query and pause gets only what is left of the wait.
+    const left = deadline - now();
+    if (left <= 0) return "still in progress";
+    let status;
+    try {
+      status = await query(`SELECT coalesce(pg_xact_status('${xid}'::xid8), 'unknown')`, left);
+    } catch {
+      return "unavailable (the status query failed)";
+    }
+    if (status === "committed" || status === "aborted") return status;
+    if (status !== "in progress") return "unknown";
+    await sleep(Math.min(250, Math.max(0, deadline - now())));
+  }
+}
 
 /**
  * libpq environment for a postgres:// URL. Only libpq-understood parameters are

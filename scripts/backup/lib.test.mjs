@@ -11,6 +11,7 @@ import {
   parseS3Source,
   pgEnvFromUrl,
   pickLatest,
+  pollXactStatus,
   shellQuote,
   sortBackups,
   UsageError,
@@ -219,5 +220,108 @@ describe("backups in the volume", () => {
     );
     assert.equal(pickLatest([at("pre-restore-20261103T120000Z.dump", 5)]), null);
     assert.equal(pickLatest([]), null);
+  });
+});
+
+describe("pollXactStatus", () => {
+  /**
+   * A fake clock and status server. `answers` is consumed one per query: a
+   * string is printed after `cost` ms; "hang" never answers, so the query is
+   * killed at its timeout (the clock moves by all of it) and rejects.
+   */
+  function server(answers, { cost = 30 } = {}) {
+    let clock = 1_000_000;
+    const queries = [];
+    const sleeps = [];
+    const query = async (sql, timeoutMs) => {
+      queries.push({ sql, at: clock, timeoutMs });
+      const answer = answers.length > 1 ? answers.shift() : answers[0];
+      if (answer === "hang" || answer === "fail") {
+        clock += answer === "hang" ? timeoutMs : cost;
+        throw new Error(answer === "hang" ? "killed at the timeout" : "psql exited 2");
+      }
+      clock += Math.min(cost, timeoutMs);
+      return answer;
+    };
+    const sleep = async (ms) => {
+      sleeps.push(ms);
+      clock += ms;
+    };
+    return { query, queries, sleep, sleeps, now: () => clock, start: clock };
+  }
+
+  it("asks once and returns a final answer as is", async () => {
+    for (const answer of ["committed", "aborted"]) {
+      const s = server([answer]);
+      assert.equal(await pollXactStatus("777", s.query, { waitMs: 2000, ...s }), answer);
+      assert.deepEqual(
+        s.queries.map((q) => [q.sql, q.timeoutMs]),
+        [["SELECT coalesce(pg_xact_status('777'::xid8), 'unknown')", 2000]],
+      );
+    }
+  });
+
+  it("never queries without a transaction id of digits only", async () => {
+    for (const xid of [null, "", "77a", "777; SELECT 1", "-1"]) {
+      const s = server(["committed"]);
+      assert.equal(await pollXactStatus(xid, s.query, { waitMs: 2000, ...s }), "unknown", xid);
+      assert.equal(s.queries.length, 0, String(xid));
+    }
+  });
+
+  it("reads a failed query as unavailable and any other output as unknown", async () => {
+    let s = server(["fail"]);
+    assert.equal(
+      await pollXactStatus("777", s.query, { waitMs: 2000, ...s }),
+      "unavailable (the status query failed)",
+    );
+    s = server(["unknown"]);
+    assert.equal(await pollXactStatus("777", s.query, { waitMs: 2000, ...s }), "unknown");
+  });
+
+  it("waits out an 'in progress' transaction, pausing at most 250 ms between queries", async () => {
+    const s = server(["in progress", "in progress", "aborted"]);
+    assert.equal(await pollXactStatus("777", s.query, { waitMs: 2000, ...s }), "aborted");
+    assert.equal(s.queries.length, 3);
+    assert.deepEqual(s.sleeps, [250, 250]);
+  });
+
+  it("stops at the deadline while the transaction stays in progress, each query bounded by what is left", async () => {
+    const s = server(["in progress"]);
+    assert.equal(await pollXactStatus("777", s.query, { waitMs: 2000, ...s }), "still in progress");
+    assert.ok(s.queries.length >= 2, `${s.queries.length} queries`);
+    for (const q of s.queries) assert.equal(q.timeoutMs, s.start + 2000 - q.at);
+    // It waited out the whole budget, and not a millisecond more.
+    assert.equal(s.now(), s.start + 2000);
+    assert.ok(s.sleeps.every((ms) => ms >= 0 && ms <= 250));
+  });
+
+  it("is one total budget: a query that hangs after 'in progress' is killed at the deadline", async () => {
+    // "in progress" for the first 1.2 s, then a query that never answers.
+    const s = server(["in progress", "in progress", "in progress", "in progress", "hang"], {
+      cost: 50,
+    });
+    assert.equal(
+      await pollXactStatus("777", s.query, { waitMs: 2000, ...s }),
+      "unavailable (the status query failed)",
+    );
+    const hung = s.queries.at(-1);
+    assert.ok(hung.at - s.start >= 1000, `the hanging query started at ${hung.at - s.start} ms`);
+    // Killed at the 2 s deadline, not 2 s after it started.
+    assert.equal(hung.timeoutMs, s.start + 2000 - hung.at);
+    assert.equal(s.now(), s.start + 2000);
+  });
+
+  it("a query that hangs at once is killed at the deadline", async () => {
+    const s = server(["hang"]);
+    assert.equal(
+      await pollXactStatus("777", s.query, { waitMs: 2000, ...s }),
+      "unavailable (the status query failed)",
+    );
+    assert.deepEqual(
+      s.queries.map((q) => q.timeoutMs),
+      [2000],
+    );
+    assert.equal(s.now(), s.start + 2000);
   });
 });

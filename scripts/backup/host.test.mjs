@@ -24,77 +24,151 @@ const base = {
 };
 
 // Docker is an inert inspect fixture. No real Docker, database or credential IO.
-const dockerStub = `#!${process.execPath}
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-const fixture = JSON.parse(fs.readFileSync(process.env.FIXTURE, 'utf8'));
-const project = ${JSON.stringify(project)};
-const out = (s) => process.stdout.write(s + '\\n');
-fs.appendFileSync(process.env.CALLS, JSON.stringify(args) + '\\n');
-const ids = { 'app-id': 'app', 'pg-id': 'postgres', 'backup-id': 'backup' };
-if (args[0] === 'info') process.exit(0);
-if (args[0] === 'ps') {
-  const scoped = args.includes('label=com.docker.compose.project=' + project);
-  const svc = args.find(s => s.startsWith('label=com.docker.compose.service='))?.split('=').at(-1);
-  if (!scoped) process.stdout.write(fixture.projects ?? project + '\\nknowledge-base-prod\\n');
-  else if (svc === 'app') out('app-id');
-  else if (svc === 'postgres') out('pg-id');
-  else if (svc === 'backup') { if (fixture.backupIds !== '') out(fixture.backupIds ?? 'backup-id'); }
-  else out('app-id\\npg-id\\nbackup-id');
-} else if (args[0] === 'network' && args[1] === 'inspect') {
-  const info = fixture.networks[args.at(-1)];
-  if (!info) process.exit(1);
-  out(info.internal + '|' + info.project + (args[3].includes('compose.network') ? '|' + (info.name || args.at(-1)) : ''));
-} else if (args[0] === 'inspect') {
-  const template = args[2];
-  const id = args.at(-1);
-  if (!ids[id]) process.exit(1);
-  if (template.includes('working_dir')) out(fixture.workingDir ?? '<no value>');
-  else if (template.includes('config_files')) out(fixture.configFiles ?? '<no value>');
-  else if (template.includes('Config.Labels')) out(template.includes('compose.service') ? ids[id] : project);
-  else if (template.includes('.State.Running')) out('true');
-  else if (template.includes('.Image')) out('image-id');
-  else if (template.includes('.Mounts')) out(fixture.volumes?.[id] ?? fixture.volume ?? 'backups-volume');
-  else if (template.includes('.Config.Env')) out([
-    'DATABASE_URL=' + 'postgresql://writer:fixture@' + (fixture.databaseHost || 'postgres') + ':5432/cockpit_context',
-    'BACKUP_S3_BUCKET=fixture-bucket', 'BACKUP_S3_PREFIX=cockpit-context/prod/database',
-    'BACKUP_S3_ACCESS_KEY_ID=fixture-writer', 'BACKUP_S3_SECRET_ACCESS_KEY=fixture-secret',
-    'BACKUP_S3_REGION=auto', 'BACKUP_S3_ENDPOINT=https://s3.example.test',
-    'BACKUP_S3_FORCE_PATH_STYLE=true', 'BACKUP_S3_SSE=AES256',
-    'S3_ACCESS_KEY_ID=fixture-unrelated', 'BACKUP_MONITOR_S3_ACCESS_KEY_ID=fixture-monitor',
-    'BACKUP_MONITOR_S3_SECRET_ACCESS_KEY=fixture-monitor-secret',
-    'BETTER_AUTH_SECRET=fixture-auth', 'COCKPIT_CONTEXT_ENCRYPTION_KEYS=fixture-keyring',
-    'BACKUP_S3_UNKNOWN=fixture-unknown', 'BACKUP_HEARTBEAT_URL=https://heartbeat.example.test/token'
-  ].join('\\n'));
-  else if (template.includes('.Aliases')) out(fixture.aliases.join('\\n'));
-  else if (template.includes('.NetworkSettings.Networks')) out((id === 'app-id' ? fixture.appNetworks : fixture.pgNetworks).join('\\n'));
-  else process.exit(2);
-} else if (args[0] === 'image' && args[1] === 'inspect') {
-  // The app container's image ID is gone after a no-change redeploy (fixture.imageGone).
-  if (fixture.imageGone || args.at(-1) !== 'image-id') {
-    console.error('Error response from daemon: No such image: ' + args.at(-1));
-    process.exit(1);
-  }
-} else if (args[0] === 'run') {
-  const names = process.env.FIXTURE_NAMES.split('\\n').sort();
-  fs.writeFileSync(process.env.RESULT, JSON.stringify({args, names}));
-  if (args.includes('restore') && args.includes('--guided')) process.exitCode = Number(fixture.restoreExit ?? 0);
-} else if (args[0] === 'stop') {
-  // Once: the first stop (after the stop prompt) is interrupted by a signal.
-  const signalled = process.env.CALLS + '.signalled';
-  if (fixture.stopSignal && !fs.existsSync(signalled)) {
-    fs.writeFileSync(signalled, '');
-    process.kill(process.ppid, fixture.stopSignal);
-  }
-  if (process.env.MARK) {
-    fs.writeFileSync(process.env.MARK, '');
-    // Give the reader time to leave before the shell's next write.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
-  }
-  process.exitCode = Number(fixture.stopExit ?? 0);
-} else if (args[0] === 'start') {
-} else process.exit(3);
+// A bash script, not Node: host.sh calls docker a dozen times per run, and a
+// Node start per call was most of this file's time. The JSON fixture becomes
+// shell variables once per run (fixtureShell); each call appends
+// "<argc>\0<arg>\0…" to CALLS, and `docker run` writes "<env names>\0<arg>\0…"
+// to RESULT.
+const dockerStub = `#!/usr/bin/env bash
+source "$FIXTURE"
+{ printf '%s\\0' "$#" "$@"; } >>"$CALLS"
+out() { printf '%s\\n' "$1"; }
+id_name() { case "$1" in app-id) echo app ;; pg-id) echo postgres ;; backup-id) echo backup ;; *) return 1 ;; esac; }
+last=\${@: -1}
+case "$1" in
+  info) exit 0 ;;
+  ps)
+    scoped=0 svc=
+    for arg in "$@"; do
+      [ "$arg" = "label=com.docker.compose.project=$PROJECT" ] && scoped=1
+      [[ $arg == label=com.docker.compose.service=* ]] && [ -z "$svc" ] && svc=\${arg##*=}
+    done
+    if [ "$scoped" = 0 ]; then printf '%s' "$PROJECTS"
+    elif [ "$svc" = app ]; then out app-id
+    elif [ "$svc" = postgres ]; then out pg-id
+    elif [ "$svc" = backup ]; then [ -z "\${BACKUP_IDS+set}" ] || out "$BACKUP_IDS"
+    else printf 'app-id\\npg-id\\nbackup-id\\n'
+    fi ;;
+  network)
+    [ "$2" = inspect ] || exit 3
+    [ -n "\${NET_INFO[$last]+set}" ] || exit 1
+    if [[ $4 == *compose.network* ]]; then out "\${NET_INFO[$last]}|\${NET_NAME[$last]}"
+    else out "\${NET_INFO[$last]}"
+    fi ;;
+  inspect)
+    template=$3
+    name=$(id_name "$last") || exit 1
+    if [[ $template == *working_dir* ]]; then out "$WORKING_DIR"
+    elif [[ $template == *config_files* ]]; then out "$CONFIG_FILES"
+    elif [[ $template == *Config.Labels* ]]; then
+      if [[ $template == *compose.service* ]]; then out "$name"; else out "$PROJECT"; fi
+    elif [[ $template == *.State.Running* ]]; then out true
+    elif [[ $template == *.Image* ]]; then out image-id
+    elif [[ $template == *.Mounts* ]]; then out "\${MOUNTS[$last]}"
+    elif [[ $template == *.Config.Env* ]]; then out "$CONFIG_ENV"
+    elif [[ $template == *.Aliases* ]]; then out "$ALIASES"
+    elif [[ $template == *.NetworkSettings.Networks* ]]; then
+      if [ "$last" = app-id ]; then out "$APP_NETWORKS"; else out "$PG_NETWORKS"; fi
+    else exit 2
+    fi ;;
+  image)
+    [ "$2" = inspect ] || exit 3
+    # The app container's image ID is gone after a no-change redeploy (fixture.imageGone).
+    if [ -n "$IMAGE_GONE" ] || [ "$last" != image-id ]; then
+      echo "Error response from daemon: No such image: $last" >&2
+      exit 1
+    fi ;;
+  run)
+    names= named=0 previous= restore=0 guided=0
+    for arg in "$@"; do
+      if [ "$previous" = --env-file ] && [ "$named" = 0 ]; then
+        names=$(cut -d= -f1 "$arg" | LC_ALL=C sort) named=1
+      fi
+      [ "$arg" = restore ] && restore=1
+      [ "$arg" = --guided ] && guided=1
+      previous=$arg
+    done
+    { printf '%s\\0' "$names" "$@"; } >"$RESULT"
+    if [ "$restore" = 1 ] && [ "$guided" = 1 ]; then exit "$RESTORE_EXIT"; fi ;;
+  stop)
+    # Once: the first stop (after the stop prompt) is interrupted by a signal.
+    if [ -n "$STOP_SIGNAL" ] && [ ! -e "$CALLS.signalled" ]; then
+      : >"$CALLS.signalled"
+      kill -s "$STOP_SIGNAL" "$PPID"
+    fi
+    if [ -n "\${MARK:-}" ]; then
+      : >"$MARK"
+      # Give the reader time to leave before the shell's next write.
+      sleep 0.3
+    fi
+    exit "$STOP_EXIT" ;;
+  start) ;;
+  *) exit 3 ;;
+esac
+exit 0
 `;
+
+const sh = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
+const shMap = (name, entries) =>
+  `declare -A ${name}=(${entries.map(([key, value]) => `[${sh(key)}]=${sh(value)}`).join(" ")})`;
+
+/** The fixture as the shell variables the Docker stub reads. */
+function fixtureShell(fixture) {
+  const networks = Object.entries(fixture.networks);
+  const ids = ["app-id", "pg-id", "backup-id"];
+  const env = [
+    "DATABASE_URL=" +
+      "postgresql://writer:fixture@" +
+      `${fixture.databaseHost || "postgres"}:5432/cockpit_context`,
+    "BACKUP_S3_BUCKET=fixture-bucket",
+    "BACKUP_S3_PREFIX=cockpit-context/prod/database",
+    "BACKUP_S3_ACCESS_KEY_ID=fixture-writer",
+    "BACKUP_S3_SECRET_ACCESS_KEY=fixture-secret",
+    "BACKUP_S3_REGION=auto",
+    "BACKUP_S3_ENDPOINT=https://s3.example.test",
+    "BACKUP_S3_FORCE_PATH_STYLE=true",
+    "BACKUP_S3_SSE=AES256",
+    "S3_ACCESS_KEY_ID=fixture-unrelated",
+    "BACKUP_MONITOR_S3_ACCESS_KEY_ID=fixture-monitor",
+    "BACKUP_MONITOR_S3_SECRET_ACCESS_KEY=fixture-monitor-secret",
+    "BETTER_AUTH_SECRET=fixture-auth",
+    "COCKPIT_CONTEXT_ENCRYPTION_KEYS=fixture-keyring",
+    "BACKUP_S3_UNKNOWN=fixture-unknown",
+    "BACKUP_HEARTBEAT_URL=https://heartbeat.example.test/token",
+  ];
+  const backupIds = fixture.backupIds === "" ? null : (fixture.backupIds ?? "backup-id");
+  return [
+    `PROJECT=${sh(project)}`,
+    `PROJECTS=${sh(fixture.projects ?? `${project}\nknowledge-base-prod\n`)}`,
+    backupIds === null ? "unset BACKUP_IDS" : `BACKUP_IDS=${sh(backupIds)}`,
+    shMap(
+      "NET_INFO",
+      networks.map(([name, info]) => [name, `${info.internal}|${info.project}`]),
+    ),
+    shMap(
+      "NET_NAME",
+      networks.map(([name, info]) => [name, info.name || name]),
+    ),
+    `WORKING_DIR=${sh(fixture.workingDir ?? "<no value>")}`,
+    `CONFIG_FILES=${sh(fixture.configFiles ?? "<no value>")}`,
+    shMap(
+      "MOUNTS",
+      ids.map((id) => [id, fixture.volumes?.[id] ?? fixture.volume ?? "backups-volume"]),
+    ),
+    `CONFIG_ENV=${sh(env.join("\n"))}`,
+    `ALIASES=${sh(fixture.aliases.join("\n"))}`,
+    `APP_NETWORKS=${sh(fixture.appNetworks.join("\n"))}`,
+    `PG_NETWORKS=${sh(fixture.pgNetworks.join("\n"))}`,
+    `IMAGE_GONE=${sh(fixture.imageGone ? "1" : "")}`,
+    `RESTORE_EXIT=${sh(Number(fixture.restoreExit ?? 0))}`,
+    `STOP_SIGNAL=${sh(fixture.stopSignal ?? "")}`,
+    `STOP_EXIT=${sh(Number(fixture.stopExit ?? 0))}`,
+    "",
+  ].join("\n");
+}
+
+/** NUL-terminated fields; the stub ends every field with "\0". */
+const fields = (path) => readFileSync(path, "utf8").split("\0").slice(0, -1);
 
 /**
  * Real host.sh functions (sourced, then `body`), inert Docker boundary on an
@@ -107,27 +181,9 @@ function run(
 ) {
   const dir = mkdtempSync(join(tmpdir(), "backup-host-test-"));
   try {
-    writeFileSync(join(dir, "docker.cjs"), dockerStub);
-    writeFileSync(
-      join(dir, "docker"),
-      `#!/usr/bin/env bash
-FIXTURE_NAMES=""
-if [ "$1" = run ]; then
-  previous=""
-  for arg in "$@"; do
-    if [ "$previous" = --env-file ]; then
-      FIXTURE_NAMES="$(cut -d= -f1 "$arg" | sort)"
-      break
-    fi
-    previous="$arg"
-  done
-fi
-export FIXTURE_NAMES
-exec ${process.execPath} "$FIXTURE_SCRIPT" "$@"
-`,
-    );
+    writeFileSync(join(dir, "docker"), dockerStub);
     chmodSync(join(dir, "docker"), 0o755);
-    writeFileSync(join(dir, "fixture.json"), JSON.stringify(fixture));
+    writeFileSync(join(dir, "fixture.sh"), fixtureShell(fixture));
     // Node starts children with SIGPIPE ignored; a terminal shell has it at the
     // default (fatal), so restore that before bash starts (GNU env, Linux-only).
     const result = spawnSync(
@@ -140,10 +196,9 @@ exec ${process.execPath} "$FIXTURE_SCRIPT" "$@"
         killSignal: "SIGKILL",
         env: {
           PATH: `${dir}:${process.env.PATH}`,
-          FIXTURE: join(dir, "fixture.json"),
-          RESULT: join(dir, "result.json"),
-          CALLS: join(dir, "calls.jsonl"),
-          FIXTURE_SCRIPT: join(dir, "docker.cjs"),
+          FIXTURE: join(dir, "fixture.sh"),
+          RESULT: join(dir, "result"),
+          CALLS: join(dir, "calls"),
           ...(markOnStop ? { MARK: join(dir, "stopped") } : {}),
           ...(gone ? { HOST_TEST_GONE: join(dir, "reader-gone") } : {}),
         },
@@ -151,14 +206,17 @@ exec ${process.execPath} "$FIXTURE_SCRIPT" "$@"
     );
     let invocation = null;
     try {
-      invocation = JSON.parse(readFileSync(join(dir, "result.json"), "utf8"));
+      const [names = "", ...args] = fields(join(dir, "result"));
+      invocation = { args, names: names.split("\n").sort() };
     } catch {}
-    let calls = [];
+    const calls = [];
     try {
-      calls = readFileSync(join(dir, "calls.jsonl"), "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
+      const logged = fields(join(dir, "calls"));
+      for (let at = 0; at < logged.length; ) {
+        const count = Number(logged[at++]);
+        calls.push(logged.slice(at, at + count));
+        at += count;
+      }
     } catch {}
     return { ...result, invocation, calls };
   } finally {

@@ -40,7 +40,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pipeline } from "node:stream/promises";
-import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createGunzip } from "node:zlib";
 
@@ -57,6 +56,7 @@ import {
   parseS3Source,
   pgEnvFromUrl,
   pickLatest,
+  pollXactStatus,
   RESTORE_LOCK_KEY,
   RESTORE_USAGE,
   shellQuote,
@@ -685,32 +685,15 @@ async function settleOutcome(result, env) {
 }
 
 /**
- * The server's pg_xact_status() for the restore transaction, from a fresh
- * session. Waits while it is still "in progress" (the dead session's backend
- * may still be finishing its COMMIT or its rollback), up to XACT_STATUS_WAIT_MS.
+ * The server's pg_xact_status() for the restore transaction, each query from a
+ * fresh session, within XACT_STATUS_WAIT_MS in total (pollXactStatus in lib.mjs).
  * @param {NodeJS.ProcessEnv} env
  * @param {string | null} xid digits only (parsed from the session's output)
- * @returns {Promise<string>} committed | aborted | in progress | unknown | unavailable
  */
-async function serverXactStatus(env, xid) {
-  if (!xid || !/^\d+$/.test(xid)) return "unknown";
-  const deadline = Date.now() + XACT_STATUS_WAIT_MS;
-  for (;;) {
-    // Every query and pause gets only what is left of the wait.
-    const left = deadline - Date.now();
-    if (left <= 0) return "still in progress";
-    let status;
-    try {
-      status = await query(env, `SELECT coalesce(pg_xact_status('${xid}'::xid8), 'unknown')`, {
-        timeoutMs: left,
-      });
-    } catch {
-      return "unavailable (the status query failed)";
-    }
-    if (status === "committed" || status === "aborted") return status;
-    if (status !== "in progress") return "unknown";
-    await delay(Math.min(250, Math.max(0, deadline - Date.now())));
-  }
+function serverXactStatus(env, xid) {
+  return pollXactStatus(xid, (sql, timeoutMs) => query(env, sql, { timeoutMs }), {
+    waitMs: XACT_STATUS_WAIT_MS,
+  });
 }
 
 /** @param {NodeJS.ProcessEnv} env */
