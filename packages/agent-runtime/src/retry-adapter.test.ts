@@ -308,6 +308,66 @@ async function* runErrorStream(code: unknown, message = "boom"): AsyncIterable<S
   yield { type: "RUN_ERROR", message, rawEvent: { code, message } } as unknown as StreamChunk;
 }
 
+describe("createRetryFailoverAdapter — truncation reported as RUN_ERROR", () => {
+  const usage = { promptTokens: 25, completionTokens: 40, cost: 0.0000225 };
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["messages (max_tokens)", { code: "max_tokens", message: "The response was cut off" }],
+    ["responses (incomplete)", { code: "incomplete", message: "max_output_tokens" }],
+  ];
+  for (const [label, error] of cases) {
+    it(`finishes a ${label} turn as truncated, without retrying or failing over`, async () => {
+      let calls = 0;
+      const primary = makeAdapter("primary", () => {
+        calls += 1;
+        return (async function* () {
+          yield { type: "RUN_STARTED", runId: "r", threadId: "t" } as unknown as StreamChunk;
+          yield { type: "RUN_ERROR", ...error, error, usage } as unknown as StreamChunk;
+        })();
+      });
+      const backup = makeAdapter("backup", () => okStream());
+      const { adapter, getServingModelId } = createRetryFailoverAdapter({
+        candidates: [
+          { adapter: primary, modelId: "primary" },
+          { adapter: backup, modelId: "backup" },
+        ],
+        sleep: async () => {},
+      });
+      const chunks = await drain(adapter);
+      expect(calls).toBe(1);
+      expect(getServingModelId()).toBe("primary");
+      expect(chunks).toEqual([
+        { type: "RUN_STARTED", runId: "r", threadId: "t" },
+        expect.objectContaining({
+          type: "RUN_FINISHED",
+          runId: "r",
+          threadId: "t",
+          finishReason: "length",
+          usage,
+        }),
+      ]);
+    });
+  }
+
+  it("still fails an incomplete response that was not cut off by the ceiling", async () => {
+    const primary = makeAdapter("primary", () =>
+      (async function* () {
+        yield { type: "RUN_STARTED", runId: "r", threadId: "t" } as unknown as StreamChunk;
+        yield { type: "TEXT_MESSAGE_START", messageId: "m" } as unknown as StreamChunk;
+        yield {
+          type: "RUN_ERROR",
+          code: "incomplete",
+          message: "content_filter",
+        } as unknown as StreamChunk;
+      })(),
+    );
+    const { adapter } = createRetryFailoverAdapter({
+      candidates: [{ adapter: primary, modelId: "primary" }],
+      sleep: async () => {},
+    });
+    await expect(drain(adapter)).rejects.toThrow("content_filter");
+  });
+});
+
 describe("createRetryFailoverAdapter — RUN_ERROR chunks", () => {
   it("retries a transient RUN_ERROR; RUN_STARTED does not commit the attempt", async () => {
     let calls = 0;

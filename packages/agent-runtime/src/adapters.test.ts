@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { anthropicSdkBaseUrl, createModelAdapter, resolvePromptCache } from "./adapters";
+import {
+  anthropicSdkBaseUrl,
+  createModelAdapter,
+  outputCeilingOptions,
+  resolvePromptCache,
+} from "./adapters";
 import type { AgentModel } from "./types";
 
 // Capture the args each provider factory is called with so we can assert the config
@@ -48,7 +53,13 @@ beforeEach(() => {
 describe("createModelAdapter — chat-completions", () => {
   it("uses the OpenRouter chat adapter with no modelOptions (chat() promptCache does the caching)", () => {
     const bundle = createModelAdapter(claude("chat-completions"), { enabled: true, cacheKey: "k" });
-    expect(bundle).toEqual({ adapter: { name: "openrouter-chat" } });
+    // Wrapped so a tool call cut off at the ceiling reads as truncated (chat-truncation.ts).
+    expect(bundle).toEqual({
+      adapter: expect.objectContaining({
+        name: "openrouter-chat",
+        chatStream: expect.any(Function),
+      }),
+    });
     expect(calls.chat[0]).toEqual([
       "anthropic/claude-haiku-4.5",
       "test-key",
@@ -122,6 +133,35 @@ describe("createModelAdapter — messages", () => {
   it("strips the /v1 the Anthropic SDK adds back", () => {
     createModelAdapter({ ...claude("messages"), baseUrl: "https://gateway.example/v1/" });
     expect(calls.messages[0]?.[2]).toMatchObject({ baseURL: "https://gateway.example" });
+  });
+});
+
+describe("createModelAdapter — output ceiling", () => {
+  it("puts the ceiling in each adapter's own modelOptions field", () => {
+    expect(createModelAdapter(gpt("chat-completions"), undefined, 16384).modelOptions).toEqual({
+      maxCompletionTokens: 16384,
+    });
+    expect(createModelAdapter(claude("messages"), undefined, 16384).modelOptions).toEqual({
+      max_tokens: 16384,
+    });
+    expect(
+      createModelAdapter(claude("responses"), { enabled: true, cacheKey: "k" }, 16384).modelOptions,
+    ).toEqual({
+      maxOutputTokens: 16384,
+      sessionId: "k",
+      promptCacheKey: "k",
+      cacheControl: { type: "ephemeral" },
+    });
+    expect(createModelAdapter(gpt("responses"), { enabled: false }, 4096).modelOptions).toEqual({
+      maxOutputTokens: 4096,
+    });
+  });
+
+  it("sends no ceiling when none is resolved", () => {
+    for (const api of ["chat-completions", "responses", "messages"] as const) {
+      expect(outputCeilingOptions(api, undefined)).toEqual({});
+    }
+    expect(createModelAdapter(gpt("messages")).modelOptions).toBeUndefined();
   });
 });
 

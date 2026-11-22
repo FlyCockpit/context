@@ -338,13 +338,22 @@ export function costMicros(costUsd: number | undefined): number {
   return Math.round(costUsd * 1_000_000);
 }
 
+/**
+ * The usage a run row stores: the published view plus the generation ids, which stay
+ * off the event stream (they are for an operator auditing cost, not for the UI).
+ */
 function usageColumns(
   usage: AgentUsage,
 ): Pick<
   RunUpdate,
-  "inputTokens" | "outputTokens" | "cachedInputTokens" | "costUsdMicros" | "unpricedCalls"
+  | "inputTokens"
+  | "outputTokens"
+  | "cachedInputTokens"
+  | "costUsdMicros"
+  | "unpricedCalls"
+  | "generationIds"
 > {
-  return usageView(usage);
+  return { ...usageView(usage), generationIds: usage.generationIds ?? [] };
 }
 
 /**
@@ -984,8 +993,9 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       iterations,
       usage: view,
     });
+    const columns = usageColumns(liveUsage(run));
     run.progress = run.progress
-      .then(() => store.updateRun(run.runId, { ...view, iterations }))
+      .then(() => store.updateRun(run.runId, { ...columns, iterations }))
       .catch((error: unknown) => {
         console.warn(`[runs] could not save progress of run ${run.runId}`, error);
       });
@@ -1487,6 +1497,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           state.usage = sumUsage(state.usage, usage);
           state.iterations += 1;
           const view = usageView(state.usage);
+          const columns = usageColumns(state.usage);
           const iterations = state.iterations;
           publish(conversation.id, {
             type: "run.progress",
@@ -1498,7 +1509,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           // Saved as it goes, like the main run's: a helper whose terminal write
           // never lands (a crash, a failed write) still shows what it spent.
           state.progress = state.progress
-            .then(() => store.updateRun(helperRunId, { ...view, iterations }))
+            .then(() => store.updateRun(helperRunId, { ...columns, iterations }))
             .catch((error: unknown) => {
               console.warn(`[runs] could not save progress of helper run ${helperRunId}`, error);
             });

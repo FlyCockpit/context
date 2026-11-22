@@ -107,6 +107,7 @@ export class MemoryRunStore implements RunStore {
       cachedInputTokens: 0,
       costUsdMicros: 0,
       unpricedCalls: 0,
+      generationIds: [],
       iterations: 0,
       finishedAt: null,
       answer: null,

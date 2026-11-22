@@ -19,7 +19,14 @@ export function sumUsage(a?: AgentUsage, b?: AgentUsage): AgentUsage {
         : undefined,
     unpricedCalls: (a?.unpricedCalls ?? 0) + (b?.unpricedCalls ?? 0),
     model: a?.model ?? b?.model,
+    ...generationIds(a, b),
   };
+}
+
+/** Both sides' generation ids, in order; no field when neither has any. */
+function generationIds(a?: AgentUsage, b?: AgentUsage): Pick<AgentUsage, "generationIds"> {
+  const ids = [...(a?.generationIds ?? []), ...(b?.generationIds ?? [])];
+  return ids.length > 0 ? { generationIds: ids } : {};
 }
 
 /**

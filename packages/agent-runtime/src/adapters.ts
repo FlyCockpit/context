@@ -2,6 +2,7 @@ import type { AnyTextAdapter, PromptCacheOptions } from "@tanstack/ai";
 import { createAnthropicChat } from "@tanstack/ai-anthropic";
 import { createOpenRouterResponsesText, createOpenRouterText } from "@tanstack/ai-openrouter";
 
+import { withWireTruncation } from "./chat-truncation";
 import { messagesFetch } from "./messages-compat";
 import type { AgentModel } from "./types";
 
@@ -34,9 +35,8 @@ export const anthropicSdkBaseUrl = (baseUrl: string = DEFAULT_MODEL_BASE_URL): s
 };
 
 /**
- * Explicit per-turn output ceiling, forwarded to every provider as `maxTokens`
- * (OpenRouter/OpenAI-chat `max_tokens`, OpenAI Responses `max_output_tokens`,
- * Anthropic Messages `max_tokens`).
+ * Explicit per-turn output ceiling, sent to every provider in its own field
+ * (see {@link outputCeilingOptions}).
  *
  * Why it exists: without it the *provider* default governs the ceiling, and several
  * defaults are as low as 4096 — small enough that a single long structured tool call
@@ -63,6 +63,31 @@ export const resolveMaxOutputTokens = (override?: number | null): number | undef
   if (override === undefined) return DEFAULT_MAX_OUTPUT_TOKENS;
   if (!Number.isFinite(override) || override < 1) return DEFAULT_MAX_OUTPUT_TOKENS;
   return Math.trunc(override);
+};
+
+/**
+ * The `modelOptions` that carry the output ceiling for one API. `chat()` has no generic
+ * output-ceiling option and no adapter reads one, so each adapter gets the field it
+ * maps onto the wire:
+ *
+ * - chat-completions (`@tanstack/ai-openrouter`): `maxCompletionTokens` → `max_completion_tokens`.
+ * - responses (`@tanstack/ai-openrouter`): `maxOutputTokens` → `max_output_tokens`.
+ * - messages (`@tanstack/ai-anthropic`): `max_tokens`, which the adapter otherwise fills
+ *   with the model's own maximum (64000 for an id it does not know).
+ */
+export const outputCeilingOptions = (
+  api: AgentModel["api"],
+  maxOutputTokens: number | undefined,
+): Record<string, number> => {
+  if (maxOutputTokens === undefined) return {};
+  switch (api) {
+    case "chat-completions":
+      return { maxCompletionTokens: maxOutputTokens };
+    case "responses":
+      return { maxOutputTokens };
+    case "messages":
+      return { max_tokens: maxOutputTokens };
+  }
 };
 
 /** Prompt-caching wiring the caller wants attached to the adapter for this loop. */
@@ -106,11 +131,19 @@ export interface ModelAdapter {
   modelOptions?: Record<string, unknown>;
 }
 
+/**
+ * The adapter for one model, plus its `modelOptions`. `maxOutputTokens` is the resolved
+ * per-turn ceiling ({@link resolveMaxOutputTokens}); `undefined` leaves it to the provider.
+ */
 export const createModelAdapter = (
   model: AgentModel,
   cache?: AdapterCacheOptions,
+  maxOutputTokens?: number,
 ): ModelAdapter => {
   const cachingEnabled = cache?.enabled ?? true;
+  const ceiling = outputCeilingOptions(model.api, maxOutputTokens);
+  const withOptions = (adapter: AnyTextAdapter, options: Record<string, unknown>): ModelAdapter =>
+    Object.keys(options).length > 0 ? { adapter, modelOptions: options } : { adapter };
   // Retries belong to retry-adapter.ts, which knows when a stream is committed and fails
   // over between models. Both SDKs retry on their own by default — the OpenRouter SDK
   // backs off on every 5xx for up to an hour — which would hide a failure from it until
@@ -121,12 +154,11 @@ export const createModelAdapter = (
   };
   switch (model.api) {
     case "chat-completions": {
-      const adapter = createOpenRouterText(
-        model.model as OpenRouterModel,
-        model.apiKey,
-        openRouterConfig,
+      // A tool call cut off at the ceiling reads as one (chat-truncation.ts).
+      const adapter = withWireTruncation(
+        createOpenRouterText(model.model as OpenRouterModel, model.apiKey, openRouterConfig),
       );
-      return { adapter };
+      return withOptions(adapter, ceiling);
     }
     case "responses": {
       const adapter = createOpenRouterResponsesText(
@@ -134,20 +166,20 @@ export const createModelAdapter = (
         model.apiKey,
         openRouterConfig,
       );
-      if (!cachingEnabled) return { adapter };
+      if (!cachingEnabled) return withOptions(adapter, ceiling);
       // This adapter reads no `promptCache`, so the same wiring goes in by hand.
       // OpenRouter's Responses endpoint drops `cache_control` on content blocks; the
       // top-level one is Anthropic's automatic caching, which puts the breakpoint on the
       // last cacheable block of every request (the growing conversation tail).
       // `session_id` keeps the session on one provider; `prompt_cache_key` routes OpenAI
       // requests to the same cache shard.
-      const modelOptions: Record<string, unknown> = {
+      return withOptions(adapter, {
+        ...ceiling,
         ...(cache?.cacheKey
           ? { sessionId: cache.cacheKey, promptCacheKey: clampCacheKey(cache.cacheKey) }
           : {}),
         ...(isAnthropicModel(model.model) ? { cacheControl: { type: "ephemeral" } } : {}),
-      };
-      return Object.keys(modelOptions).length > 0 ? { adapter, modelOptions } : { adapter };
+      });
     }
     case "messages": {
       const adapter = createAnthropicChat(model.model as AnthropicModel, model.apiKey, {
@@ -155,7 +187,7 @@ export const createModelAdapter = (
         maxRetries: 0,
         fetch: messagesFetch(),
       });
-      return { adapter };
+      return withOptions(adapter, ceiling);
     }
   }
 };

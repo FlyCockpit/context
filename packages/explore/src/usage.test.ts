@@ -29,6 +29,21 @@ describe("sumUsage", () => {
     ).toMatchObject({ costUsd: 0.5, unpricedCalls: 2 });
   });
 
+  it("concatenates generation ids in order, and adds no field when neither side has any", () => {
+    expect(
+      sumUsage(
+        { inputTokens: 1, outputTokens: 1, generationIds: ["gen-a"] },
+        { inputTokens: 1, outputTokens: 1, generationIds: ["gen-b", "gen-c"] },
+      ).generationIds,
+    ).toEqual(["gen-a", "gen-b", "gen-c"]);
+    expect(
+      sumUsage(undefined, { inputTokens: 0, outputTokens: 0, generationIds: ["gen-x"] }),
+    ).toMatchObject({ generationIds: ["gen-x"] });
+    expect(sumUsage({ inputTokens: 1, outputTokens: 1 }, undefined)).not.toHaveProperty(
+      "generationIds",
+    );
+  });
+
   it("leaves costUsd undefined when neither side reported one", () => {
     expect(sumUsage({ inputTokens: 1, outputTokens: 1 }, undefined).costUsd).toBeUndefined();
     expect(

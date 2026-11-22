@@ -85,6 +85,8 @@ export interface RunUpdate {
   cachedInputTokens?: number;
   costUsdMicros?: number;
   unpricedCalls?: number;
+  /** Provider generation ids of every answered model call so far (`AgentUsage.generationIds`). */
+  generationIds?: string[];
   iterations?: number;
   startedAt?: Date;
   finishedAt?: Date;

@@ -1,4 +1,4 @@
-import type { AnyTextAdapter, StreamChunk } from "@tanstack/ai";
+import { type AnyTextAdapter, EventType, type StreamChunk } from "@tanstack/ai";
 
 import type { ModelAdapter } from "./adapters";
 import {
@@ -8,6 +8,7 @@ import {
   errorUsage,
   type ProviderTokenUsage,
 } from "./errors";
+import { isTruncationRunError } from "./finish-reason";
 import {
   computeBackoffMs,
   DEFAULT_MAX_ATTEMPTS_PER_MODEL,
@@ -117,6 +118,31 @@ export type RetryFailoverOptions = {
 };
 
 /**
+ * The `RUN_FINISHED` a truncation `RUN_ERROR` ({@link isTruncationRunError}) stands for:
+ * `finishReason: "length"`, as the chat-completions adapter reports the same event, with
+ * the error's usage. From there `chat()` handles a cut-off tool call as it does for that
+ * adapter, and the loop reports `output-truncated`. Thrown instead, the error has no
+ * status, so it would read as transient: retried at the same ceiling for the same bill,
+ * failed over, then failed as a model error.
+ */
+const truncatedFinish = (
+  chunk: Extract<StreamChunk, { type: "RUN_ERROR" }>,
+  started: StreamChunk | undefined,
+  streamOptions: Parameters<AnyTextAdapter["chatStream"]>[0],
+): StreamChunk => {
+  const ids = started?.type === "RUN_STARTED" ? started : undefined;
+  return {
+    type: EventType.RUN_FINISHED,
+    threadId: ids?.threadId ?? chunk.threadId ?? streamOptions.threadId ?? "",
+    runId: ids?.runId ?? chunk.runId ?? streamOptions.runId ?? "",
+    finishReason: "length",
+    timestamp: chunk.timestamp ?? Date.now(),
+    ...(chunk.model ? { model: chunk.model } : {}),
+    ...(chunk.usage ? { usage: chunk.usage } : {}),
+  };
+};
+
+/**
  * Wrap one or more model adapters so each `chatStream` call retries on transient
  * failures, then fails over to the next candidate (cap {@link MAX_FAILOVER_CANDIDATES}).
  *
@@ -191,6 +217,7 @@ export const createRetryFailoverAdapter = (
         // whether the model is answering. Hold it back until something else arrives, or a
         // failure on the request itself could never be retried.
         let held: StreamChunk[] = [];
+        let started: StreamChunk | undefined;
         const attemptAbort = new AbortController();
         try {
           const attemptOptions = optionsFor(candidate, streamOptions);
@@ -203,7 +230,7 @@ export const createRetryFailoverAdapter = (
             candidate.stallTimeoutMs,
             () => attemptAbort.abort(),
           );
-          for await (const chunk of chunks) {
+          for await (let chunk of chunks) {
             if (options.abortSignal?.aborted) {
               // A terminal chunk arriving after the stop still reports what was spent.
               const usage =
@@ -214,6 +241,12 @@ export const createRetryFailoverAdapter = (
                 name: "AbortError",
                 ...(usage ? { usage } : {}),
               });
+            }
+            if (chunk.type === "RUN_STARTED") started = chunk;
+            // Hitting the output ceiling is a finished, truncated turn on every API,
+            // never a failure to retry: see truncatedFinish.
+            if (chunk.type === "RUN_ERROR" && isTruncationRunError(chunk)) {
+              chunk = truncatedFinish(chunk, started, streamOptions);
             }
             // The adapters report a failed call as this chunk instead of throwing.
             if (chunk.type === "RUN_ERROR") throw errorFromRunErrorChunk(chunk);

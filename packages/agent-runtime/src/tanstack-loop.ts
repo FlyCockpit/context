@@ -100,6 +100,12 @@ const turnRole = (message: AgentMessage): string =>
     ? "tool"
     : message.role;
 
+/** Append generation ids to a usage record, leaving the field unset when there are none. */
+const addGenerationIds = (target: AgentUsage, ids: readonly string[]): void => {
+  if (ids.length === 0) return;
+  target.generationIds = [...(target.generationIds ?? []), ...ids];
+};
+
 export const executeTanstackLoop = async (
   options: AgentLoopOptions,
   abortController: AbortController,
@@ -244,11 +250,15 @@ export const executeTanstackLoop = async (
     0,
     MAX_FAILOVER_CANDIDATES,
   );
+  // Explicit output ceiling — never rely on the provider default (see
+  // DEFAULT_MAX_OUTPUT_TOKENS: a low default truncates long tool calls). Each adapter
+  // carries it in its own modelOptions field, fallbacks included.
+  const maxOutputTokens = resolveMaxOutputTokens(options.maxOutputTokens);
   /** Set for the dispatch in flight: takes the usage a failed attempt reported. */
   let recordFailedAttempt: ((attemptUsage: ProviderTokenUsage, model: string) => void) | undefined;
   const { adapter, modelOptions, getServingModelId } = createRetryFailoverAdapter({
     candidates: modelCandidates.map((model) => {
-      const bundle = createModelAdapter(model, cacheOpts);
+      const bundle = createModelAdapter(model, cacheOpts, maxOutputTokens);
       return {
         ...bundle,
         modelId: model.model,
@@ -266,10 +276,6 @@ export const executeTanstackLoop = async (
   // so an in-flight stream is cut off instead of running to completion.
   const deadline = startDeadline(options, abortController);
   let timedOut = false;
-
-  // Explicit output ceiling — never rely on the provider default (see
-  // DEFAULT_MAX_OUTPUT_TOKENS: a low default truncates long tool calls).
-  const maxOutputTokens = resolveMaxOutputTokens(options.maxOutputTokens);
 
   try {
     // The seed messages are turns too: without them the persisted history opens
@@ -359,16 +365,31 @@ export const executeTanstackLoop = async (
        * retried or not). The adapter reports them synchronously; they are counted once
        * the dispatch is over, with the wire usage the attempt left in the tap.
        */
-      const failedAttempts: { usage: ProviderTokenUsage; model: string; wire?: RawUsage }[] = [];
+      const failedAttempts: {
+        usage: ProviderTokenUsage;
+        model: string;
+        wire?: RawUsage;
+        generationId?: string;
+      }[] = [];
       recordFailedAttempt = (attemptUsage, model) => {
-        failedAttempts.push({ usage: attemptUsage, model, wire: usageTap.latest() });
+        failedAttempts.push({
+          usage: attemptUsage,
+          model,
+          wire: usageTap.latest(),
+          // Reported as the attempt fails, before any retry fetches again.
+          generationId: usageTap.takeLatestGenerationId(),
+        });
       };
 
-      /** Counts one attempt's reported usage; without a cost it is an unpriced call. */
+      /**
+       * Counts one attempt's reported usage; without a cost it is an unpriced call. The
+       * attempt's generation id travels with it, so each report's ids are its own calls.
+       */
       const countUsage = async (
         tokenUsage: ProviderTokenUsage,
         model: string,
         wire: RawUsage | undefined,
+        generationId: string | undefined,
       ) => {
         attemptsWithUsage += 1;
         const turnUsage: AgentUsage = {
@@ -376,6 +397,7 @@ export const executeTanstackLoop = async (
           outputTokens: tokenUsage.completionTokens,
           model,
         };
+        addGenerationIds(turnUsage, generationId ? [generationId] : []);
         const rawUsage = tokenUsage as unknown as Record<string, unknown>;
         const cachedInputTokens =
           tokenUsage.promptTokensDetails?.cachedTokens ??
@@ -406,6 +428,7 @@ export const executeTanstackLoop = async (
           usage.cacheCreationInputTokens =
             (usage.cacheCreationInputTokens ?? 0) + cacheCreationInputTokens;
         }
+        if (turnUsage.generationIds) addGenerationIds(usage, turnUsage.generationIds);
         usage.inputTokens += turnUsage.inputTokens;
         usage.outputTokens += turnUsage.outputTokens;
         if (usage.model === undefined) usage.model = turnUsage.model;
@@ -424,18 +447,23 @@ export const executeTanstackLoop = async (
         dispatchSettled = true;
         recordFailedAttempt = undefined;
         for (const failed of failedAttempts.splice(0)) {
-          await countUsage(failed.usage, failed.model, failed.wire);
+          await countUsage(failed.usage, failed.model, failed.wire, failed.generationId);
         }
         const unreported = usageTap.answered() - attemptsWithUsage;
         if (unreported <= 0) return;
         usage.unpricedCalls = (usage.unpricedCalls ?? 0) + unreported;
         if (usage.model === undefined) usage.model = getServingModelId();
-        await options.onUsage?.({
+        const unreportedUsage: AgentUsage = {
           inputTokens: 0,
           outputTokens: 0,
           unpricedCalls: unreported,
           model: getServingModelId(),
-        });
+        };
+        // Every counted attempt took its own id, so what is left belongs to the
+        // attempts that never reported.
+        addGenerationIds(unreportedUsage, usageTap.takeGenerationIds());
+        if (unreportedUsage.generationIds) addGenerationIds(usage, unreportedUsage.generationIds);
+        await options.onUsage?.(unreportedUsage);
       };
       const stream = chat({
         adapter,
@@ -444,7 +472,6 @@ export const executeTanstackLoop = async (
         tools,
         abortController,
         agentLoopStrategy: maxIterations(1),
-        ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
         ...(modelOptions ? { modelOptions } : {}),
         threadId,
         promptCache,
@@ -476,7 +503,14 @@ export const executeTanstackLoop = async (
             const tokenUsage = Array.isArray(chunk.usage)
               ? fromSpecTokenUsage(chunk.usage, chunk.metadata?.tanstack?.usage)
               : chunk.usage;
-            if (tokenUsage) await countUsage(tokenUsage, getServingModelId(), usageTap.latest());
+            if (tokenUsage) {
+              await countUsage(
+                tokenUsage,
+                getServingModelId(),
+                usageTap.latest(),
+                usageTap.takeLatestGenerationId(),
+              );
+            }
           }
           yield chunk;
         }

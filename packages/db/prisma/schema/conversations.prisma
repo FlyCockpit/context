@@ -112,6 +112,10 @@ model AgentRun {
   /// Model dispatches whose provider reported no cost. Any at all makes the
   /// run's cost unknown (MCP reports `priced: false`), never $0.
   unpricedCalls     Int             @default(0)
+  /// The provider's id for every answered model call of this run, in order
+  /// (OpenRouter: `GET /api/v1/generation?id=` gives each call's billed cost),
+  /// so `costUsdMicros` can be checked call by call. Never shown to users.
+  generationIds     String[]        @default([])
   iterations        Int             @default(0)
   startedAt         DateTime?
   finishedAt        DateTime?

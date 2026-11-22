@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { collectFinishReasons, isTruncatedFinish, normalizeFinishReason } from "./finish-reason";
+import {
+  collectFinishReasons,
+  isTruncatedFinish,
+  isTruncationRunError,
+  normalizeFinishReason,
+} from "./finish-reason";
 
 describe("normalizeFinishReason", () => {
   it("maps every provider spelling of the output ceiling to length", () => {
@@ -80,5 +85,26 @@ describe("collectFinishReasons / isTruncatedFinish", () => {
     expect(isTruncatedFinish({ finishReason: "tool_calls" })).toBe(false);
     expect(isTruncatedFinish(null)).toBe(false);
     expect(isTruncatedFinish({})).toBe(false);
+  });
+});
+
+describe("isTruncationRunError", () => {
+  it("recognizes the Anthropic and Responses spellings of a ceiling hit", () => {
+    expect(isTruncationRunError({ code: "max_tokens" })).toBe(true);
+    expect(isTruncationRunError({ error: { code: "max_tokens", message: "cut off" } })).toBe(true);
+    expect(isTruncationRunError({ code: "incomplete", message: "max_output_tokens" })).toBe(true);
+    expect(
+      isTruncationRunError({
+        code: "incomplete",
+        error: { code: "incomplete", message: "max_output_tokens" },
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves every other error alone", () => {
+    expect(isTruncationRunError({ code: "incomplete", message: "content_filter" })).toBe(false);
+    expect(isTruncationRunError({ code: "context_overflow", message: "max_tokens" })).toBe(false);
+    expect(isTruncationRunError({ code: "503", message: "length" })).toBe(false);
+    expect(isTruncationRunError({ message: "max_tokens" })).toBe(false);
   });
 });

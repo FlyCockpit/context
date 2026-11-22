@@ -155,10 +155,11 @@ describe("executeTanstackLoop cache wiring", () => {
       baseOptions({ cacheKey: "run-1:person", cache: true }),
       new AbortController(),
     );
-    expect(createModelAdapter).toHaveBeenCalledWith(expect.objectContaining({ api: "responses" }), {
-      enabled: true,
-      cacheKey: "run-1:person",
-    });
+    expect(createModelAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ api: "responses" }),
+      { enabled: true, cacheKey: "run-1:person" },
+      DEFAULT_MAX_OUTPUT_TOKENS,
+    );
     expect(chatCalls[0]?.modelOptions).toEqual({ sessionId: "run-1:person" });
   });
 
@@ -332,20 +333,29 @@ describe("executeTanstackLoop cache wiring", () => {
 });
 
 describe("executeTanstackLoop output ceiling", () => {
-  it("forwards an explicit, generous maxTokens to the provider by default", async () => {
-    await executeTanstackLoop(baseOptions(), new AbortController());
-    expect(chatCalls[0]?.maxTokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS);
+  // chat() has no generic output-ceiling option; the ceiling travels in each adapter's
+  // modelOptions (adapters.ts outputCeilingOptions, and the wire test in wire.test.ts).
+  it("hands every candidate's adapter an explicit, generous ceiling by default", async () => {
+    await executeTanstackLoop(
+      baseOptions({ fallbackModels: [{ api: "messages", model: "anthropic/x", apiKey: "k" }] }),
+      new AbortController(),
+    );
+    expect(createModelAdapter.mock.calls.map((call) => call[2])).toEqual([
+      DEFAULT_MAX_OUTPUT_TOKENS,
+      DEFAULT_MAX_OUTPUT_TOKENS,
+    ]);
     expect(DEFAULT_MAX_OUTPUT_TOKENS).toBeGreaterThanOrEqual(16384);
+    expect(chatCalls[0]).not.toHaveProperty("maxTokens");
   });
 
   it("honors a caller override", async () => {
     await executeTanstackLoop(baseOptions({ maxOutputTokens: 4096 }), new AbortController());
-    expect(chatCalls[0]?.maxTokens).toBe(4096);
+    expect(createModelAdapter.mock.calls[0]?.[2]).toBe(4096);
   });
 
   it("falls back to the provider default only when explicitly passed null", async () => {
     await executeTanstackLoop(baseOptions({ maxOutputTokens: null }), new AbortController());
-    expect(chatCalls[0]).not.toHaveProperty("maxTokens");
+    expect(createModelAdapter.mock.calls[0]?.[2]).toBeUndefined();
   });
 });
 

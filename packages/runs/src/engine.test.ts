@@ -1261,6 +1261,59 @@ describe("createRunEngine", () => {
       expect(helper).toMatchObject({ inputTokens: 50, costUsdMicros: 20_000 });
     });
 
+    it("stores each run's generation ids on its own row, and keeps them off the events", async () => {
+      exploreRun.mockImplementation(async (options) => {
+        await options.onUsage?.({
+          inputTokens: 10,
+          outputTokens: 2,
+          costUsd: 0.004,
+          generationIds: ["gen-main-1"],
+        });
+        const hooks = await options.onHelperStart?.({ index: 0, focus: "src", question: "?" });
+        const helperUsage = {
+          inputTokens: 50,
+          outputTokens: 5,
+          costUsd: 0.02,
+          generationIds: ["gen-helper-1", "gen-helper-2"],
+        };
+        hooks?.onUsage?.(helperUsage);
+        await options.onHelperFinish?.({
+          index: 0,
+          focus: "src",
+          question: "?",
+          helperRunId: hooks?.helperRunId,
+          model: "vendor/helper",
+          stopReason: "completed",
+          forcedFinal: false,
+          answer: "- src/a.ts:1",
+          usage: helperUsage,
+          iterations: 1,
+        });
+        await options.onUsage?.({ inputTokens: 1, outputTokens: 1, generationIds: ["gen-main-2"] });
+        // While the run is going, its row already has what it reported so far.
+        await vi.waitFor(() =>
+          expect(
+            [...store.runs.values()].find((run) => run.kind === "main")?.generationIds,
+          ).toEqual(["gen-main-1", "gen-main-2"]),
+        );
+        // explore sums the master's own reports into `ownUsage` (sumUsage).
+        return result(options, "answer", {
+          ownUsage: {
+            inputTokens: 11,
+            outputTokens: 3,
+            costUsd: 0.004,
+            generationIds: ["gen-main-1", "gen-main-2"],
+          },
+        });
+      });
+      const { started } = await startAndFinish();
+      const main = store.runs.get(started.runId);
+      const helper = [...store.runs.values()].find((run) => run.kind === "helper");
+      expect(main?.generationIds).toEqual(["gen-main-1", "gen-main-2"]);
+      expect(helper?.generationIds).toEqual(["gen-helper-1", "gen-helper-2"]);
+      expect(JSON.stringify(events)).not.toContain("gen-");
+    });
+
     it("saves a helper's spend as it goes, so a helper that never finishes keeps it", async () => {
       const gate = deferred();
       const reported = deferred<string>();

@@ -115,3 +115,29 @@ export const collectFinishReasons = (chunk: unknown): string[] => {
  */
 export const isTruncatedFinish = (chunk: unknown): boolean =>
   collectFinishReasons(chunk).some((raw) => normalizeFinishReason(raw) === "length");
+
+/**
+ * True when a `RUN_ERROR` chunk is really "the output hit the token ceiling". Two
+ * adapters report it that way rather than as a finish reason: `@tanstack/ai-anthropic`
+ * (`stop_reason: "max_tokens"` → `code: "max_tokens"`) and the OpenRouter Responses
+ * adapter (`response.incomplete` → `code: "incomplete"`, the message being
+ * `incomplete_details.reason`, e.g. `max_output_tokens`). An incomplete response for
+ * any other reason (a content filter) is not a truncation.
+ */
+export const isTruncationRunError = (chunk: {
+  code?: unknown;
+  message?: unknown;
+  error?: unknown;
+}): boolean => {
+  const nested =
+    typeof chunk.error === "object" && chunk.error !== null
+      ? (chunk.error as { code?: unknown; message?: unknown })
+      : {};
+  const code = [nested.code, chunk.code].find((value) => typeof value === "string");
+  if (typeof code !== "string") return false;
+  if (normalizeFinishReason(code) === "length") return true;
+  if (code !== "incomplete") return false;
+  return [nested.message, chunk.message].some(
+    (value) => typeof value === "string" && normalizeFinishReason(value) === "length",
+  );
+};

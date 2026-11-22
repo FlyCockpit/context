@@ -5,8 +5,10 @@
  *
  * MANUAL ONLY — every case calls a real model and spends money. Never wire it
  * into verify, CI or a test. Needs OPENROUTER_API_KEY and COCKPIT_CONTEXT_MODEL (root
- * `.env` or shell); COCKPIT_CONTEXT_HELPER_MODEL, COCKPIT_CONTEXT_OPENROUTER_BASE_URL,
- * COCKPIT_CONTEXT_MAX_ITERATIONS and COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS are honored when set.
+ * `.env` or shell); COCKPIT_CONTEXT_MODEL_API (chat-completions, responses or messages),
+ * COCKPIT_CONTEXT_HELPER_MODEL, COCKPIT_CONTEXT_OPENROUTER_BASE_URL,
+ * COCKPIT_CONTEXT_MAX_ITERATIONS and COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS are honored when set
+ * (scripts/lib/explore-script-env.ts).
  *
  * `--cases` is a JSON array of
  *   { "id", "repo", "root" (absolute path to a checkout), "question",
@@ -22,6 +24,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 
 import { runExploreAgent } from "../packages/explore/src/index.ts";
+import { readExploreScriptEnv } from "./lib/explore-script-env.ts";
 
 type EvalCase = {
   id: string;
@@ -40,19 +43,12 @@ if (!values.cases) {
   process.exit(1);
 }
 
-const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-const model = process.env.COCKPIT_CONTEXT_MODEL?.trim();
-if (!apiKey || !model) {
-  console.error("Set OPENROUTER_API_KEY and COCKPIT_CONTEXT_MODEL to run the explore-agent eval.");
+const settings = readExploreScriptEnv(process.env);
+if (!settings.ok) {
+  console.error(`[eval] ${settings.error}`);
   process.exit(1);
 }
-
-const positiveInt = (raw: string | undefined): number | undefined => {
-  const value = Number(raw);
-  return Number.isInteger(value) && value > 0 ? value : undefined;
-};
-const maxIterations = positiveInt(process.env.COCKPIT_CONTEXT_MAX_ITERATIONS);
-const timeoutSeconds = positiveInt(process.env.COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS);
+const { apiKey, model, api, helperModel, baseUrl, maxIterations, timeoutSeconds } = settings.value;
 
 const outDir = path.resolve(
   values.out ?? path.join(os.tmpdir(), `cockpit-context-explore-eval-${Date.now()}`),
@@ -65,10 +61,10 @@ const cases = JSON.parse(fs.readFileSync(path.resolve(values.cases), "utf8")) as
 fs.writeFileSync(outJsonl, "");
 fs.writeFileSync(
   outMd,
-  `# Explore-agent eval\n\nModel: \`${model}\`\nStarted: ${new Date().toISOString()}\n\n`,
+  `# Explore-agent eval\n\nAPI: \`${api}\` · Model: \`${model}\`\nStarted: ${new Date().toISOString()}\n\n`,
 );
 
-console.log(`[eval] ${cases.length} cases · model=${model} · out=${outDir}`);
+console.log(`[eval] ${cases.length} cases · api=${api} · model=${model} · out=${outDir}`);
 
 for (const evalCase of cases) {
   console.log(`\n[eval] >>> ${evalCase.id} (${evalCase.repo})`);
@@ -89,9 +85,10 @@ for (const evalCase of cases) {
       question: evalCase.question,
       package: { identifier: evalCase.repo },
       apiKey,
+      api,
       model,
-      helperModel: process.env.COCKPIT_CONTEXT_HELPER_MODEL?.trim() || undefined,
-      baseUrl: process.env.COCKPIT_CONTEXT_OPENROUTER_BASE_URL?.trim() || undefined,
+      helperModel,
+      baseUrl,
       maxIterations,
       timeoutMs: timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000,
     });

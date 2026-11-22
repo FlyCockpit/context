@@ -65,7 +65,7 @@
     "test:setup": "node --import tsx --test scripts/lib/admin-email-env.test.ts scripts/lib/smtp-env.test.ts scripts/lib/encryption-keyring-env.test.ts",
     "test:scripts:affected": "node scripts/test-scripts-affected.ts",
     "test:scripts:affected:test": "node --test scripts/test-scripts-affected.test.ts",
-    "test:dev-tools": "node --import tsx --test scripts/lib/fake-openrouter.test.ts scripts/lib/e2e-capture.test.mjs",
+    "test:dev-tools": "node --import tsx --test scripts/lib/fake-openrouter.test.ts scripts/lib/e2e-capture.test.mjs scripts/lib/explore-script-env.test.ts",
     "doctor": "tsx scripts/doctor.ts",
     "doctor:react": "react-doctor . --offline -y",
     "doctor:react:diff": "react-doctor . --scope changed --base origin/main --offline -y",

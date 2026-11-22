@@ -37,6 +37,13 @@ export interface AgentUsage {
   cacheCreationInputTokens?: number;
   /** Model id that actually served this successful dispatch (may be a fallback). */
   model?: string;
+  /**
+   * The provider's ids for the answered model calls this usage is the first to account
+   * for, in order: one per call, failed and retried ones included, since each may be
+   * billed. On OpenRouter each one opens `GET /api/v1/generation?id=`, which gives that
+   * call's billed cost and tokens. Unset when the provider sent none.
+   */
+  generationIds?: string[];
 }
 
 export interface StreamEvent {
