@@ -86,6 +86,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), [AGENTS.md](./AGENTS.md) and [develop
 - [Hosting and persistent storage](./docs/hosting.md)
 - [Schema migrations](./docs/schema-migrations.md) and [change recipes](./docs/schema-changes-recipe.md)
 - [Backup and restore](./docs/backup-restore.md)
+- [UI edge lines](./docs/ui.md)
 - [Changelog](./CHANGELOG.md)
 
 ## Contributing

@@ -1,0 +1,28 @@
+# UI
+
+Layout rules for the web app that the code alone does not make obvious. The general rules (one scroller, overlays, touch targets, i18n) live in [AGENTS.md](../AGENTS.md); this file records measured values.
+
+## Edge lines
+
+Set 11-22 by the orchestrator's gridlines pass, owner-requested. This app follows the template's edge lines (FlyCockpit/template, `patterns/design-system.md` § Edge lines). This section lists only where this app's shell differs from them or adds containers the template does not have. Change a value only with the owner's approval, and record the new value here.
+
+Terms are the template's. The **text line** is where labels, headings and bare icons start. The **box line** is where filled, bordered or shadowed controls start. The **trailing line** is where the last item in a row ends. An item is within tolerance when its ink is within 1px of its line. Values hold at 390px and 1440px unless a row says otherwise.
+
+| Container | Text line | Box line | Trailing line | Centre / icon column |
+|---|---|---|---|---|
+| App header (`Header`, `px-4` at every width) | 16px: the brand | — | 16px: the user menu button's box ends here | Every item centres on the header row. |
+| Signed-in sidebar, expanded (`AppFrame`, `w-60`) | Labels at 51px (icon column plus `gap-3`) | 8px (`px-2`): the nav link boxes (`touch`: 1px border plus `px-3.5`) | 9px: the link boxes and the right-aligned collapse toggle (`icon-touch` in `p-2`) end here, inside the rail's 1px end border | Nav icons are `size-4`, left-aligned on one column that starts 23px in. The footer group (Settings, Admin) uses the same lines. |
+| Signed-in sidebar, collapsed (`w-16`) | — | — | — | The links and the centred toggle share one vertical centre line, the rail's centre inside its 1px end border. |
+| Page content (`PageShell`: `container mx-auto max-w-{4xl,5xl,7xl}` with `px-4`) | 16px inside the centred page container. Where the main column is wider than the container's maximum width, the container's margins come first. | Same as the text line | 16px inside the container | — |
+| Section tabs (`SectionTabs`: Access, Settings; the admin strip is a `SelectorRow` in the `max-w-7xl` container with the same spacing) | The icon starts 12px inside the tab (`px-3`); the label follows after it and `gap-2`, 36px in | The first tab's box starts on the page text line | The strip scrolls sideways on phones | — |
+| Two-factor nudge (`TwoFactorNudge`, full-width band under the admin strip and above signed-in pages) | The shield icon starts 16px inside the frame (`px-4`), like the template's admin-setup banner: a frame band, not a page row. From `sm:` the heading and body follow the 20px icon and `gap-3`, 48px in; below `sm:` the block stacks and the text starts at 16px too. The icon shares the page text line only where the page container fills the main column: the `wide` admin pages (overview, users, storage, jobs) at 1440px and below. Admin settings (`narrow`) and seed use narrower containers, so their text line sits further in. | — | 16px: the Set up 2FA button | — |
+| More sheet (BottomNav, `side="bottom"`) | 16px: the "More" title | 16px (`px-4`): the row boxes (`touch`); each row's icon starts 15px inside its box (1px border plus `px-3.5`) and its label 43px in (after the icon and `gap-3`) | 16px: the row boxes and the close X's ink | — |
+| Dropdown menu, account menu | Group label, name and email on the 10px icon column's edge; Settings and Sign out on the 32px label line (Sign out takes `inset`) | — | — | The account menu is at least 224px wide (`min-w-56`, owner 11-22); a long email truncates with an ellipsis (`truncate`) and shows in full in its `title`. |
+| Dialog close (`DialogContent`) | — | — | The X's ink ends on the 16px line: the 28px button (`icon-sm` is 28px at every width here; the template has 44px on phones) sits at `right-1.5` | Centred on the title line at every width (`top-3`). The hit expansion (`after:-inset-3`) is laid out from the button's padding box (inside its 1px border), so it reaches 11px past the button: a 45×50px target where the popup clips its edge (`overflow-x-hidden`), 50×50px otherwise. |
+| Sheet close (`SheetContent`) | — | — | Same button, placement and target as the dialog (`top-3 right-1.5`; the template uses a 44px `icon-touch` at `top-1 right-0`) | Centred on the header title (`p-4`). |
+
+Dropdown menus elsewhere (the 32px label line, the 10px icon column, `inset` for rows without an icon), BottomNav and Select listboxes use the template's lines unchanged. `SegmentedControl` keeps the template's box lines (`border p-1`, toggles inside it), but its toggles have only `min-h-[44px]`, no 44px minimum width, so a short label such as "All" sits in a narrower box than the template's.
+
+Known conflict, left for the owner (11-22): short `SegmentedControl` toggles (no 44px minimum width) fall below the 44px mobile touch-target rule in [AGENTS.md](../AGENTS.md). Fixing it changes control sizes, which an alignment pass does not do.
+
+The template's two rules apply here too. Boxes share the text line inside pages, cards, sheets and forms. A miss is fixed in the container (its padding, `inset`, `px-*` on a track, or the shared close-button placement), never with a one-off margin on one item.

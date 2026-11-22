@@ -60,7 +60,9 @@ export default function UserMenuContent() {
             <span className="block text-muted-foreground">{t("userMenu.myAccount")}</span>
             <span className="block truncate text-foreground">{session.user.name}</span>
             {session.user.email ? (
-              <span className="block truncate font-normal">{session.user.email}</span>
+              <span className="block truncate font-normal" title={session.user.email}>
+                {session.user.email}
+              </span>
             ) : null}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -69,12 +71,13 @@ export default function UserMenuContent() {
               key={item.id}
               onClick={() => navigate({ to: toLangRoute(item.path), params: { lang } })}
             >
-              <item.icon className="mr-2 size-4" />
+              <item.icon className="size-4" />
               {t(item.labelKey)}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            inset
             variant="destructive"
             onClick={async () => {
               // Dynamic import keeps the sign-out path out of the menu chunk's
