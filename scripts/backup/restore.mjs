@@ -811,7 +811,7 @@ async function main() {
       if (reportedExit !== null) process.exit(reportedExit);
       if (committed || commitConfirmed) {
         // The restore itself finished; only the closing summary was cut short.
-        // Report it as done (exit 0, owner decision 2026-11-14): host.sh then
+        // Report it as done (exit 0): host.sh then
         // treats it exactly like an uninterrupted restore.
         console.error(
           process.env.RESTORE_DRILL === "1"

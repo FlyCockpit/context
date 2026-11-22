@@ -165,7 +165,7 @@ export async function ensureRuntimeTables(client, schema) {
   for (const ddl of RUNTIME_DDL) await client.query(ddlFor(ddl, schema));
 }
 
-// --- recording applied migrations (F7) ---------------------------------------
+// --- recording applied migrations --------------------------------------------
 
 const displayKey = (key) =>
   String(key)

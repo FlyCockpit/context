@@ -993,7 +993,7 @@ const SHELL_DIALECTS = {
 // Validated by harmless local `pwd` controls and exercised across all hook
 // entries below. Keep this finite witness set separate from the decoder's
 // general profile so the regression does not become another union grammar.
-const C25_ZSH_MODE_PREFIXES = ["zsh -Oc", "zsh -cO", "zsh -c -O", "zsh +Oc", "zsh -c -oemacs"];
+const ZSH_MODE_PREFIXES = ["zsh -Oc", "zsh -cO", "zsh -c -O", "zsh +Oc", "zsh -c -oemacs"];
 
 // This is a deliberately small shared source language for Zsh `-c`, not a
 // blacklist for one `=command` spelling. It admits one simple command with
@@ -4852,12 +4852,12 @@ export async function evaluate(payload, projectDir) {
 async function selfTest() {
   await ensureBashParser();
   const projectDir = "/proj";
-  // -- pass-24: canonical shell invocation/mode decoder --------------------
+  // -- canonical shell invocation/mode decoder --------------------
   // -c is a pending mode. These forms prove that operands, clusters,
   // delimiters, and stdin selection are consumed before the actual source is
   // selected, while later positional argv is never reparsed.
-  const c24BashCases = [];
-  const c24ModePrefixes = [
+  const modeBashCases = [];
+  const bashModePrefixes = [
     "bash -c",
     "bash -o pipefail -c",
     "bash -euo pipefail -c",
@@ -4882,12 +4882,12 @@ async function selfTest() {
     "bash -oO pipefail extglob -c",
     "bash -coo pipefail errexit",
   ];
-  for (const mode of c24ModePrefixes) {
-    c24BashCases.push([mode + " 'sudo id'", true]);
-    c24BashCases.push([mode + ' "$X"', true]);
-    c24BashCases.push([mode + " 'printf \"%s\" \"$1\"' sh 'sudo id'", false]);
+  for (const mode of bashModePrefixes) {
+    modeBashCases.push([mode + " 'sudo id'", true]);
+    modeBashCases.push([mode + ' "$X"', true]);
+    modeBashCases.push([mode + " 'printf \"%s\" \"$1\"' sh 'sudo id'", false]);
   }
-  c24BashCases.push(
+  modeBashCases.push(
     ["command bash -o pipefail -c 'sudo id'", true],
     ["timeout 1 bash -O extglob -c 'sudo id'", true],
     ["pnpm exec bash -co pipefail 'sudo id'", true],
@@ -4913,11 +4913,11 @@ async function selfTest() {
     ["bash \"$SHELL_FLAG\" -c 'sudo id'", true],
     ["find node_modules -exec bash '{}' -c 'sudo id' \\;", true],
   );
-  // -- pass-25: dialect-specific option arity and source roles -------------
+  // -- dialect-specific option arity and source roles -------------
   // These modes are valid local Zsh controls. `-O` is Boolean; `-oemacs`
   // consumes its attached name, so neither form may steal the `-c` source.
-  for (const mode of C25_ZSH_MODE_PREFIXES) {
-    c24BashCases.push(
+  for (const mode of ZSH_MODE_PREFIXES) {
+    modeBashCases.push(
       [mode + " 'dropdb'", true],
       [mode + " 'sudo id'", true],
       [mode + " '=dropdb'", true],
@@ -4931,7 +4931,7 @@ async function selfTest() {
   // Dash, ksh, and ash intentionally retain only their primary source/script
   // transitions. Advanced flags do not inherit another dialect's arity.
   for (const shell of ["dash", "ksh", "ash"]) {
-    c24BashCases.push(
+    modeBashCases.push(
       [shell + " -c 'sudo id'", true],
       [shell + ' -c "$X"', true],
       [shell + " -c ''", false],
@@ -5202,7 +5202,7 @@ async function selfTest() {
     ['psql -d "$DATABASE_URL" -c "SELECT 1"', false],
     ['grep -rn "DROP TABLE" scripts/', false], // destructive:audited — inert hook self-test input; parsed, never executed.
     ["pnpm verify", false],
-    // -- pass-8: per-segment leading-prefix boundary (old first-match would fail) -
+    // -- per-segment leading-prefix boundary (a first-match parser would fail) -
     ["if false; then echo no; fi; if true; then sudo id; fi", true],
     ["if true; then echo ok; fi; while true; do sudo id; done", true],
     ["if true; then echo ok; fi; until false; do sudo id; done", true],
@@ -5222,7 +5222,7 @@ async function selfTest() {
     ['if printf "%s" "ok"; then echo hi; fi', false],
     ["if true; then echo ok; fi; if coproc sudo id; then echo hi; fi", true],
     ["if true; then echo ok; fi; if false; then echo no; elif sudo id; then echo yes; fi", true],
-    // -- pass-9: case branch preservation (C8 bypass) -----------------------
+    // -- case branch preservation (bypass regression) -----------------------
     ["case x in a) echo ok ;; b) sudo id ;; esac", true],
     ["case b in a) echo ok ;; b) sudo id ;; esac", true],
     ["case x in a) echo ok ;; b) dropdb starter_dev ;; esac", true], // destructive:audited — inert hook self-test input; parsed, never executed.
@@ -5231,7 +5231,7 @@ async function selfTest() {
     ["case x in a) echo ok ;; b) $tool -rf apps/web/src ;; esac", true],
     ["case x in a|b) echo ok ;; c) sudo id ;; esac", true],
     ["case x in a) echo ok; sudo id ;; b) echo no ;; esac", true],
-    // -- pass-9: registered wrapper operand resolution (C8 bypass) ---------
+    // -- registered wrapper operand resolution (bypass regression) ---------
     ["timeout 1 sudo id", true],
     ["timeout 1 dropdb starter_dev", true], // destructive:audited — inert hook self-test input; parsed, never executed.
     ['timeout 1 bash -c "sudo id"', true],
@@ -5251,11 +5251,11 @@ async function selfTest() {
     ["xargs -I X echo ok", false],
     ["setsid -c true", false],
     ["exec -c true", false],
-    // -- pass-9: shell nesting depth boundary (C8 bypass) -------------------
+    // -- shell nesting depth boundary (bypass regression) -------------------
     ['bash -c "bash -c \\"bash -c \\\\\\"bash -c sudo id\\\\\\"\\""', true],
     ['bash -c "bash -c \\"bash -c \\\\\\"bash -c \\\\\\\\\\"sudo id\\\\\\\\\\"\\\\\\"\\""', true],
     ['bash -c "bash -c \\"bash -c \\\\\\"echo ok\\\\\\"\\""', false],
-    // -- pass-10: C9 parser-backed regressions --------------------------------
+    // -- parser-backed regressions --------------------------------
     ["echo case; sudo id", true],
     ["case 'in' in in) sudo id ;; esac", true],
     ["pnpm exec env sudo id", true],
@@ -5270,13 +5270,13 @@ async function selfTest() {
     ["pnpm dlx -c 'echo ok; sudo id'", true],
     ["npx --call='sudo id'", true],
     ["npm exec --call='sudo id'", true],
-    ["time -o /tmp/c9-time sudo id", true],
-    ["/usr/bin/time -o /tmp/c9-time sudo id", true],
-    ["time --output /tmp/c9-time sudo id", true],
+    ["time -o /tmp/hook-time sudo id", true],
+    ["/usr/bin/time -o /tmp/hook-time sudo id", true],
+    ["time --output /tmp/hook-time sudo id", true],
     ["time -f %e sudo id", true],
     ['timeout 1 env -S "sudo id"', true],
     ['timeout 1 env -S "bash -c \\"sudo id\\""', true],
-    // -- pass-11: typed invocation / provenance (C11 coordinator probes) -----
+    // -- typed invocation / provenance -----
     [String.raw`su\do id`, true],
     [String.raw`\sudo id`, true],
     [String.raw`dro\pdb starter_dev`, true],
@@ -5301,10 +5301,10 @@ async function selfTest() {
     ["npm --prefix . exec sudo id", true],
     ["yarn --cwd . exec sudo id", true],
     ["npx --prefix . sudo id", true],
-    // -- pass-12: remove unsound consumer fallbacks (C12 coordinator probes) --
+    // -- remove unsound consumer fallbacks --
     [`env -S 'su"do" id'`, true],
-    [`env -S '\${PR54_PROGRAM} id'`, true],
-    [`env -S 'prisma db push \${PR54_FLAG}'`, true], // destructive:audited — inert hook self-test input; parsed, never executed.
+    [`env -S '\${HOOK_PROGRAM} id'`, true],
+    [`env -S 'prisma db push \${HOOK_FLAG}'`, true], // destructive:audited — inert hook self-test input; parsed, never executed.
     ["su{do,} id", true],
     ["dro{p,}db starter", true],
     ["git pu{sh,} --force", true],
@@ -5329,7 +5329,7 @@ async function selfTest() {
     [String.raw`find . -exec git commit -m "--force-reset" \;`, false], // destructive:audited — inert hook self-test input; parsed, never executed.
     ["cp -t docs notes.md", false],
     ["mv --target-directory=docs notes.md", false],
-    // -- pass-13: central classification / stage / all-root / runner roles (C13) --
+    // -- central classification / stage / all-root / runner roles --
     ['prisma "$first" reset', true],
     ['prisma migrate "$ACTION"', true],
     ['prisma db "$ACTION"', true],
@@ -5361,7 +5361,7 @@ async function selfTest() {
     ['git commit --message "$MESSAGE"', false],
     ["pnpm -w --dir . exec printf okay", false],
     ["find node_modules dist -exec rm -rf {} +", false],
-    // -- pass-14: complete SQL/cp-mv/find-okdir/pnpm workspace-root (C14) --
+    // -- complete SQL/cp-mv/find-okdir/pnpm workspace-root --
     ['psql "$OPTION" "DROP TABLE x"', true], // destructive:audited — inert hook self-test input; parsed, never executed.
     ['psql "$OPTION" "DELETE FROM x"', true], // destructive:audited — inert hook self-test input; parsed, never executed.
     ['psql "$OPTION" "TRUNCATE x"', true], // destructive:audited — inert hook self-test input; parsed, never executed.
@@ -5390,7 +5390,7 @@ async function selfTest() {
     ["mv --target-directory=docs source", false],
     [String.raw`find node_modules dist -okdir rm -rf {} \;`, false],
     ['git commit -m "mysql -e DROP TABLE x"', false], // destructive:audited — inert hook self-test input; parsed, never executed.
-    // -- pass-15: typed SQL/find/compose/time roles and bootstrap cleanup (C15) --
+    // -- typed SQL/find/compose/time roles and bootstrap cleanup --
     ['psql "$ARG" -c "SELECT 1"', true],
     ['psql "$ARG" --command "SELECT 1"', true],
     ['psql -c "SELECT 1" "$ARG" -c "SELECT 2"', true],
@@ -5433,7 +5433,7 @@ async function selfTest() {
     ["docker compose -f docker-compose.dev.yml down --volumes", false],
     ["bash scripts/compose.sh -f docker-compose.dev.yml down -v", false],
     ["docker --context default compose ps", false],
-    // -- pass-16: finite role inventory / identity propagation (C16 review + C17 probes) --
+    // -- finite role inventory / identity propagation --
     ["find apps/web/src -depth -delete", true],
     ["find apps/web/src -depth -exec rm -rf {} +", true],
     [String.raw`find apps/web/src -depth -exec sudo id \;`, true],
@@ -5481,7 +5481,7 @@ async function selfTest() {
     ["xargs --eof printf okay", false],
     ["xargs --replace printf okay", false],
     ["git -c core.quotePath=false status --short", false],
-    // -- pass-18: typed find/Compose/Git identity ownership (C18) -----------
+    // -- typed find/Compose/Git identity ownership -----------
     [String.raw`find node_modules -follow -exec rm -r {} \;`, true],
     [String.raw`find node_modules -follow -exec rm -r -f {} \;`, true],
     [String.raw`find node_modules -follow -exec /bin/rm -R {} \;`, true],
@@ -5494,7 +5494,7 @@ async function selfTest() {
     [String.raw`find node_modules -follow -exec printf "%s" {} \;`, false],
     [String.raw`find node_modules -follow -exec sh -c "printf '%s' 'rm -rf {}'" \;`, true],
     [String.raw`find node_modules -follow -exec sh -c "echo rm -rf {}" \;`, true],
-    [String.raw`find node_modules -follow -exec rm -r /tmp/pr54-owned \;`, false],
+    [String.raw`find node_modules -follow -exec rm -r /tmp/hook-owned \;`, false],
     ["bash -o pipefail scripts/compose.sh -f docker-compose.dev.yml -p other down -v", true],
     ["bash -euo pipefail scripts/compose.sh -f docker-compose.dev.yml -p other down -v", true],
     ["sh -o errexit scripts/compose.sh -f docker-compose.dev.yml -p other down -v", true],
@@ -5519,7 +5519,7 @@ async function selfTest() {
     ["git -c alias.restore=status restore .", true],
     ["git -c core.quotePath=true status --short", false],
     ["git -C . status --short", false],
-    // -- pass-19: per-operand find origin and exact Compose identity (C19) --
+    // -- per-operand find origin and exact Compose identity --
     [String.raw`find node_modules -follow -exec rm -r "./{}" \;`, true],
     [String.raw`find node_modules -follow -exec rm -r "./{}/child" \;`, true],
     [String.raw`find node_modules -follow -exec env rm -R "./{}" \;`, true],
@@ -5546,7 +5546,7 @@ async function selfTest() {
     ["docker compose --file=docker-compose.dev.yml down --volumes", false],
     [String.raw`find node_modules -follow -exec sh -c "printf {}; rm -r node_modules" \;`, true],
     [String.raw`find node_modules -follow -exec sh -c "printf {}; rm -r ./node_modules" \;`, true],
-    // -- pass-20: execution-scope cwd ownership and request boundary --------
+    // -- execution-scope cwd ownership and request boundary --------
     ['eval "cd /tmp"; docker compose -f docker-compose.dev.yml down -v', true],
     ["builtin cd /tmp && docker compose -f docker-compose.dev.yml down -v", true],
     ["pushd /tmp && docker compose -f docker-compose.dev.yml down -v", true],
@@ -5570,7 +5570,7 @@ async function selfTest() {
     ['printf "%s" "$(cd /tmp && pwd)"; docker compose -f docker-compose.dev.yml down -v', false],
     [String.raw`find /tmp -exec docker compose -f docker-compose.dev.yml down -v \;`, false],
     ["for x in 1 2; do (cd /tmp); docker compose -f docker-compose.dev.yml down -v; done", false],
-    // -- pass-21: normalized builtin identity and recursive cwd effects ------
+    // -- normalized builtin identity and recursive cwd effects ------
     ['builtin eval "cd /tmp"; docker compose -f docker-compose.dev.yml down -v', true],
     ["builtin command cd /tmp; docker compose -f docker-compose.dev.yml down -v", true],
     [
@@ -5606,7 +5606,7 @@ async function selfTest() {
     ["builtin command git status --short", false],
     ['builtin builtin printf "%s" safe', false],
     ['builtin -- printf "%s" safe', false],
-    // -- pass-22: complete bounded execution-owner relation -----------------
+    // -- complete bounded execution-owner relation -----------------
     ["true | { true | cd /tmp; }; docker compose -f docker-compose.dev.yml down -v", true],
     [
       'true | { true | builtin eval "cd /tmp"; }; docker compose -f docker-compose.dev.yml down -v',
@@ -5642,12 +5642,12 @@ async function selfTest() {
     ],
     ["true | { true | cd /tmp; } & wait; docker compose -f docker-compose.dev.yml down -v", false],
   ];
-  bashCases.push(...c24BashCases);
-  // -- pass-23: role-validated actual shell-source boundary ----------------
+  bashCases.push(...modeBashCases);
+  // -- role-validated actual shell-source boundary ----------------
   // Each source-shaped word must fail before eval or a shell child reparses
   // it. The matching controls keep the same dynamic values as ordinary argv
   // inside an already-static program.
-  const c23DynamicSourceWords = [
+  const dynamicSourceWords = [
     '"$X"',
     "$X",
     '"$' + '{X:-safe}"',
@@ -5659,7 +5659,7 @@ async function selfTest() {
     "~",
     "$((1 + 1))",
   ];
-  for (const word of c23DynamicSourceWords) {
+  for (const word of dynamicSourceWords) {
     for (const source of [
       `eval printf ${word}`,
       `builtin eval -- printf ${word}`,
@@ -6219,7 +6219,7 @@ async function bootstrapSelfTest(options = {}) {
   // The real wrapper and direct Node entries use the same decoder result. Test
   // every demonstrated Zsh mode at both boundaries, including the positional
   // data counterpart that would expose a source-role false denial.
-  for (const mode of C25_ZSH_MODE_PREFIXES) {
+  for (const mode of ZSH_MODE_PREFIXES) {
     for (const [label, command, expected] of [
       ["protected source denied", mode + " 'dropdb'", 2],
       ["equals-expansion source denied", mode + " '=dropdb'", 2],
@@ -6347,7 +6347,7 @@ async function bootstrapSelfTest(options = {}) {
       throw new Error("__bootstrap_setup_inject__");
     }
 
-    const spacedDir = mkdtempSync(path.join(tmpdir(), "pr54-hook space-"));
+    const spacedDir = mkdtempSync(path.join(tmpdir(), "cc-hook space-"));
     ownedTempDirs.push(spacedDir);
     copyProductionHook(spacedDir);
     const spacedNodeModules = path.join(spacedDir, "node_modules");

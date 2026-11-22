@@ -415,7 +415,7 @@ function isHookSelfTestCase(path, current, ancestors) {
   const tuple = node(ancestors.at(-1));
   return (
     isLiteralFixtureTuple(tuple, 2, current) &&
-    isDirectFixtureTableEntry(ancestors, ["bashCases", "c24BashCases"])
+    isDirectFixtureTableEntry(ancestors, ["bashCases", "modeBashCases"])
   );
 }
 

@@ -5,10 +5,10 @@ import { containerPrefix, DEFAULT_CONTAINER_PREFIX, e2eNames } from "./e2e-names
 
 describe("backup e2e names", () => {
   it("takes TEST_CONTAINER_PREFIX when there is no flag; the flag wins", () => {
-    assert.equal(containerPrefix([], { TEST_CONTAINER_PREFIX: "rp5-env" }), "rp5-env");
+    assert.equal(containerPrefix([], { TEST_CONTAINER_PREFIX: "ci-env" }), "ci-env");
     assert.equal(
-      containerPrefix(["--container-prefix", "rp5-flag"], { TEST_CONTAINER_PREFIX: "rp5-env" }),
-      "rp5-flag",
+      containerPrefix(["--container-prefix", "ci-flag"], { TEST_CONTAINER_PREFIX: "ci-env" }),
+      "ci-flag",
     );
     // Validated like the flag; an empty or invalid value is an error, not the default.
     for (const bad of ["", "Bad", "a-", "x".repeat(33)])
@@ -33,15 +33,15 @@ describe("backup e2e names", () => {
   });
 
   it("puts every container, the network and the tools image under the prefix", () => {
-    const names = e2eNames(containerPrefix(["--container-prefix", "rp5-fua2"]), "9-z");
+    const names = e2eNames(containerPrefix(["--container-prefix", "ci-run7"]), "9-z");
     const all = [names.toolsImage, names.network, names.pg, names.tool(1), names.tool(2)];
-    for (const name of all) assert.ok(name.startsWith("rp5-fua2-"), name);
-    assert.equal(names.toolsImage, "rp5-fua2-tools:9-z");
+    for (const name of all) assert.ok(name.startsWith("ci-run7-"), name);
+    assert.equal(names.toolsImage, "ci-run7-tools:9-z");
     assert.equal(new Set(all).size, all.length);
   });
 
   it("accepts the separators Docker image names allow", () => {
-    for (const prefix of ["rp5-fua2", "a.b", "a_b", "a__b", "a--b", "x".repeat(32)])
+    for (const prefix of ["ci-run7", "a.b", "a_b", "a__b", "a--b", "x".repeat(32)])
       assert.equal(containerPrefix(["--container-prefix", prefix]), prefix);
   });
 
@@ -76,8 +76,8 @@ describe("containerPrefix for other harnesses", () => {
   it("returns the harness's own default only when neither the flag nor the variable is set", () => {
     assert.equal(containerPrefix([], {}, "cockpit-context-runtime"), "cockpit-context-runtime");
     assert.equal(
-      containerPrefix([], { TEST_CONTAINER_PREFIX: "rp5-x" }, "cockpit-context-runtime"),
-      "rp5-x",
+      containerPrefix([], { TEST_CONTAINER_PREFIX: "ci-x" }, "cockpit-context-runtime"),
+      "ci-x",
     );
     assert.throws(
       () => containerPrefix([], { TEST_CONTAINER_PREFIX: "" }, "cockpit-context-runtime"),

@@ -377,6 +377,7 @@ CREATE TABLE "agent_run" (
     "cachedInputTokens" INTEGER NOT NULL DEFAULT 0,
     "costUsdMicros" INTEGER NOT NULL DEFAULT 0,
     "unpricedCalls" INTEGER NOT NULL DEFAULT 0,
+    "generationIds" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "iterations" INTEGER NOT NULL DEFAULT 0,
     "startedAt" TIMESTAMP(3),
     "finishedAt" TIMESTAMP(3),

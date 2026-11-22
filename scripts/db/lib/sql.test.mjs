@@ -414,10 +414,9 @@ const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const expandOf = (header = HEADER) => enumRemoveExpand(header);
 
 describe("templates (v1)", () => {
-  // v1 is in no release yet (no tag; no committed migration uses it). Its pins
-  // last changed when the sync trigger was renamed `0_cockpit_context_sync_*` so
-  // it fires before an app's own BEFORE triggers; from 1.0.0 on, a change
-  // needs v2.
+  // v1 is the template version the 1.0.0 generator ships. Its sync trigger
+  // is named `0_cockpit_context_sync_*` so it fires before an app's own BEFORE
+  // triggers. A released template never changes: a new text needs v2.
   test("the v1 text is pinned byte for byte (never edit a released template: add v2)", () => {
     assert.equal(LATEST_TEMPLATE_VERSION, "v1");
     assert.deepEqual(Object.keys(TEMPLATES), ["v1"]);
@@ -1419,27 +1418,26 @@ describe("findNameReuse", () => {
     assert.deepEqual(findNameReuse(folders), []);
   });
 
-  test("template object names, current and earlier sync prefixes, are excluded", () => {
+  test("template object names are excluded; lookalikes still count", () => {
     const names = [
       "0_cockpit_context_sync_00000000",
-      "cockpit_context_sync_00000000",
       "cockpit_context_enum_new_00000000",
       "cockpit_context_enum_old_00000000",
     ];
-    const lookalike = "x_cockpit_context_sync_00000000";
+    const lookalikes = ["cockpit_context_sync_00000000", "x_cockpit_context_sync_00000000"];
     const dropper = {
       name: "1_drop",
       sql: "SELECT 1;",
-      contract: { sql: [...names, lookalike].map((n) => `${DROP} TABLE "${n}";`).join("\n") },
+      contract: { sql: [...names, ...lookalikes].map((n) => `${DROP} TABLE "${n}";`).join("\n") },
     };
     const later = {
       name: "2_create",
-      sql: [...names, lookalike].map((n) => `CREATE TABLE "${n}" ("id" TEXT);`).join("\n"),
+      sql: [...names, ...lookalikes].map((n) => `CREATE TABLE "${n}" ("id" TEXT);`).join("\n"),
       contract: null,
     };
     assert.deepEqual(
       findNameReuse([dropper, later]).map((m) => m.key),
-      [`table:public.${lookalike}`],
+      lookalikes.map((n) => `table:public.${n}`),
     );
   });
 

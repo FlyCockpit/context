@@ -3203,9 +3203,8 @@ function parseIndexStatement(sql, statement) {
 
 // --- name reuse ------------------------------------------------------
 
-// `cockpit_context_sync_` is the sync name before it was renamed to fire first.
 const TEMPLATE_OBJECT =
-  /^(0_cockpit_context_sync|cockpit_context_sync|cockpit_context_enum_new|cockpit_context_enum_old)_[0-9a-f]{8}$/;
+  /^(0_cockpit_context_sync|cockpit_context_enum_new|cockpit_context_enum_old)_[0-9a-f]{8}$/;
 
 function createdKeys(sql) {
   const keys = [];
