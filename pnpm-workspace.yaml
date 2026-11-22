@@ -51,6 +51,12 @@ overrides:
   # height/opacity, spring bounce+duration), unchanged in 14. Drop once sileo
   # depends on motion 14.
   "sileo>motion@^12": "catalog:"
+  # GHSA-7589-6fvf-x4pw: effect <=3.22.0 has a ReDoS in Schema.TemplateLiteral,
+  # fixed in 3.22.1. Reached via prisma > @prisma/config, which pins effect
+  # 3.20.0 exactly (prisma 7.10.1 is the latest release). Caret, not >=: an
+  # open range resolves effect 4, a major @prisma/config was not built for.
+  # Drop once @prisma/config depends on effect >=3.22.1.
+  "effect@<3.22.1": "^3.22.1"
 blockExoticSubdeps: true
 dangerouslyAllowAllBuilds: false
 savePrefix: ""
