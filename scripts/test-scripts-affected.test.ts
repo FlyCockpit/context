@@ -23,12 +23,13 @@ const selected = (changed: readonly string[] | undefined) =>
 
 function tracked(): string[] {
   // Untracked (non-ignored) files too: a new file is checked before its commit.
-  const result = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: ROOT, encoding: "utf8" },
+  );
   assert.equal(result.status, 0, result.stderr);
-  return result.stdout.split("\n").filter(Boolean);
+  return result.stdout.split("\0").filter(Boolean);
 }
 
 /** The test files a suite's package.json script runs (its globs expanded against git). */
@@ -196,12 +197,26 @@ describe("changedFiles", () => {
   test("commits, edits, untracked files, and both sides of a rename since the merge base", (t) => {
     const dir = mkdtempSync(join(tmpdir(), "scripts-affected-"));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
+    // A git hook (or any caller) may export GIT_DIR, GIT_INDEX_FILE and the
+    // like; inherited, they would point this scratch repo's writes at the
+    // caller's repository. Drop every GIT_* variable.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+    );
     const git = (...args: string[]) => {
-      const result = spawnSync("git", ["-c", "commit.gpgsign=false", ...args], {
+      // No hooks either: a global core.hooksPath must not judge this repo. And
+      // quotePath pinned on: a global core.quotePath=false would hide the
+      // quoting the non-ASCII case below guards against.
+      const config = [
+        ...["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"],
+        ...["-c", "core.quotePath=true"],
+      ];
+      const result = spawnSync("git", [...config, ...args], {
         cwd: dir,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...env,
+          GIT_CEILING_DIRECTORIES: tmpdir(),
           GIT_AUTHOR_NAME: "t",
           GIT_AUTHOR_EMAIL: "t@example.com",
           GIT_COMMITTER_NAME: "t",
@@ -221,14 +236,22 @@ describe("changedFiles", () => {
     git("checkout", "-q", "-b", "feature");
     writeFileSync(join(dir, "apps/web/a.ts"), "2");
     git("mv", "scripts/backup/restore.mjs", "apps/web/restore.mjs");
+    // A committed non-ASCII name exercises the diff side; the untracked one below, ls-files.
+    writeFileSync(join(dir, "apps/web/naïve.ts"), "1");
+    git("add", "apps/web/naïve.ts");
     git("commit", "-q", "-am", "edit");
     writeFileSync(join(dir, "README.md"), "2");
     writeFileSync(join(dir, "new.ts"), "1");
+    // Non-ASCII names come back verbatim, not quoted by core.quotePath.
+    mkdirSync(join(dir, "docs"));
+    writeFileSync(join(dir, "docs/café.md"), "1");
     const run = (args: readonly string[]) => git(...args);
     assert.deepEqual(changedFiles(run)?.sort(), [
       "README.md",
       "apps/web/a.ts",
+      "apps/web/naïve.ts",
       "apps/web/restore.mjs",
+      "docs/café.md",
       "new.ts",
       "scripts/backup/restore.mjs",
     ]);

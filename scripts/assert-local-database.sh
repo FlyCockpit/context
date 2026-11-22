@@ -151,13 +151,28 @@ if [[ "$CMD" == "--self-test" ]]; then
   fi
 
   # Worktree names are exact, distinct from the main checkout, and stable.
-  git -C "$tmp" init -q main
-  git -C "$tmp/main" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m init
-  git -C "$tmp/main" worktree add -q "$tmp/wt" -b self-test-wt
-  main_name="$(env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" main --cwd "$tmp/main")"
-  wt_name="$(env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" main --cwd "$tmp/wt")"
-  wt_again="$(env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" main --cwd "$tmp/wt")"
-  wt_shadow="$(env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" shadow --cwd "$tmp/wt")"
+  # A git hook (or any caller) may export GIT_DIR, GIT_INDEX_FILE and the like;
+  # inherited, the scratch repository's git calls would write the caller's
+  # repository. Run them without any GIT_* variable, with discovery stopped at
+  # $tmp and no hooks on any call (a global core.hooksPath must not judge this
+  # repo; `git init` runs the reference-transaction hook too).
+  scratch() {
+    local name
+    # Starts nonempty: bash 3.2 (macOS) under set -u rejects an empty "${a[@]}".
+    local -a cmd=(env)
+    for name in $(compgen -e); do
+      if [[ "$name" == GIT_* ]]; then cmd+=(-u "$name"); fi
+    done
+    "${cmd[@]}" GIT_CEILING_DIRECTORIES="$tmp" \
+      GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null "$@"
+  }
+  scratch git -C "$tmp" init -q main
+  scratch git -C "$tmp/main" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m init
+  scratch git -C "$tmp/main" worktree add -q "$tmp/wt" -b self-test-wt
+  main_name="$(scratch env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" main --cwd "$tmp/main")"
+  wt_name="$(scratch env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" main --cwd "$tmp/wt")"
+  wt_again="$(scratch env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" main --cwd "$tmp/wt")"
+  wt_shadow="$(scratch env -u EXPECTED_DB node "$ROOT/scripts/db/lib/local-db-name.mjs" shadow --cwd "$tmp/wt")"
   if [[ "$main_name" != "cockpit_context" || ! "$wt_name" =~ ^cockpit_context_wt_[0-9a-f]{10}$ || "$wt_name" != "$wt_again" || "$wt_shadow" != "${wt_name}_shadow" ]]; then
     echo "self-test FAILED: local database naming (main=$main_name wt=$wt_name shadow=$wt_shadow)" >&2
     failed=1

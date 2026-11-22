@@ -722,11 +722,18 @@ esac
  * @param {number} expectedExit
  * @param {string} label
  */
+// A git hook (or any caller) may export GIT_DIR, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY
+// and the like; inherited by the scratch repository's git calls (here and in the
+// wrapper), they would point at the caller's repository. Drop every GIT_*
+// variable; the scratch calls name their GIT_DIR explicitly (no discovery).
+const scratchEnv = () =>
+  Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
+
 function gitCommit(revision, gitDir) {
   const result = spawnSync("git", ["rev-parse", "--verify", `${revision}^{commit}`], {
     encoding: "utf8",
     cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
-    env: { ...process.env, GIT_DIR: gitDir },
+    env: { ...scratchEnv(), GIT_DIR: gitDir },
   });
   if (result.error || result.status !== 0) {
     throw new Error(`could not resolve inert wrapper-test commit ${revision}`);
@@ -740,7 +747,7 @@ function gitCommit(revision, gitDir) {
 
 function runWrapper(env, expectedExit, label, base, head) {
   const result = spawnSync("bash", ["scripts/trufflehog-pr-scan.sh", base, head], {
-    env: { ...process.env, ...env },
+    env: { ...scratchEnv(), ...env },
     encoding: "utf8",
     cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
   });
@@ -771,10 +778,11 @@ async function wrapperIntegrationTest() {
   // brand-new repository has a single commit and no HEAD^).
   const gitDir = join(dir, "wrapper-test.git");
   const git = (...args) => {
-    const r = spawnSync("git", args, {
+    // No hooks either: a global core.hooksPath must not judge this repo.
+    const r = spawnSync("git", ["-c", "core.hooksPath=/dev/null", ...args], {
       encoding: "utf8",
       env: {
-        ...process.env,
+        ...scratchEnv(),
         GIT_DIR: gitDir,
         GIT_AUTHOR_NAME: "wrapper-test",
         GIT_AUTHOR_EMAIL: "wrapper-test@localhost",
@@ -787,11 +795,15 @@ async function wrapperIntegrationTest() {
   git("init", "--quiet", "--bare");
   const empty = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"; // git's empty tree
   const mk = (message, parent) => {
-    const args = ["commit-tree", "-m", message, ...(parent ? ["-p", parent] : []), empty];
+    const args = [
+      ...["-c", "core.hooksPath=/dev/null", "commit-tree", "-m", message],
+      ...(parent ? ["-p", parent] : []),
+      empty,
+    ];
     const r = spawnSync("git", args, {
       encoding: "utf8",
       env: {
-        ...process.env,
+        ...scratchEnv(),
         GIT_DIR: gitDir,
         GIT_AUTHOR_NAME: "wrapper-test",
         GIT_AUTHOR_EMAIL: "wrapper-test@localhost",
@@ -868,7 +880,7 @@ async function wrapperIntegrationTest() {
 
     const overrideAttempt = spawnSync("bash", ["scripts/trufflehog-pr-scan.sh", base, head], {
       env: {
-        ...process.env,
+        ...scratchEnv(),
         ...baseEnv,
         FAKE_DOCKER_TRUFFLEHOG_MODE: "exit42_garbage",
         TRUFFLEHOG_FINDINGS_EXIT: "invalid",

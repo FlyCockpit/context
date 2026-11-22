@@ -12,6 +12,18 @@ import {
   worktreeName,
 } from "./local-db-name.mjs";
 
+// A git hook (or any caller) may export GIT_DIR, GIT_INDEX_FILE and the like;
+// inherited by the scratch directory's git calls (in local-db-name.mjs), they
+// would point at the caller's repository. Drop every GIT_* variable, stop
+// discovery at the temp dir, and turn hooks off for every git call in this
+// process and its children (a global core.hooksPath must not judge these repos;
+// `git init` and `git add` run hooks too).
+for (const name of Object.keys(process.env)) if (name.startsWith("GIT_")) delete process.env[name];
+process.env.GIT_CEILING_DIRECTORIES = tmpdir();
+process.env.GIT_CONFIG_COUNT = "1";
+process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
+process.env.GIT_CONFIG_VALUE_0 = "/dev/null";
+
 test("main and linked worktree names use the exact git directory without git writes", () => {
   const gitRead = (cwd, args) => (args.includes("--git-common-dir") ? "/main/.git" : `${cwd}/.git`);
   const main = localDatabaseNames({ cwd: "/main", env: {}, gitRead });
@@ -34,10 +46,7 @@ test("main and linked worktree names use the exact git directory without git wri
 test("outside git behaves as the main checkout", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "dbname-nogit-"));
   try {
-    assert.equal(
-      localDatabaseNames({ cwd: dir, env: { GIT_CEILING_DIRECTORIES: tmpdir() } }).main,
-      "cockpit_context",
-    );
+    assert.equal(localDatabaseNames({ cwd: dir, env: {} }).main, "cockpit_context");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
