@@ -62,7 +62,7 @@
     "policy:access-matrix": "node scripts/check-access-matrix.ts",
     "policy:access-matrix:self-test": "node scripts/check-access-matrix.ts --self-test",
     "setup": "tsx scripts/setup.ts",
-    "test:setup": "node --import tsx --test scripts/lib/admin-email-env.test.ts scripts/lib/smtp-env.test.ts scripts/lib/encryption-keyring-env.test.ts",
+    "test:setup": "node --import tsx --test scripts/lib/admin-email-env.test.ts scripts/lib/smtp-env.test.ts scripts/lib/encryption-keyring-env.test.ts scripts/lib/trust-proxy-hops-env.test.ts",
     "test:scripts:affected": "node scripts/test-scripts-affected.ts",
     "test:scripts:affected:test": "node --test scripts/test-scripts-affected.test.ts",
     "test:dev-tools": "node --import tsx --test scripts/lib/fake-openrouter.test.ts scripts/lib/e2e-capture.test.mjs scripts/lib/explore-script-env.test.ts",

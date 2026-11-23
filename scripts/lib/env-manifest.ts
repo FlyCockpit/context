@@ -561,8 +561,9 @@ export const ENV_VARS: EnvVar[] = [
     example: "0",
     comment: [
       "Exact number of trusted reverse proxies. Default 0 uses the socket peer",
-      "and ignores X-Forwarded-For. Set 1 behind Traefik/Dokploy, or N for N",
-      "trusted proxies, and restrict direct origin access to that chain.",
+      "and ignores X-Forwarded-For. Set 1 behind Traefik/Dokploy, Caddy or a",
+      "Cloudflare Tunnel to the app, 2 for a tunnel into Traefik/Caddy, or N for",
+      "N trusted proxies, and restrict direct origin access to that chain.",
       "Only the Nth entry from the right is used. A proxy-appended port is",
       "stripped; a missing/invalid selected hop falls back to the socket peer.",
     ],

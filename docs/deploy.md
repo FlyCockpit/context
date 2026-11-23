@@ -34,7 +34,7 @@ A first deployment needs only `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `BETTER
 | `MIGRATE_ON_START` | True for normal startup; false only with an explicit prior migrate job. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, provider credentials | Optional production SMTP; enables email verification, resets and emailed invitations. Never use development Mailpit as a public relay. |
 | `SIGNUP_ENABLED` | Defaults false. True permits the runtime signup toggle; without SMTP it allows unverified addresses and logs a warning. |
-| `TRUST_PROXY_HOPS` | Defaults to **0**: use the socket peer and ignore forwarded headers (direct deployment). Set **N** to the exact number of trusted proxies, e.g. **1** behind Traefik/Dokploy or Caddy. Restrict origin access to that chain. Only the Nth entry from the right of X-Forwarded-For is used; a missing/invalid hop falls back to the socket peer. A proxy-appended IPv4 or bracketed IPv6 port is stripped. |
+| `TRUST_PROXY_HOPS` | Defaults to **0**: use the socket peer and ignore forwarded headers (direct deployment). Set **N** to the exact number of trusted proxies, e.g. **1** behind Traefik/Dokploy, Caddy or a Cloudflare Tunnel to the app, **2** for a tunnel into Traefik/Caddy ([Cloudflare Tunnel](#home-server-behind-a-cloudflare-tunnel)). Restrict origin access to that chain. Only the Nth entry from the right of X-Forwarded-For is used; a missing/invalid hop falls back to the socket peer. A proxy-appended IPv4 or bracketed IPv6 port is stripped. |
 | `CORS_ORIGIN` | Leave unset for same-origin use; no wildcard. |
 | `SSO_ENABLED`, OIDC client/secret/issuer/provider settings | Optional configured OIDC sign-in. Review `FORCE_SSO` before enabling; it changes available sign-in methods. |
 | `COCKPIT_CONTEXT_OPERATOR_NAME`, `COCKPIT_CONTEXT_OPERATOR_CONTACT_EMAIL` | Public operator identity for the privacy notice. |
@@ -141,6 +141,59 @@ The Node server ships no compression middleware; compression is the proxy's job.
 ### Static asset caching
 
 Files under `/assets/` are content-hashed and served with `Cache-Control: public, max-age=31536000, immutable`; a missing file there is a plain `404` with `Cache-Control: no-store` and no locale redirect. SSR pages and the HTML shell get no long-lived cache header (public pages are held only in the server's own memory cache for `SSR_CACHE_TTL_SECONDS`, default 60 s), so do not add one at a CDN or proxy: a new deploy's hashed assets are reached through the current HTML.
+
+## Home server behind a Cloudflare Tunnel
+
+A machine at home with no public IP can serve Cockpit Context through a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (a named tunnel run by `cloudflared`, Free or Pro plan). Nothing needs inbound TCP or UDP: `cloudflared` makes outbound connections to Cloudflare, Cloudflare terminates TLS for your hostname, and requests reach the app as plain HTTP over loopback or a private network. The app itself still needs the outbound access in [hosting](./hosting.md) (Git/SSH hosts, OpenRouter, SMTP).
+
+There are two topologies. The hop count differs between them:
+
+- **Tunnel to the app.** Browser or coding agent → Cloudflare edge (TLS) → `cloudflared` on the home machine → `http://127.0.0.1:<port>` → app. One proxy hop, `TRUST_PROXY_HOPS=1`.
+- **Tunnel to a local proxy.** Browser or coding agent → Cloudflare edge → `cloudflared` → Traefik (Dokploy) or Caddy on plain HTTP → app. Two hops, `TRUST_PROXY_HOPS=2`. The local proxy must trust `cloudflared`'s address for forwarded headers, or it replaces the client's `X-Forwarded-For` entry with `cloudflared`'s and every user shares one rate-limit bucket.
+
+Start the app with the loopback overlay as in [Plain VPS with Caddy](#plain-vps-with-caddy) (`compose.vps.yaml` publishes `127.0.0.1:${COCKPIT_CONTEXT_HTTP_PORT}` only), or run `cloudflared` as a container on the app's network and point it at `http://app:3000` with no published port at all. Do not publish the app on `0.0.0.0` or forward a router port to it. The tunnel must be the only way in: `TRUST_PROXY_HOPS` trusts the rightmost `X-Forwarded-For` entries, so a caller who reaches the origin directly can choose their own rate-limit key.
+
+A sample `/etc/cloudflared/config.yml` for the first topology (create the tunnel and its DNS route with `cloudflared tunnel create` and `cloudflared tunnel route dns`, and substitute your tunnel id and hostname):
+
+```yaml
+tunnel: <tunnel-uuid>
+credentials-file: /etc/cloudflared/<tunnel-uuid>.json
+ingress:
+  - hostname: context.example.com
+    service: http://127.0.0.1:3036
+  - service: http_status:404
+```
+
+For the second topology, point the service at the local proxy (for example `http://127.0.0.1:80`). `cloudflared` keeps the original `Host` header, so the proxy routes by your hostname as usual.
+
+| Setting | Tunnel to the app | Tunnel to Traefik/Caddy |
+|---|---|---|
+| `BETTER_AUTH_URL` | `https://context.example.com` | `https://context.example.com` |
+| `TRUST_PROXY_HOPS` | `1` | `2` |
+| `COCKPIT_CONTEXT_HTTP_PORT` | a free loopback port, e.g. `3036`, with `compose.vps.yaml` | as your proxy setup requires |
+| `CORS_ORIGIN` | unset (same origin) | unset (same origin) |
+| `SMTP_HOST` / `SMTP_PORT` | a relay on `587` (STARTTLS) or `465` (implicit TLS) | same |
+
+`BETTER_AUTH_URL` is the one public-URL setting: sign-in, cookies, emailed links, the allowed browser origin and every MCP OAuth URL (issuer `<origin>/api/auth`, resource `<origin>/mcp`) come from it, so it must be the tunnel hostname exactly. `CORS_ORIGIN` is only for a browser app on a different origin. `PUBLIC_APP_URL` is translation-provider metadata, not used for authentication. Home connections usually block outbound port 25, so send mail through a relay (your provider's SMTP submission service) on 587 or 465. With port 465 the mailer uses implicit TLS on its own. `pnpm doctor` warns when `TRUST_PROXY_HOPS` is `0` on a deployment (`NODE_ENV=production`, or an `https` `BETTER_AUTH_URL` on a non-local host), and the server logs one `[client-ip]` warning when a private peer such as `cloudflared` sends `X-Forwarded-For` while it is `0`.
+
+**Client address.** Cloudflare appends the address that connected to it to `X-Forwarded-For`, and `cloudflared` forwards that header unchanged, so with the hop counts above the app keys rate limits and sign-in failures on the real client. The app does not read `CF-Connecting-IP`. That header names the same address, but trusting it is safe only while nothing but the tunnel can reach the origin, and it would stay trusted if the deployment later moved behind another proxy. One rule (count the hops in `X-Forwarded-For`) covers every topology. For the two-hop topology:
+
+- **Traefik:** add `cloudflared`'s address to the `web` entry point's `forwardedHeaders.trustedIPs`. A host `cloudflared` reaching a Traefik container through a published port arrives from the Docker bridge gateway (such as `172.17.0.1`), not from `127.0.0.1`.
+- **Caddy:** list it under the global `servers { trusted_proxies static … }` option and serve the site as `http://context.example.com` (or `:80`).
+
+**Limits that apply.**
+
+- **Request bodies.** Cloudflare caps request bodies at 100 MB on Free and Pro plans. Cockpit Context never needs that much: the server refuses any body over 10 MB, `/mcp` over 1 MB, the OAuth authorize and token forms over 16 KB and consent and client registration over 32 KB, and backups and restores never pass through the tunnel.
+- **Silent responses (524).** Cloudflare answers 524 when the origin sends nothing for its Proxy Read Timeout: 125 s by default on Free and Pro, adjustable only on Enterprise (it was 100 s for years, so plan for 100 s). The two long-lived responses stream a keepalive: an MCP tool call is a server-sent event stream with a `: keepalive` comment every 15 s from dispatch to result, whatever the investigation is doing (`query_dependency` and `get_query_result` can wait up to `COCKPIT_CONTEXT_MCP_WAIT_SECONDS`, 900 s by default). The web live view (`conversations.watch` and `.activity`) sends the same comment every 15 s.
+- **Web actions that wait on Git or mail.** Ordinary web requests are not streamed, so one that waits longer than that ends in a 524 in the browser:
+  - Starting a conversation from the web form resolves the version first. The first clone of a large repository, or a slow fetch, can take longer. Once the connection closes, the server cancels the clone with the request. Ask the first question about such a package over MCP: it streams while it clones and leaves the clone cached, so later questions usually only fetch.
+  - Adding, approving or updating a snapshot package (a one-time SSH key) clones before it answers, and that clone is not cancelled. After a 524, reload the package list before retrying: the snapshot may have been created anyway.
+  - Deleting a clone or checkout (Admin → Storage, a package's checkouts) or a snapshot package first waits for any clone or fetch of that repository to finish, and completes after a 524 too. Reload the page before retrying.
+  - A hung SMTP relay can hold an action that sends mail (an invitation or a password link) for up to three attempts. Use a relay that answers promptly.
+
+**Dropped streams.** Cloudflare can close a long-lived connection when its edge restarts. Cockpit Context uses no WebSockets: the live view is a server-sent event stream that reconnects on its own (after 1 s, backing off to at most 30 s between attempts), and every reconnect starts from a fresh snapshot, so nothing is lost. An MCP call whose stream drops ends with a transport error in the coding agent. An investigation that had already started keeps running, and asking the same question again joins it or reuses its answer ([answer reuse](./mcp.md#answer-reuse)). A drop while the version is still resolving cancels that clone or fetch.
+
+**Not needed.** ACME and certificate settings (Traefik `certresolver` labels, Dokploy's HTTPS/Let's Encrypt toggle, Caddy's automatic HTTPS) do not apply. Cloudflare holds the certificate for your hostname, so nothing behind the tunnel needs one. Serve the local proxy on plain HTTP, and do not let it redirect to HTTPS: Cloudflare already did, and the redirect would loop. Do not put a Cloudflare challenge (Bot Fight Mode, a managed challenge or Cloudflare Access) in front of `/mcp`, `/.well-known/*` or `/api/auth/*`: coding agents are not browsers and cannot pass one.
 
 ## Runtime checks and limits
 

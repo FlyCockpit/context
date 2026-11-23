@@ -5,6 +5,7 @@ import {
   McpServer,
 } from "@modelcontextprotocol/server";
 
+import { STREAM_KEEPALIVE_MS } from "../stream-keepalive.js";
 import { registerMcpTools } from "./tools";
 
 /**
@@ -17,9 +18,16 @@ import { registerMcpTools } from "./tools";
  * - `legacy: "stateless"`: 2025-era clients (an `initialize` handshake, then
  *   independent POSTs) are served by the SDK's stateless fallback next to
  *   the 2026-07-28 per-request protocol. Both legs answer GET with 405;
- * - `responseMode: "auto"`: a plain JSON body unless a tool sends a
- *   notification first, which upgrades the response to SSE. That is how
- *   `query_dependency` streams its ~20 s progress notifications.
+ * - `responseMode: "sse"`: a dispatched request (a tool call, `tools/list`,
+ *   …) is answered with an event stream whose headers go out as soon as it
+ *   is dispatched, with a `: keepalive` comment every `STREAM_KEEPALIVE_MS`
+ *   (../stream-keepalive.ts). A proxy that ends a response after a period
+ *   without a byte (Cloudflare's 524) never sees a silent exchange, whatever
+ *   the tool or the model is doing; progress notifications
+ *   (`query_dependency`'s ~20 s lines) are extra frames on the same stream.
+ *   The legacy leg's SDK transport streams the same way. Notifications still
+ *   get an empty 202, and refusals made before dispatch (authentication,
+ *   protocol and validation errors) stay JSON with their HTTP status.
  *
  * The handler performs no token verification: `authInfo` passed to `fetch`
  * comes from `mcp/auth.ts` after the credential was resolved.
@@ -32,7 +40,7 @@ const MCP_SERVER_CAPABILITIES = { tools: { listChanged: false }, logging: {} } a
 
 const MCP_TRANSPORT_OPTIONS = {
   legacy: "stateless",
-  responseMode: "auto",
+  responseMode: "sse",
   maxSubscriptions: 0,
 } as const;
 
@@ -51,10 +59,13 @@ const SERVER_INSTRUCTIONS = [
 export function createMcpTransport({
   registerTools = registerMcpTools,
   isShuttingDown = () => false,
+  keepAliveMs = STREAM_KEEPALIVE_MS,
 }: {
   registerTools?: (server: McpServer, ctx: McpRequestContext) => void;
   /** Refuse server creation once shutdown began (the admission gate's flag). */
   isShuttingDown?: () => boolean;
+  /** Tests shorten it; production uses {@link STREAM_KEEPALIVE_MS}. */
+  keepAliveMs?: number;
 } = {}): McpHttpHandler {
   return createMcpHandler(
     (ctx) => {
@@ -79,6 +90,7 @@ export function createMcpTransport({
     },
     {
       ...MCP_TRANSPORT_OPTIONS,
+      keepAliveMs,
       maxRequestBodySize: MCP_MAX_REQUEST_BODY_BYTES,
       // Class name only: SDK errors can carry request bodies.
       onerror: (error) => {

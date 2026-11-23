@@ -63,6 +63,7 @@ import { sessionMiddleware } from "./session-middleware.js";
 import { SIGNIN_FAILURE_PATH, signinFailureLimit } from "./signin-failure-limit.js";
 import { adminBootstrapMarker, signupAvailabilityGate } from "./signup-gate.js";
 import { handleSsrRequest } from "./ssr-cache.js";
+import { RPC_EVENT_STREAM_OPTIONS } from "./stream-keepalive.js";
 import { TWO_FACTOR_OTP_PATH, twoFactorOtpLimit } from "./two-factor-otp-limit.js";
 
 // ---------------------------------------------------------------------------
@@ -486,6 +487,9 @@ export const apiHandler = new OpenAPIHandler(appRouter, {
 // 413 is a *procedure count* limit, not `bodyLimit` and not a proxy payload
 // limit. See `packages/config/src/orpc-batch.ts`.
 export const rpcHandler = new RPCHandler(appRouter, {
+  // Live views stay open for minutes between events: a keepalive comment
+  // every STREAM_KEEPALIVE_MS keeps proxies with an idle limit from ending them.
+  ...RPC_EVENT_STREAM_OPTIONS,
   plugins: [
     new BatchHandlerPlugin({ maxSize: ORPC_BATCH_MAX_SIZE }),
     new SimpleCsrfProtectionHandlerPlugin(),
