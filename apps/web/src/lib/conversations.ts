@@ -696,7 +696,14 @@ export function summarizeToolCall(call: ToolCallView): ToolSummary {
 // ── Transcript ──
 
 export type TranscriptBlock =
-  | { kind: "question"; key: string; text: string; followUp: boolean }
+  | {
+      kind: "question";
+      key: string;
+      text: string;
+      followUp: boolean;
+      /** The same question asked again: the run before never reached the agent. */
+      retry: boolean;
+    }
   | { kind: "steer"; key: string; text: string }
   | {
       kind: "assistant";
@@ -798,7 +805,21 @@ export function buildTranscript(state: ConversationViewState): TranscriptBlock[]
     helpersOf.set(run.parentRunId, list);
   }
 
-  mainRuns(state).forEach((run, runIndex) => {
+  const mains = mainRuns(state);
+  const questionOf = (run: RunView): string | null => {
+    const turn = run.turns.find((candidate) => candidate.role === "user" && !candidate.steering);
+    return turn ? partText(turn.parts) : null;
+  };
+  mains.forEach((run, runIndex) => {
+    // `conversations.retry` re-asks the question of a run that never reached
+    // the agent. A follow-up may also come after such a run (once the version
+    // resolved), so the question must be the same one too.
+    const previous = runIndex > 0 ? mains[runIndex - 1] : undefined;
+    const retry =
+      previous !== undefined &&
+      !previous.started &&
+      !isActive(previous.status) &&
+      questionOf(previous) === questionOf(run);
     const messages: Array<{ parts: readonly MessagePart[] }> = [...run.turns];
     if (run.partial) messages.push(run.partial);
     const results = toolResultsOf(messages);
@@ -815,7 +836,7 @@ export function buildTranscript(state: ConversationViewState): TranscriptBlock[]
         if (turn.steering) blocks.push({ kind: "steer", key, text });
         else if (!sawQuestion) {
           sawQuestion = true;
-          blocks.push({ kind: "question", key, text, followUp: runIndex > 0 });
+          blocks.push({ kind: "question", key, text, followUp: runIndex > 0, retry });
         } else blocks.push({ kind: "steer", key, text });
         continue;
       }

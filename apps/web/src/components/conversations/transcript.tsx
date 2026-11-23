@@ -115,11 +115,13 @@ function Block({
       return (
         <div className="flex min-w-0 flex-col items-end">
           <p className="mb-1 text-xs text-muted-foreground">
-            {block.followUp
-              ? t("dashboard:conversation.transcript.followUp")
-              : askedBy
-                ? t("dashboard:conversation.transcript.askedBy", { name: askedBy })
-                : t("dashboard:conversation.transcript.youAsked")}
+            {block.retry
+              ? t("dashboard:conversation.transcript.askedAgain")
+              : block.followUp
+                ? t("dashboard:conversation.transcript.followUp")
+                : askedBy
+                  ? t("dashboard:conversation.transcript.askedBy", { name: askedBy })
+                  : t("dashboard:conversation.transcript.youAsked")}
           </p>
           <p className="max-w-[min(85%,40rem)] rounded-2xl rounded-ee-sm bg-primary px-4 py-3 text-sm break-words whitespace-pre-wrap text-primary-foreground">
             {block.text}

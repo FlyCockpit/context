@@ -4,6 +4,7 @@ import {
   isRepoError,
   snapshotRefMissing,
   updateSnapshotRepository,
+  withLock,
 } from "@cockpit-context/repos";
 
 /**
@@ -171,34 +172,35 @@ export async function withSnapshotTasksClosed<T>(
   }
 }
 
-const packageGates = new Map<string, Promise<void>>();
+/**
+ * Longest a request waits for another snapshot operation of the same package
+ * before answering REPOSITORY_BUSY (CONFLICT, retryable). A holder does fast
+ * row work or a delete's bounded repository-lock wait (REQUEST_LOCK_WAIT_MS),
+ * so a request that gets the gate still answers well inside a reverse proxy's
+ * 100 s idle limit.
+ */
+export const PACKAGE_GATE_WAIT_MS = 15_000;
 
 /**
  * Serialize the snapshot operations of one package (re-key, re-key and save,
- * convert to an ordinary package), so each reads the package's repository
- * AFTER the previous one wrote it: two concurrent requests can then never act
- * on different repository rows (one attaching a replacement clone while the
- * other converts the package). Each holder only does fast work (rows, task
- * start), so a waiter waits milliseconds, never for a clone.
+ * convert to an ordinary package, delete), so each reads the package's
+ * repository AFTER the previous one wrote it: two concurrent requests can
+ * then never act on different repository rows (one attaching a replacement
+ * clone while the other converts or deletes the package). The repos keyed
+ * mutex does the queueing: a waiter that gives up after `waitMs` leaves the
+ * queue at once, and the key's entry stays until the queue tail settles, so a
+ * holder never loses its gate to a later caller.
  */
-export async function withSnapshotPackageGate<T>(
+export function withSnapshotPackageGate<T>(
   packageId: string,
   fn: () => Promise<T>,
+  waitMs = PACKAGE_GATE_WAIT_MS,
 ): Promise<T> {
-  const previous = packageGates.get(packageId) ?? Promise.resolve();
-  let release: () => void = () => {};
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const tail = previous.then(() => current);
-  packageGates.set(packageId, tail);
-  try {
-    await previous;
-    return await fn();
-  } finally {
-    release();
-    if (packageGates.get(packageId) === tail) packageGates.delete(packageId);
-  }
+  return withLock(snapshotPackageGateKey(packageId), fn, undefined, { waitMs });
+}
+
+export function snapshotPackageGateKey(packageId: string): string {
+  return `snapshot-package:${packageId}`;
 }
 
 /** Abort every snapshot task of `ownerId`'s repositories (account deletion). */

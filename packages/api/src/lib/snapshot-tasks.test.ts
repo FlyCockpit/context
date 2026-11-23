@@ -6,7 +6,10 @@ vi.mock("@cockpit-context/db", async () => {
 });
 vi.mock("@cockpit-context/repos", async () => {
   const errors = await import("@cockpit-context/repos/errors");
+  const locks = await import("@cockpit-context/repos/locks");
   return {
+    withLock: locks.withLock,
+    isLockQueued: locks.isLockQueued,
     isRepoError: errors.isRepoError,
     snapshotRefMissing: () => new errors.RepoError("PACKAGE_SNAPSHOT_REF_MISSING", "missing"),
     cloneRepository: vi.fn(),
@@ -115,6 +118,62 @@ describe("snapshot tasks", () => {
       }),
     ).rejects.toThrow("boom");
     await expect(tasks.withSnapshotPackageGate("pkg-1", async () => "next")).resolves.toBe("next");
+    // Nothing stays queued once every caller has settled.
+    expect(repos.isLockQueued(tasks.snapshotPackageGateKey("pkg-1"))).toBe(false);
+    expect(repos.isLockQueued(tasks.snapshotPackageGateKey("pkg-2"))).toBe(false);
+  });
+
+  it("bounds a waiter's wait with REPOSITORY_BUSY, and the holder keeps its gate until it ends", async () => {
+    vi.useFakeTimers();
+    try {
+      const key = tasks.snapshotPackageGateKey("pkg-slow");
+      let releaseHolder: () => void = () => {};
+      let running = 0;
+      let overlapped = false;
+      const guarded = async <T>(value: T) => {
+        running += 1;
+        if (running > 1) overlapped = true;
+        await Promise.resolve();
+        running -= 1;
+        return value;
+      };
+      const holder = tasks.withSnapshotPackageGate("pkg-slow", async () => {
+        running += 1;
+        await new Promise<void>((resolve) => {
+          releaseHolder = resolve;
+        });
+        running -= 1;
+        return "held";
+      });
+      let ran = false;
+      const waiter = tasks
+        .withSnapshotPackageGate("pkg-slow", async () => {
+          ran = true;
+        })
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(tasks.PACKAGE_GATE_WAIT_MS - 1);
+      expect(ran).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await waiter).toMatchObject({ code: "REPOSITORY_BUSY" });
+      expect(ran).toBe(false);
+      // The waiter that gave up removed nothing: the holder still owns the
+      // gate, so a later caller still waits for it (and never runs alongside).
+      expect(repos.isLockQueued(key)).toBe(true);
+      const later = tasks.withSnapshotPackageGate("pkg-slow", () => guarded("later"));
+      const late = tasks
+        .withSnapshotPackageGate("pkg-slow", () => guarded("too late"), 1_000)
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await late).toMatchObject({ code: "REPOSITORY_BUSY" });
+      releaseHolder();
+      await expect(holder).resolves.toBe("held");
+      // The ones that gave up do not hold up the next one in line.
+      await expect(later).resolves.toBe("later");
+      expect(overlapped).toBe(false);
+      expect(repos.isLockQueued(key)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses a row that is not the owner's snapshot, leaving nothing registered", async () => {

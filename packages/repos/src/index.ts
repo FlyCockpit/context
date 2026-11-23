@@ -37,7 +37,7 @@ export {
   scanKnownHost,
   trustedHostKeys,
 } from "./known-hosts";
-export { REQUEST_LOCK_WAIT_MS, withRepositoryLock } from "./locks";
+export { isLockQueued, REQUEST_LOCK_WAIT_MS, withLock, withRepositoryLock } from "./locks";
 export { fetchNpmGitHead } from "./npm-registry";
 export type { PublicKey, SupportedKeyType } from "./openssh";
 export {

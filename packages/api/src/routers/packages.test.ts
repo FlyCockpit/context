@@ -599,6 +599,52 @@ describe("one-time SSH packages", () => {
     await assertNoPersistedSecret();
   });
 
+  it("with save, stores nothing when the package's gate wait runs out, so a retry succeeds", async () => {
+    const { PACKAGE_GATE_WAIT_MS, withSnapshotPackageGate } = await import("../lib/snapshot-tasks");
+    db.package.findFirst.mockResolvedValue(snapshot);
+    const saving = { id: snapshot.id, key: { ...key, save: true, name: "deploy" } };
+    // Its own user: this test spends two of the per-user key-write budget.
+    const saver = () => client(sessionContext({ id: "gate-saver" }));
+    vi.useFakeTimers();
+    let release: () => void = () => {};
+    try {
+      const holder = withSnapshotPackageGate(
+        snapshot.id,
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const first = saver()
+        .updateSnapshot(saving)
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(PACKAGE_GATE_WAIT_MS);
+      expect(await first).toMatchObject({ code: "CONFLICT", data: { reason: "REPOSITORY_BUSY" } });
+      expect(repos.importSshKey).not.toHaveBeenCalled();
+      expect(db.package.updateMany).not.toHaveBeenCalled();
+      release();
+      await holder;
+    } finally {
+      release();
+      vi.useRealTimers();
+    }
+    await expect(saver().updateSnapshot(saving)).resolves.toEqual({ ok: true, syncing: true });
+    expect(repos.importSshKey).toHaveBeenCalledTimes(1);
+    db.package.findFirst.mockReset();
+  });
+
+  it("with save, stores no key for a package that stopped being a snapshot meanwhile", async () => {
+    // Read before the gate, then gone (converted or deleted) once inside it.
+    db.package.findFirst.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(null);
+    await expect(
+      client(sessionContext({ id: "gone-saver" })).updateSnapshot({
+        id: snapshot.id,
+        key: { ...key, save: true, name: "deploy" },
+      }),
+    ).rejects.toMatchObject({ data: { reason: "PACKAGE_SNAPSHOT_REF_MISSING" } });
+    expect(repos.importSshKey).not.toHaveBeenCalled();
+  });
+
   it("serializes a re-key and a save on one package: the save converts the clone the re-key attached", async () => {
     // A tiny package row: the snapshot's clone was deleted (repositoryId null).
     let repositoryId: string | null = null;
@@ -768,6 +814,35 @@ describe("one-time SSH packages", () => {
     await settle();
   });
 
+  it("answers CONFLICT / REPOSITORY_BUSY when converting waits too long for the package's gate", async () => {
+    const { PACKAGE_GATE_WAIT_MS, withSnapshotPackageGate } = await import("../lib/snapshot-tasks");
+    db.package.findFirst.mockResolvedValue(snapshot);
+    db.sshKey.findFirst.mockResolvedValue({ id: "saved-key" });
+    vi.useFakeTimers();
+    let release: () => void = () => {};
+    try {
+      const holder = withSnapshotPackageGate(
+        snapshot.id,
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const edit = owner()
+        .update({ id: snapshot.id, sshKeyId: "saved-key" })
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(PACKAGE_GATE_WAIT_MS);
+      expect(await edit).toMatchObject({ code: "CONFLICT", data: { reason: "REPOSITORY_BUSY" } });
+      expect(db.package.updateMany).not.toHaveBeenCalled();
+      release();
+      await holder;
+    } finally {
+      release();
+      vi.useRealTimers();
+      db.package.findFirst.mockReset();
+    }
+  });
+
   it("keeps the snapshot if the chosen saved key belongs to another user", async () => {
     db.package.findFirst.mockResolvedValue(snapshot);
     db.sshKey.findFirst.mockResolvedValue(null);
@@ -865,6 +940,62 @@ describe("one-time SSH packages", () => {
       data: { reason: "REPOSITORY_BUSY" },
     });
     expect(db.package.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("bounds concurrent deletes of one package while one holds its gate, leaking nothing", async () => {
+    const { PACKAGE_GATE_WAIT_MS, snapshotPackageGateKey } = await import("../lib/snapshot-tasks");
+    const gateKey = snapshotPackageGateKey(snapshot.id);
+    db.package.findFirst.mockResolvedValue({ repositoryId: "repo-snapshot" });
+    db.package.deleteMany.mockResolvedValue({ count: 1 });
+    // The first delete holds the gate while its repository-lock wait runs.
+    let releaseLock: () => void = () => {};
+    let deleting = 0;
+    let overlapped = false;
+    vi.mocked(repos.deleteRepository).mockImplementation(async () => {
+      deleting += 1;
+      if (deleting > 1) overlapped = true;
+      if (vi.mocked(repos.deleteRepository).mock.calls.length === 1)
+        await new Promise<void>((resolve) => {
+          releaseLock = resolve;
+        });
+      deleting -= 1;
+      return { freedBytes: 0n };
+    });
+    vi.useFakeTimers();
+    try {
+      const holder = owner().delete({ id: snapshot.id });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(repos.deleteRepository).toHaveBeenCalledTimes(1);
+      const waiters = Array.from({ length: 10 }, () =>
+        owner()
+          .delete({ id: snapshot.id })
+          .catch((error: unknown) => error),
+      );
+      // Every waiter answers once the gate's bound elapses: they wait side by
+      // side, not one after the other.
+      await vi.advanceTimersByTimeAsync(PACKAGE_GATE_WAIT_MS);
+      const answers = await Promise.all(waiters);
+      for (const answer of answers)
+        expect(answer).toMatchObject({ code: "CONFLICT", data: { reason: "REPOSITORY_BUSY" } });
+      expect(repos.deleteRepository).toHaveBeenCalledTimes(1);
+      // The holder still owns the gate (no waiter that gave up removed it): a
+      // delete arriving now waits for it and never runs alongside.
+      expect(repos.isLockQueued(gateKey)).toBe(true);
+      const next = owner().delete({ id: snapshot.id });
+      await vi.advanceTimersByTimeAsync(PACKAGE_GATE_WAIT_MS - 1);
+      expect(repos.deleteRepository).toHaveBeenCalledTimes(1);
+      releaseLock();
+      await expect(holder).resolves.toEqual({ ok: true });
+      await expect(next).resolves.toEqual({ ok: true });
+      expect(repos.deleteRepository).toHaveBeenCalledTimes(2);
+      expect(overlapped).toBe(false);
+      expect(db.package.deleteMany).toHaveBeenCalledTimes(2);
+      expect(repos.isLockQueued(gateKey)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      vi.mocked(repos.deleteRepository).mockReset();
+      db.package.findFirst.mockReset();
+    }
   });
 });
 

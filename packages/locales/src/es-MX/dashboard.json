@@ -722,6 +722,7 @@
       "youAsked": "Preguntaste",
       "askedBy": "{{name}} preguntó",
       "followUp": "Tu seguimiento",
+      "askedAgain": "Volviste a preguntar",
       "steered": "Indicaste:",
       "answer": "Respuesta (generada por IA)",
       "streaming": "Escribiendo…"

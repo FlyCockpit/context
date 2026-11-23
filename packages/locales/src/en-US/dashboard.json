@@ -722,6 +722,7 @@
       "youAsked": "You asked",
       "askedBy": "{{name}} asked",
       "followUp": "Your follow-up",
+      "askedAgain": "You asked again",
       "steered": "You steered:",
       "answer": "Answer (AI-generated)",
       "streaming": "Writing…"

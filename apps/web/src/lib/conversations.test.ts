@@ -831,6 +831,93 @@ describe("web conversations that resolve inside their first run", () => {
     expect(composerMode(state)).toEqual({ kind: "disabled", reason: "retry", live: false });
   });
 
+  it("labels a question asked again after a run that never reached the agent", () => {
+    const failed = detailRun({
+      id: "run-1",
+      status: "failed",
+      stopReason: "resolve-failed",
+      answer: null,
+      startedAt: null,
+      turns: [
+        { seq: 0, role: "user", parts: [text("How do I pad?")], steering: false, createdAt: NOW },
+      ],
+    });
+    const answered = detailRun({
+      id: "run-2",
+      turns: [
+        { seq: 0, role: "user", parts: [text("How do I pad?")], steering: false, createdAt: NOW },
+      ],
+    });
+    const followUp = detailRun({
+      id: "run-3",
+      turns: [
+        { seq: 0, role: "user", parts: [text("And then?")], steering: false, createdAt: NOW },
+      ],
+    });
+    const questions = buildTranscript(
+      fold([snapshot(detail([failed, answered, followUp]))]),
+    ).filter((block) => block.kind === "question");
+    expect(
+      questions.map((block) => block.kind === "question" && [block.followUp, block.retry]),
+    ).toEqual([
+      [false, false],
+      [true, true],
+      [true, false],
+    ]);
+  });
+
+  it("labels the same question as a follow-up when the run before reached the agent or is still live", () => {
+    const question = (id: string, overrides: Partial<DetailRun> = {}) =>
+      detailRun({
+        id,
+        turns: [
+          { seq: 0, role: "user", parts: [text("How do I pad?")], steering: false, createdAt: NOW },
+        ],
+        ...overrides,
+      });
+    const labels = (runs: DetailRun[]) =>
+      buildTranscript(fold([snapshot(detail(runs))]))
+        .filter((block) => block.kind === "question")
+        .map((block) => block.kind === "question" && block.retry);
+    // The run before answered (it started): the same words again are a follow-up.
+    expect(labels([question("run-1"), question("run-2")])).toEqual([false, false]);
+    // The run before has not started yet but is still live (queued).
+    expect(
+      labels([
+        question("run-1", { status: "queued", answer: null, startedAt: null }),
+        question("run-2"),
+      ]),
+    ).toEqual([false, false]);
+  });
+
+  it("labels a different question after a run that never started as a follow-up, not a retry", () => {
+    const stopped = detailRun({
+      id: "run-1",
+      status: "stopped",
+      stopReason: "user",
+      answer: null,
+      startedAt: null,
+      turns: [
+        { seq: 0, role: "user", parts: [text("How do I pad?")], steering: false, createdAt: NOW },
+      ],
+    });
+    const followUp = detailRun({
+      id: "run-2",
+      turns: [
+        { seq: 0, role: "user", parts: [text("How do I trim?")], steering: false, createdAt: NOW },
+      ],
+    });
+    const questions = buildTranscript(fold([snapshot(detail([stopped, followUp]))])).filter(
+      (block) => block.kind === "question",
+    );
+    expect(
+      questions.map((block) => block.kind === "question" && [block.followUp, block.retry]),
+    ).toEqual([
+      [false, false],
+      [true, false],
+    ]);
+  });
+
   it("reads the failure from saved rows, and never offers a retry once the agent started", () => {
     const failed = detailRun({
       status: "failed",

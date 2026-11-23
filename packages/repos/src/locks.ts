@@ -73,6 +73,11 @@ export async function withLock<T>(
   }
 }
 
+/** Whether `key` has a holder or a waiter (its queue has not settled). Tests only. */
+export function isLockQueued(key: string): boolean {
+  return tails.has(key);
+}
+
 /** Lease admission and repository/checkout deletion share this lifecycle gate. */
 export function withRepositoryLock<T>(
   repositoryId: string,

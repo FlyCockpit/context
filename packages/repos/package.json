@@ -20,6 +20,9 @@
     },
     "./errors": {
       "default": "./src/errors.ts"
+    },
+    "./locks": {
+      "default": "./src/locks.ts"
     }
   },
   "dependencies": {

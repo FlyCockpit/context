@@ -222,16 +222,19 @@ export const packagesRouter = {
         // No pasted-key task may go on (or start) for a package that is no
         // longer a snapshot: serialized with re-keys, on the repository the
         // package has now (a concurrent re-key may have attached a new one).
-        await withSnapshotPackageGate(current.id, async () => {
-          const fresh = await prisma.package.findFirst({
-            where: { id: current.id, ownerId },
-            select: { repositoryId: true },
-          });
-          if (!fresh) throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
-          await withSnapshotTasksClosed(fresh.repositoryId, () =>
-            prisma.$transaction((tx) => write(tx, fresh.repositoryId)),
-          );
-        });
+        // A wait past PACKAGE_GATE_WAIT_MS answers CONFLICT / REPOSITORY_BUSY.
+        await withDomainErrors(() =>
+          withSnapshotPackageGate(current.id, async () => {
+            const fresh = await prisma.package.findFirst({
+              where: { id: current.id, ownerId },
+              select: { repositoryId: true },
+            });
+            if (!fresh) throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
+            await withSnapshotTasksClosed(fresh.repositoryId, () =>
+              prisma.$transaction((tx) => write(tx, fresh.repositoryId)),
+            );
+          }),
+        );
       } else await write(prisma);
       forgetPackageReuse(current.id);
       const row = await findOwnedOrThrow({
@@ -276,22 +279,26 @@ export const packagesRouter = {
             key.privateKey,
             key.passphrase || undefined,
           );
-          const saved = key.save
-            ? await importSshKey({
-                ownerId,
-                name: key.name!,
-                privateKey: key.privateKey,
-                passphrase: key.passphrase,
-              })
-            : null;
           // Serialized per package, on the repository it has NOW: a concurrent
           // re-key or conversion may have attached or converted one meanwhile.
+          // A wait past PACKAGE_GATE_WAIT_MS answers REPOSITORY_BUSY before
+          // anything is written, so the request can simply be retried.
           return await withSnapshotPackageGate(current.id, async () => {
             const fresh = await prisma.package.findFirst({
               where: { id: current.id, ownerId, isSnapshot: true },
               select: { repositoryId: true },
             });
             if (!fresh) throw snapshotRefMissing();
+            // Stored only once this request holds the gate and the package is
+            // still a snapshot.
+            const saved = key.save
+              ? await importSshKey({
+                  ownerId,
+                  name: key.name!,
+                  privateKey: key.privateKey,
+                  passphrase: key.passphrase,
+                })
+              : null;
             if (saved) {
               const repositoryIdNow = fresh.repositoryId;
               // No pasted-key task may go on (or start) once the key is saved.
@@ -362,34 +369,39 @@ export const packagesRouter = {
 
   /**
    * Delete a package. A snapshot's own clone goes with it: its background
-   * clone or refresh is cancelled first, and the repository lock is waited
-   * for at most REQUEST_LOCK_WAIT_MS (then CONFLICT / REPOSITORY_BUSY).
+   * clone or refresh is cancelled first, and the package's snapshot gate and
+   * the repository lock are each waited for a bounded time (then CONFLICT /
+   * REPOSITORY_BUSY).
    */
   delete: protectedProcedure
     .input(z.object({ id: entityId }))
     .handler(async ({ input, context }) => {
       const ownerId = context.session.user.id;
       // Serialized with re-keys: a concurrent one cannot attach (and start
-      // cloning) a replacement snapshot this delete would then miss.
-      await withSnapshotPackageGate(input.id, async () => {
-        const snapshot = await prisma.package.findFirst({
-          where: { id: input.id, ownerId, isSnapshot: true },
-          select: { repositoryId: true },
-        });
-        if (snapshot?.repositoryId) {
-          const repositoryId = snapshot.repositoryId;
-          // Its clone or refresh is killed; the bounded lock wait below covers
-          // the unwinding (then REPOSITORY_BUSY, and the delete can be retried).
-          cancelSnapshotSync(repositoryId);
-          await withDomainErrors(() =>
-            deleteRepository(repositoryId, { lockWaitMs: REQUEST_LOCK_WAIT_MS }),
-          );
-        }
-        // Conversations keep `packageIdentifier` (their FK is SetNull); a live
-        // run notices on its next lease renewal.
-        const { count } = await prisma.package.deleteMany({ where: { id: input.id, ownerId } });
-        if (count === 0) throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
-      });
+      // cloning) a replacement snapshot this delete would then miss. Both
+      // waits are bounded (the gate's PACKAGE_GATE_WAIT_MS, then the
+      // repository lock's REQUEST_LOCK_WAIT_MS) and answer CONFLICT /
+      // REPOSITORY_BUSY, so the delete can be retried.
+      await withDomainErrors(() =>
+        withSnapshotPackageGate(input.id, async () => {
+          const snapshot = await prisma.package.findFirst({
+            where: { id: input.id, ownerId, isSnapshot: true },
+            select: { repositoryId: true },
+          });
+          if (snapshot?.repositoryId) {
+            const repositoryId = snapshot.repositoryId;
+            // Its clone or refresh is killed; the bounded lock wait covers the
+            // unwinding.
+            cancelSnapshotSync(repositoryId);
+            await deleteRepository(repositoryId, { lockWaitMs: REQUEST_LOCK_WAIT_MS });
+          }
+          // Conversations keep `packageIdentifier` (their FK is SetNull); a live
+          // run notices on its next lease renewal.
+          const { count } = await prisma.package.deleteMany({ where: { id: input.id, ownerId } });
+          if (count === 0)
+            throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
+        }),
+      );
       forgetPackageReuse(input.id);
       return { ok: true as const };
     }),
