@@ -45,12 +45,14 @@ export default function UserMenu() {
       <div className="flex items-center gap-2">
         {/* Links styled as buttons, not a <Button> inside a <Link>: nesting
             puts two tab stops on one action and is invalid HTML. */}
+        {/* Below `sm:` only Sign in fits next to language and theme at 320px;
+            the sign-in page links to sign-up. */}
         {showSignUp && (
           <Link
             to="/$lang/signup"
             params={{ lang }}
             search={{ redirectTo: undefined }}
-            className={cn(buttonVariants({ size: "touch" }))}
+            className={cn(buttonVariants({ size: "touch" }), "max-sm:hidden")}
           >
             {t("userMenu.signUp")}
           </Link>

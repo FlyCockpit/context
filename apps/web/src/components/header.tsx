@@ -1,9 +1,10 @@
-import { Link, useParams } from "@tanstack/react-router";
+import { cn } from "@cockpit-context/ui/lib/utils";
+import { useParams } from "@tanstack/react-router";
 
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/i18n/config";
 
-import { BrandMark } from "./brand-mark";
+import { AppNameLink } from "./app-name-link";
 import { LanguageSwitcher } from "./language-switcher";
 import { MainNav } from "./main-nav";
 import { ModeToggle } from "./mode-toggle";
@@ -22,15 +23,18 @@ export default function Header() {
   return (
     <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="flex min-h-14 min-w-0 flex-row items-center gap-4 px-4 py-2">
-        <Link
-          to={home}
-          params={{ lang }}
-          className="inline-flex min-h-11 min-w-0 max-w-48 shrink-0 items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-56 lg:max-w-none"
-        >
-          <BrandMark />
-        </Link>
+        {/* The first thing in the row to give way (see AppNameLink). */}
+        <AppNameLink to={home} lang={lang} />
         <MainNav />
-        <div className="ml-auto flex min-w-0 items-center gap-2">
+        {/* Signed out (and while the session loads) nothing in the controls
+            group can shrink, so it never does. Signed in, the account trigger
+            is a fixed 44px below `md:` and its name truncates from `md:` up. */}
+        <div
+          className={cn(
+            "ml-auto flex min-w-0 items-center gap-2",
+            state.status !== "authenticated" && "shrink-0",
+          )}
+        >
           <LanguageSwitcher />
           <ModeToggle />
           <UserMenu />

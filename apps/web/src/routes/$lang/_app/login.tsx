@@ -14,6 +14,7 @@ import z from "zod";
 import { AdminSetupCard } from "@/components/auth/admin-setup-card";
 import { AuthConfigGate } from "@/components/auth/auth-config-gate";
 import { AuthCard } from "@/components/auth/auth-screen";
+import { PasswordHelp } from "@/components/auth/password-help";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { authClient } from "@/lib/auth-client";
 import { decideAnonymousOnlyRouteAccess } from "@/lib/route-session-access";
@@ -227,13 +228,13 @@ function LoginPage() {
                 {t("auth:login.ssoContinue", { provider: ssoProviderName })}
               </Button>
               {!forceSso && (
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card px-2 text-muted-foreground">{t("auth:login.or")}</span>
-                  </div>
+                // Two rules around the label instead of a label masking one
+                // rule with `bg-card`: on phones the card is flat, and the mask
+                // showed as a box over the page's backdrop.
+                <div className="flex items-center gap-2 text-xs uppercase text-muted-foreground">
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                  <span>{t("auth:login.or")}</span>
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
                 </div>
               )}
             </>
@@ -252,7 +253,10 @@ function LoginPage() {
             </div>
           )}
           {signupAvailable && (
-            <div className="text-center">
+            // `max-sm:-mt-2`: on phones the link's 44px box may use half of the
+            // gap above it (its text sits 12px inside the box), which keeps it
+            // above the BottomNav at 320×568.
+            <div className="text-center max-sm:-mt-2">
               <Link
                 to="/$lang/signup"
                 params={{ lang }}
@@ -364,36 +368,27 @@ function SignInForm({
         )}
       </form.Field>
 
-      <form.Field name="password">
-        {(field) => (
-          <TextField
-            field={field}
-            label={t("auth:fields.password")}
-            type="password"
-            autoComplete="current-password"
-          />
-        )}
-      </form.Field>
-
-      {passwordResetAvailable ? (
-        <div className="text-right">
-          <Link
-            to="/$lang/forgot-password"
-            params={{ lang }}
-            search={{ redirectTo }}
-            className={cn(
-              buttonVariants({ variant: "link" }),
-              "min-h-[44px] px-0 text-sm text-muted-foreground",
-            )}
-          >
-            {t("auth:login.forgotPassword")}
-          </Link>
-        </div>
-      ) : (
-        // No SMTP: there is no reset flow, so say so instead of silently
-        // omitting the link (docs/product.md).
-        <p className="text-sm text-muted-foreground">{t("auth:login.passwordResetUnavailable")}</p>
-      )}
+      {/* Phones: "Forgot password?" sits in the Password label's row (see
+          PasswordHelp), so it does not push the sign-up link below the
+          BottomNav at 320×568. DOM order is the same at every width:
+          password, then the help, then submit. */}
+      <div className="relative space-y-4 max-sm:pt-1.5">
+        <form.Field name="password">
+          {(field) => (
+            <TextField
+              field={field}
+              label={t("auth:fields.password")}
+              type="password"
+              autoComplete="current-password"
+            />
+          )}
+        </form.Field>
+        <PasswordHelp
+          lang={lang}
+          redirectTo={redirectTo}
+          passwordResetAvailable={passwordResetAvailable}
+        />
+      </div>
 
       <form.Subscribe
         selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting })}

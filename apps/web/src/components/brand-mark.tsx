@@ -4,10 +4,13 @@ import { cn } from "@cockpit-context/ui/lib/utils";
 /** Decorative artwork; the app name remains the accessible text. */
 export function BrandMark({
   className,
+  nameClassName,
   size = "md",
   withName = true,
 }: {
   className?: string;
+  /** Width caps for the name (the header's AppNameLink). */
+  nameClassName?: string;
   size?: "md" | "lg";
   /** Off where the name is already on screen (the header above the auth screens). */
   withName?: boolean;
@@ -27,6 +30,7 @@ export function BrandMark({
           className={cn(
             "min-w-0 truncate font-semibold tracking-tight",
             size === "lg" ? "text-xl" : "text-lg",
+            nameClassName,
           )}
         >
           {env.VITE_APP_NAME}

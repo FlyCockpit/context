@@ -2,7 +2,7 @@ import { buttonVariants } from "@cockpit-context/ui/components/button";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { BrandMark } from "@/components/brand-mark";
+import { AppNameLink } from "@/components/app-name-link";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ModeToggle } from "@/components/mode-toggle";
 import { PublicFooter } from "@/components/public-footer";
@@ -61,13 +61,7 @@ function PublicHeader() {
   return (
     <header>
       <div className="flex min-w-0 flex-row items-center gap-4 px-4 py-2">
-        <Link
-          to="/$lang"
-          params={{ lang }}
-          className="inline-flex min-h-11 min-w-0 max-w-48 shrink-0 items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-56 lg:max-w-none"
-        >
-          <BrandMark />
-        </Link>
+        <AppNameLink to="/$lang" lang={lang} />
         {/* Hidden below `sm`: the public branch has no BottomNav, its only
             destination is Home, and the wordmark already links there, so a
             390px phone spends the row on language, theme and Sign in instead. */}
