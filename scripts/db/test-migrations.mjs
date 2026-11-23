@@ -38,6 +38,10 @@
  *   - runtime: two concurrent leaders serialize on the runner lock (one
  *     deploy, both exit 0); a migration another session is still applying
  *     (Prisma's lock held) is refused and left untouched
+ *   - release migrations (scripts/db/test-release.mjs): every prefix of a
+ *     squashed chain reconciles to the fresh schema with its rows; contract
+ *     state carried over; tampered copies, checksum mismatches and unknown
+ *     migrations refused; followers wait; db:migrate:apply reconciles too
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -64,6 +68,7 @@ import { readMigrationsFolder } from "./lib/migration-state.mjs";
 import { loadPg, ROOT } from "./lib/prisma.mjs";
 import { wrapTransactional } from "./lib/sql.mjs";
 import { contractScenarios } from "./test-contracts.mjs";
+import { releaseScenarios } from "./test-release.mjs";
 
 // A git hook (or any caller) may export GIT_DIR, GIT_INDEX_FILE and the like;
 // inherited by the scratch repositories' git calls (here and in the scripts
@@ -1178,6 +1183,8 @@ async function runSteps(server) {
       pg,
       sh,
     });
+
+    await releaseScenarios({ step, serverUrl: server.url, repo, pg });
   } finally {
     await step("harness: clean up only the scratch databases created by this run", async () => {
       const client = await adminClient(pg, server.url);

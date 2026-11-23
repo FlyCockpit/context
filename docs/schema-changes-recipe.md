@@ -30,7 +30,7 @@ For enum removal use `--remap 'Enum.OLD=NEW'` and inspect the generated remap/sy
 
 ## What CI checks
 
-Migration replay must match the Prisma schema and application catalog; new folders sort after the base branch; merged files remain byte-identical; realistic fixtures retain their invariants; and safety analysis rejects breaking SQL, invalid generated blocks, accidental renames and retired-name reuse. Rebase unmerged folders with `pnpm db:migrate:rebase`, never retimestamp a merged folder.
+Migration replay must match the Prisma schema and application catalog; new folders sort after the base branch; merged files remain byte-identical (the one exception is the release squash: a merged folder not yet in a release tag may move, byte-identical, into a release folder's `replaced/` copy listed in its `replaces.json`, and a release PR removes the previous release's `replaced/` and `replaces.json`); realistic fixtures retain their invariants; and safety analysis rejects breaking SQL, invalid generated blocks, accidental renames and retired-name reuse. A PR that adds a release folder also checks the release squash: `replaces.json` and the `replaced/` copies agree, the release is the replaced SQL verbatim and in order, and a database built from every prefix of the replaced chain, reconciled as the deploy runner does, ends with the fresh database's exact schema; it also runs `pnpm db:check-release` against the last release tag ([schema-migrations § Releases](./schema-migrations.md#releases)). Rebase unmerged folders with `pnpm db:migrate:rebase`, never retimestamp a merged folder.
 
 ## Local database troubleshooting
 
