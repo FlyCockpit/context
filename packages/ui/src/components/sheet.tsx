@@ -59,18 +59,18 @@ function SheetContent({
         {...props}
       >
         {children}
-        {/* 28px button centred on the title (top-3); at right-1.5 the X's ink ends
-            on the 16px edge line. The ::after expansion is laid out from the
-            padding box (inside the 1px border), so -inset-3 reaches 11px past
-            the border box: a 45px target even where the popup clips its edge. */}
+        {/* 44px box at top-1, centred on the 20px title line of the p-4
+            header, flush with the edge: the icon box ends 14px in and the X's
+            ink about 18px in. The focus ring is drawn inside the box, so the
+            viewport cannot clip it. */}
         {showCloseButton && (
           <SheetPrimitive.Close
             data-slot="sheet-close"
             render={
               <Button
                 variant="ghost"
-                className="absolute top-3 right-1.5 after:absolute after:-inset-3 after:content-['']"
-                size="icon-sm"
+                className="absolute top-1 right-0 focus-visible:ring-inset focus-visible:ring-offset-0"
+                size="icon-touch"
               />
             }
           >

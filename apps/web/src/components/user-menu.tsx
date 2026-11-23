@@ -79,6 +79,7 @@ export default function UserMenu() {
       size="touch"
       aria-label={t("userMenu.open")}
       aria-haspopup="menu"
+      title={session.user.name}
       className="w-11 px-0! md:w-auto md:px-3.5!"
       inert={inert}
       onPointerEnter={prefetchMenu}

@@ -47,6 +47,7 @@ export default function UserMenuContent() {
     <DropdownMenu defaultOpen>
       <DropdownMenuTrigger
         aria-label={t("userMenu.open")}
+        title={session.user.name}
         render={
           <Button variant="outline" size="touch" className="w-11 px-0! md:w-auto md:px-3.5!" />
         }
@@ -54,7 +55,7 @@ export default function UserMenuContent() {
         <User className="size-4 md:hidden" aria-hidden="true" />
         <span className="hidden max-w-40 truncate md:inline">{session.user.name}</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="min-w-56 bg-card">
+      <DropdownMenuContent align="end" className="min-w-56 bg-card">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="space-y-0.5">
             <span className="block text-muted-foreground">{t("userMenu.myAccount")}</span>

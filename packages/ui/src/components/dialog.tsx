@@ -56,17 +56,20 @@ function DialogContent({
         {...props}
       >
         {children}
-        {/* 28px button centred on the title (top-3); at right-1.5 the X's ink ends
-            on the 16px edge line. The ::after expansion is laid out from the
-            padding box (inside the 1px border), so -inset-3 reaches 11px past
-            the border box: a 45px target even where the popup clips its edge. */}
+        {/* 28px button centred on the title (top-3). The hit area is a 44px
+            square centred on the button, whatever its border or size (an inset
+            expansion is laid out from the padding box, inside the 1px border:
+            `-inset-2` gave 42px). At right-2 the square ends exactly on the
+            popup's edge, so a caller's `overflow-x-hidden` cannot clip it; the
+            icon box ends 14px in and the X's ink about 18px in. The focus ring
+            is drawn inside the box, so no clip can cut it. */}
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
             render={
               <Button
                 variant="ghost"
-                className="absolute top-3 right-1.5 after:absolute after:-inset-3 after:content-['']"
+                className="absolute top-3 right-2 after:absolute after:top-1/2 after:left-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] focus-visible:ring-inset focus-visible:ring-offset-0"
                 size="icon-sm"
               />
             }
