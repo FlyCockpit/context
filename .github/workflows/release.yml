@@ -146,6 +146,8 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
+          # Dated, path-scoped accepted findings (docs/hosting.md).
+          trivyignores: .trivyignore.yaml
           format: table
           # Security release: updates vulnerable scanner dependencies.
           version: v0.76.2

@@ -1,0 +1,91 @@
+# Trivy ignore file (YAML; passed to every image scan through the trivy-action
+# `trivyignores` input). Each entry is scoped to an exact path and expires: an
+# expired entry stops matching, and the scan fails again. docs/hosting.md
+# § Accepted image-scan findings.
+#
+# TypeScript 7.0.2's native `tsc` is the runtime TypeScript/JavaScript
+# language server (`tsc --lsp --stdio`, packages/explore/src/lsp/specs.ts), not
+# build tooling, so the image keeps it. It is built with Go 1.26.4 and
+# golang.org/x/text v0.38.0; the findings are in Go's net/http, crypto/tls,
+# crypto/x509, encoding/asn1, encoding/xml, html/template, net/url, os.Root and
+# x/text. The language server talks over stdio only, inside the Landlock
+# sandbox (filesystem confined to the checkout, no TCP), and never serves or
+# fetches over the network. No stable TypeScript ships on a fixed Go yet.
+# Remove this entry (and bump TypeScript) when a stable TypeScript release is
+# built with Go >= 1.27.3 and golang.org/x/text >= 0.41.0.
+vulnerabilities:
+  - id: CVE-2026-111943
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-33818
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-39821
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-39822
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-46600
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-56851
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-56852
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-56853
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-56858
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-56859
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-56860
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-56862
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-78667
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-78669
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.
+  - id: CVE-2026-97031
+    paths:
+      - "app/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2027-01-04
+    statement: TypeScript 7.0.2 tsc language server, stdio only inside the Landlock sandbox with no TCP; remove on a stable TypeScript built with Go >= 1.27.3.

@@ -646,6 +646,8 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
+          # Dated, path-scoped accepted findings (docs/hosting.md).
+          trivyignores: .trivyignore.yaml
           format: table
           # Trivy binary pin: the action default (v0.70.0) carries
           # GHSA-mcj4-mphf-j9ff and GHSA-q3fv-x8vg-qqm4 (high).

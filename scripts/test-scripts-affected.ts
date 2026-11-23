@@ -145,6 +145,7 @@ export const RULES: readonly Rule[] = [
       ".gitattributes",
       ".gitignore",
       ".oxlintrc.json",
+      ".trivyignore.yaml",
       "AGENTS.md",
       "CHANGELOG.md",
       "CLAUDE.md",
