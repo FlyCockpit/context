@@ -110,6 +110,8 @@ context.example.com {
 
 Use your own domain, DNS and TLS configuration. Preserve `/mcp`, `/api/auth/*` and `/.well-known/*` paths and forwarded headers. Do not buffer SSE; allow requests to last at least `COCKPIT_CONTEXT_MCP_WAIT_SECONDS` (default 900 seconds). Keep app HTTP bound to loopback and the database unexposed.
 
+No public IP (a home server behind NAT or CGNAT)? Put a Cloudflare Tunnel in front instead of a public Caddy site: [Home server behind a Cloudflare Tunnel](#home-server-behind-a-cloudflare-tunnel).
+
 ## Dokploy Compose
 
 Create a distinct Compose project for this repository, using `compose.yaml` alone. Its services have no host-port mappings. Set the production environment before first boot and finish the private administrator setup above. In the Dokploy domain UI add your domain for service **app**, container port **3000**, with HTTPS. **Set `TRUST_PROXY_HOPS=1` yourself** in the Compose environment: this repository has no Dokploy config generator to set it, and the default `0` (direct deployment) makes every request behind Traefik look like it comes from the proxy, so per-IP rate limits and sign-in failure limits would be shared by all clients. Count any additional trusted proxy in front of Traefik too. Attach only the app to the proxy network through Dokploy's supported routing; keep Postgres on the project-private internal network. Do not attach the database to a shared proxy network or add a generic global `postgres` alias there.
@@ -166,6 +168,27 @@ ingress:
 
 For the second topology, point the service at the local proxy (for example `http://127.0.0.1:80`). `cloudflared` keeps the original `Host` header, so the proxy routes by your hostname as usual.
 
+Create the named tunnel either way:
+
+- **Remotely managed** (simplest): create it in the Cloudflare Zero Trust dashboard, add the public hostname there (`context.example.com` → `http://127.0.0.1:3036` for a connector on the host, `http://app:3000` for a connector container on the app's network), and run the connector with the tunnel token. The token is the only secret: keep it with the deployment's other secrets, never in a file in the checkout.
+- **Locally managed**: `cloudflared tunnel login`, `cloudflared tunnel create`, `cloudflared tunnel route dns`, then the `config.yml` above. Keep it and the credentials JSON **outside the checkout** (for example in `/etc/cloudflared` on the host): the image build copies the whole checkout (`COPY . .`) and `.dockerignore` does not exclude a `cloudflared/` folder, so a credentials file inside the checkout would end up in the build layers. The official `cloudflare/cloudflared` image runs as the unprivileged UID 65532 and `cloudflared tunnel create` writes the credentials file readable by its owner only, so for a connector container hand both to that UID, naming the file: `sudo chmod 400 /etc/cloudflared/<tunnel-uuid>.json`, then `sudo chown -R 65532:65532 /etc/cloudflared` and `sudo chmod 700 /etc/cloudflared`. Without that the container cannot read the file and the tunnel never connects.
+
+A connector container on the app's `egress` network (the app's other network, `internal`, has no outbound access), added to the Compose project with no published port at all; point the ingress at `http://app:3000`:
+
+```yaml
+  cloudflared:
+    image: cloudflare/cloudflared:<version>   # pin a version you have tested
+    command: tunnel --no-autoupdate run
+    # Remotely managed: no volume; pass the token instead.
+    #   environment:
+    #     TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN:?set with the other secrets}
+    volumes:
+      - /etc/cloudflared:/etc/cloudflared:ro
+    depends_on: [app]
+    networks: [egress]   # the app's non-internal network: reaches `app` and Cloudflare
+    restart: unless-stopped
+```
+
 | Setting | Tunnel to the app | Tunnel to Traefik/Caddy |
 |---|---|---|
 | `BETTER_AUTH_URL` | `https://context.example.com` | `https://context.example.com` |
@@ -195,7 +218,7 @@ For the second topology, point the service at the local proxy (for example `http
 
 **Dropped streams.** Cloudflare can close a long-lived connection when its edge restarts. Cockpit Context uses no WebSockets: the live view is a server-sent event stream that reconnects on its own (after 1 s, backing off to at most 30 s between attempts), and every reconnect starts from a fresh snapshot, so nothing is lost. An MCP call whose stream drops ends with a transport error in the coding agent. An investigation that had already started keeps running, and asking the same question again joins it or reuses its answer ([answer reuse](./mcp.md#answer-reuse)). A drop while an MCP call is still resolving the version cancels that clone or fetch (a web conversation resolves inside its run, so a dropped live view changes nothing).
 
-**Not needed.** ACME and certificate settings (Traefik `certresolver` labels, Dokploy's HTTPS/Let's Encrypt toggle, Caddy's automatic HTTPS) do not apply. Cloudflare holds the certificate for your hostname, so nothing behind the tunnel needs one. Serve the local proxy on plain HTTP, and do not let it redirect to HTTPS: Cloudflare already did, and the redirect would loop. Do not put a Cloudflare challenge (Bot Fight Mode, a managed challenge or Cloudflare Access) in front of `/mcp`, `/.well-known/*` or `/api/auth/*`: coding agents are not browsers and cannot pass one.
+**Not needed.** Opening ports 80/443, a static IP or a DDNS client (the tunnel follows the machine wherever it connects from). ACME and certificate settings (Traefik `certresolver` labels, Dokploy's HTTPS/Let's Encrypt toggle, Caddy's automatic HTTPS) do not apply. Cloudflare holds the certificate for your hostname, so nothing behind the tunnel needs one. Serve the local proxy on plain HTTP, and do not let it redirect to HTTPS: Cloudflare already did, and the redirect would loop. Do not put a Cloudflare challenge (Bot Fight Mode, a managed challenge or Cloudflare Access) in front of `/mcp`, `/.well-known/*` or `/api/auth/*`: coding agents are not browsers and cannot pass one.
 
 ## Runtime checks and limits
 
