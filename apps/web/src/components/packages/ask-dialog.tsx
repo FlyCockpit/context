@@ -21,9 +21,11 @@ import { orpc } from "@/utils/orpc";
 /**
  * "Ask": start a web conversation about one package (conversations.create,
  * which spends model tokens). The target is the package's default, a version
- * (`5.2.0`, resolved through tags) or any git ref. Resolution happens before
- * the conversation exists, so its errors (an unknown version with the
- * nearest tags, an unconfirmed SSH host) render here, inline.
+ * (`5.2.0`, resolved through tags) or any git ref. The conversation opens at
+ * once and its first run resolves the target, so a slow first clone never
+ * holds this request; resolution errors (an unknown version with the nearest
+ * tags, an unconfirmed SSH host) show on the conversation with a retry. Only
+ * the up-front refusals (budget, queue, no model) render here, inline.
  */
 
 export type AskTarget = { kind: "default" } | { kind: "version" | "ref"; value: string };

@@ -15,6 +15,7 @@ vi.mock("../../repos/src/paths", () => ({
   repositoryDir: () => "/unused/repo",
   repositoryCheckoutsDir: () => "/unused/checkouts",
   removeInsideDataDir: vi.fn(),
+  moveToTrash: vi.fn(),
 }));
 vi.mock("../../repos/src/git-exec", () => ({ runGit: vi.fn() }));
 

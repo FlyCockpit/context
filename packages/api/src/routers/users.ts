@@ -26,7 +26,7 @@ import { z } from "zod";
 
 import { adminOr404Procedure } from "../index";
 import { recordAdminAudit } from "../lib/admin-audit";
-import { reasonError } from "../lib/domain-errors";
+import { reasonError, withDomainErrors } from "../lib/domain-errors";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
 import { prepareUserDeletion, stopUserRuns } from "../lib/user-deletion";
 import { oauthRevocationWrites } from "./mcp-connections";
@@ -111,19 +111,26 @@ async function mintSetPasswordLink(
   return { url: url.toString(), token, expiresAt };
 }
 
-// Per-user issuance queue for `users.passwordLink`. In-process is enough:
-// Cockpit Context runs exactly one app replica (docs/hosting.md).
-const passwordLinkTails = new Map<string, Promise<unknown>>();
+// Per-user issuance gate for `users.passwordLink`. In-process is enough:
+// Cockpit Context runs exactly one app replica (docs/hosting.md). A second
+// request while one is in flight is refused at once rather than queued: each
+// holds the request open for up to the mail budget, so a queue would add
+// those waits up past a reverse proxy's idle limit (docs/deploy.md).
+const passwordLinksInFlight = new Set<string>();
 
 async function withPasswordLinkLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
-  const previous = passwordLinkTails.get(userId) ?? Promise.resolve();
-  const run = previous.catch(() => undefined).then(fn);
-  const tail = run.catch(() => undefined);
-  passwordLinkTails.set(userId, tail);
+  if (passwordLinksInFlight.has(userId)) {
+    throw reasonError(
+      "CONFLICT",
+      "PASSWORD_LINK_BUSY",
+      "A password link for this user is still being sent. Try again in a moment.",
+    );
+  }
+  passwordLinksInFlight.add(userId);
   try {
-    return await run;
+    return await fn();
   } finally {
-    if (passwordLinkTails.get(userId) === tail) passwordLinkTails.delete(userId);
+    passwordLinksInFlight.delete(userId);
   }
 }
 
@@ -574,7 +581,9 @@ export const usersRouter = {
     });
     if (!target) throw new ORPCError("NOT_FOUND", { message: "User not found" });
 
-    await prepareUserDeletion(input.userId);
+    // REPOSITORY_BUSY (a clone or fetch of theirs outlasted the bounded lock
+    // wait) reaches the admin as "try again": the account stays banned.
+    await withDomainErrors(() => prepareUserDeletion(input.userId));
     await prisma.user.delete({ where: { id: input.userId } });
     invalidateSignupAvailabilityCache();
     return { success: true };

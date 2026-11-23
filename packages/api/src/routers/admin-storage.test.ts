@@ -124,9 +124,10 @@ describe("adminStorageRouter", () => {
     await expect(client().delete({ kind: "checkout", id: "co-1" })).resolves.toEqual({
       freedBytes: 10,
     });
-    expect(deleteCheckout).toHaveBeenCalledWith("co-1", { force: false });
+    // A request never waits on the repository lock beyond REQUEST_LOCK_WAIT_MS.
+    expect(deleteCheckout).toHaveBeenCalledWith("co-1", { force: false, lockWaitMs: 10_000 });
     await client().delete({ kind: "repository", id: "repo-1", force: true });
-    expect(deleteRepository).toHaveBeenCalledWith("repo-1", { force: true });
+    expect(deleteRepository).toHaveBeenCalledWith("repo-1", { force: true, lockWaitMs: 10_000 });
   });
 
   it("maps a leased checkout to CONFLICT", async () => {

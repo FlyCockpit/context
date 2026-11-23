@@ -36,13 +36,16 @@ import {
   type RunActivityEvent,
   type RunEvent,
   type RunEventBus,
+  type RunFailure,
   type RunKind,
   type RunPhase,
+  type RunPhaseDetail,
   type RunStatus,
   type RunUsageView,
   runActivity,
   runEvents,
 } from "./events";
+import { runFailureFrom } from "./failure";
 import { historyFromTurns, messageText } from "./history";
 import { MemoryResultStore } from "./result-store";
 import { RunScheduler } from "./scheduler";
@@ -51,6 +54,7 @@ import type {
   CheckoutForRun,
   ConversationForRun,
   ConversationOrigin,
+  ConversationUpdate,
   PackageForRun,
   RunStore,
   RunTrigger,
@@ -179,6 +183,8 @@ export interface LiveConversationState {
     parentRunId: string | null;
     kind: RunKind;
     phase: RunPhase;
+    /** What a `resolving` run's git work is doing (cloning or fetching). */
+    phaseDetail: RunPhaseDetail | null;
     iterations: number;
     usage: RunUsageView;
     /** The in-flight assistant message, if one is streaming. */
@@ -196,6 +202,32 @@ export interface RunEngine {
    */
   assertCanStart(ownerId: string): void;
   startConversation(input: StartConversationInput): Promise<StartedConversation>;
+  /**
+   * The web's start: open the conversation at once (unresolved) and register
+   * its first run, which resolves the version in its `resolving` phase. The
+   * clone or fetch belongs to the run, not to the request, so it survives the
+   * browser closing and is stopped with the run (docs/deploy.md § Home server
+   * behind a Cloudflare Tunnel).
+   */
+  openConversation(input: Omit<StartConversationInput, "signal">): Promise<StartedRun>;
+  /**
+   * Ask the latest main run's question again when that run never reached the
+   * agent (it failed, was stopped or was interrupted while resolving,
+   * preparing or queued). While the conversation is unresolved, `version` or
+   * `ref` (at most one) may replace the target, e.g. a nearest tag.
+   */
+  retryConversation(input: {
+    ownerId: string;
+    conversationId: string;
+    version?: string | null;
+    ref?: string | null;
+  }): Promise<StartedRun>;
+  /**
+   * The periodic stale-run sweep: queued/running rows older than `graceMs`
+   * that no live run in this process owns become interrupted (normally only
+   * boot recovery finds those). Returns how many moved.
+   */
+  sweepStaleRuns(graceMs: number): Promise<number>;
   /** Follow-up in a conversation whose main run finished (`trigger: web_message`). */
   sendMessage(input: {
     ownerId: string;
@@ -293,6 +325,7 @@ type LiveRun = {
   abort: AbortController;
   steering: SteeringQueue | null;
   phase: RunPhase;
+  phaseDetail: RunPhaseDetail | null;
   usage: AgentUsage;
   iterations: number;
   /** In-flight assistant messages by run id (the run itself and its helpers). */
@@ -421,6 +454,7 @@ function parseRepoMap(value: unknown): RepoMap | null {
 /** Which bus events a live list hears about (deltas and turns are too chatty and say nothing a row shows). */
 const ACTIVITY_CHANGE: Partial<Record<RunEvent["type"], RunActivityEvent["change"]>> = {
   "run.phase": "phase",
+  "conversation.resolved": "phase",
   "run.started": "started",
   "run.progress": "progress",
   "helper.started": "helper",
@@ -513,7 +547,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       if (
         run.ownerId === ownerId &&
         run.kind === "main" &&
-        (run.phase === "preparing" || run.phase === "queued")
+        (run.phase === "resolving" || run.phase === "preparing" || run.phase === "queued")
       ) {
         waiting += 1;
       }
@@ -664,9 +698,15 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
     if (stopping) throw new RunEngineError("ENGINE_STOPPED", "The server is shutting down.");
   }
 
-  function setPhase(run: LiveRun, phase: RunPhase): void {
+  function setPhase(run: LiveRun, phase: RunPhase, detail: RunPhaseDetail | null = null): void {
     run.phase = phase;
-    publish(run.conversationId, { type: "run.phase", runId: run.runId, phase });
+    run.phaseDetail = detail;
+    publish(run.conversationId, {
+      type: "run.phase",
+      runId: run.runId,
+      phase,
+      ...(detail ? { detail } : {}),
+    });
   }
 
   function exploreModelOptions(models: { apiKey: string; model: string; helperModel: string }) {
@@ -687,6 +727,77 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
   // -------------------------------------------------------------------------
   // Checkout preparation: lease first, then make sure the worktree exists.
   // -------------------------------------------------------------------------
+
+  /**
+   * Resolve an unresolved conversation's requested version or ref (cloning or
+   * fetching as needed, with clone/fetch progress on the run's phase), then
+   * save the commit and its checkout row on the conversation. A resolution
+   * error is a result, not a throw: the run ends `failed` / `resolve-failed`
+   * with a client-safe `failure`.
+   */
+  async function resolveConversationTarget(
+    run: LiveRun,
+    conversation: ConversationForRun,
+    created: PackageForRun | null,
+    signal: AbortSignal,
+  ): Promise<
+    { ok: true } | { ok: false; stopReason: string; error: string; failure: RunFailure | null }
+  > {
+    const pkg =
+      created ??
+      (conversation.packageId
+        ? await store.loadPackage(conversation.ownerId, conversation.packageId)
+        : null);
+    if (!pkg) {
+      return {
+        ok: false,
+        stopReason: "package-deleted",
+        error: "The package was deleted before its version resolved.",
+        failure: null,
+      };
+    }
+    let target: Awaited<ReturnType<typeof deps.repos.resolveTarget>>;
+    try {
+      target = await deps.repos.resolveTarget({
+        package: pkg,
+        version: conversation.requestedVersion,
+        ref: conversation.requestedRef,
+        signal,
+        onProgress: (step) => {
+          if (!signal.aborted) setPhase(run, "resolving", step);
+        },
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        stopReason: "resolve-failed",
+        error: isRepoError(error) ? `${error.code}: ${error.message}` : errorText(error),
+        failure: runFailureFrom(error),
+      };
+    }
+    const checkoutId = await store.upsertCheckout(
+      target.repositoryId,
+      target.sha,
+      target.resolvedFrom,
+    );
+    const update: ConversationUpdate = {
+      checkoutId,
+      commitSha: target.sha,
+      resolvedFrom: target.resolvedFrom,
+    };
+    await store.updateConversation(conversation.id, update);
+    conversation.checkoutId = checkoutId;
+    conversation.commitSha = target.sha;
+    conversation.resolvedFrom = target.resolvedFrom;
+    publish(conversation.id, {
+      type: "conversation.resolved",
+      runId: run.runId,
+      commitSha: target.sha,
+      resolvedFrom: target.resolvedFrom,
+      stale: target.stale,
+    });
+    return { ok: true };
+  }
 
   /** Re-create a pruned checkout row from the conversation's commit. */
   async function recreateCheckoutRow(conversation: ConversationForRun, signal: AbortSignal) {
@@ -831,6 +942,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       abort: new AbortController(),
       steering: kind === "main" ? new SteeringQueue() : null,
       phase: "preparing",
+      phaseDetail: null,
       usage: ZERO,
       iterations: 0,
       partials: new Map(),
@@ -1142,7 +1254,12 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
      */
     const finish = async (
       status: RunStatus,
-      fields: { answer?: string | null; stopReason?: string | null; error?: string | null },
+      fields: {
+        answer?: string | null;
+        stopReason?: string | null;
+        error?: string | null;
+        failure?: RunFailure | null;
+      },
       ownUsage: AgentUsage = run.usage,
       iterations = run.iterations,
       fallback = false,
@@ -1172,6 +1289,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
         iterations,
         ...usageColumns(usage),
         finishedAt: now(),
+        ...(fields.failure ? { failure: fields.failure } : {}),
       };
       if (!fallback) {
         await store.updateRun(run.runId, data);
@@ -1194,6 +1312,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
         stopReason: snapshot.stopReason,
         answer: snapshot.answer,
         error: snapshot.error,
+        failure: fields.failure ?? null,
       });
       return snapshot;
     };
@@ -1225,11 +1344,30 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
 
     try {
       // 1. The checkout (re-created when pruned), leased before it is touched.
-      setPhase(run, "preparing");
+      setPhase(run, conversation.commitSha ? "preparing" : "resolving");
       try {
         releasePrep = await preparer.acquire(conversation.ownerId, signal);
       } catch {
         return await endAborted();
+      }
+      // 0. A web conversation's version, resolved here (not in the request
+      // that opened it), under the same preparation cap.
+      if (!conversation.commitSha) {
+        const resolved = await resolveConversationTarget(
+          run,
+          conversation,
+          input.created?.pkg ?? null,
+          signal,
+        );
+        if (signal.aborted) return await endAborted();
+        if (!resolved.ok) {
+          return await finish("failed", {
+            stopReason: resolved.stopReason,
+            error: resolved.error,
+            failure: resolved.failure,
+          });
+        }
+        setPhase(run, "preparing");
       }
       let prepared: Awaited<ReturnType<typeof leaseCheckout>>;
       try {
@@ -2028,6 +2166,148 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       }
     },
 
+    async openConversation(input) {
+      requireRunning();
+      requireModel();
+      requireQueueRoom(input.ownerId);
+      const pkg = await store.loadPackage(input.ownerId, input.packageId);
+      if (!pkg) throw new RunEngineError("PACKAGE_NOT_FOUND", "Package not found.");
+      requireRunning();
+      const releaseQueueRoom = reserveQueueRoom(input.ownerId);
+      try {
+        const conversation = await store.createConversation({
+          ownerId: input.ownerId,
+          packageId: pkg.id,
+          packageIdentifier: pkg.identifier,
+          requestedVersion: input.version ?? null,
+          requestedRef: input.ref ?? null,
+          // Unresolved: the first run resolves it (phase `resolving`).
+          checkoutId: null,
+          commitSha: null,
+          resolvedFrom: null,
+          origin: input.origin,
+          mcpAgentTokenId: input.origin === "mcp" ? (input.mcp?.agentTokenId ?? null) : null,
+          mcpGrantId: input.origin === "mcp" ? (input.mcp?.grantId ?? null) : null,
+          mcpConnectionLabel: input.origin === "mcp" ? (input.mcp?.label ?? null) : null,
+          title: titleFrom(input.text) || pkg.identifier,
+        });
+        return await launchMainRun({
+          conversation,
+          trigger: input.origin === "mcp" ? "mcp_query" : "web_message",
+          text: input.text,
+          history: [],
+          created: { pkg },
+        });
+      } finally {
+        releaseQueueRoom();
+      }
+    },
+
+    async retryConversation(input) {
+      requireRunning();
+      requireModel();
+      const conversation = await store.loadConversation(input.ownerId, input.conversationId);
+      if (!conversation) {
+        throw new RunEngineError("CONVERSATION_NOT_FOUND", "Conversation not found.");
+      }
+      const latest = await store.latestMainRun(conversation.id);
+      // No await between this check and the reservation below.
+      if (
+        liveMain.has(conversation.id) ||
+        startingFollowUps.has(conversation.id) ||
+        (latest && !TERMINAL.has(latest.status))
+      ) {
+        throw new RunEngineError(
+          "RUN_ACTIVE",
+          "The agent is still working on this conversation; steer it instead.",
+        );
+      }
+      if (!latest || latest.status === "completed" || latest.startedAt !== null) {
+        throw new RunEngineError(
+          "NOT_RETRYABLE",
+          "Only a question that never reached the agent can be asked again; send a follow-up instead.",
+        );
+      }
+      const retarget = input.version != null || input.ref != null;
+      if (retarget && conversation.commitSha) {
+        throw new RunEngineError(
+          "NOT_RETRYABLE",
+          "This conversation's version is already resolved; start a new conversation for another one.",
+        );
+      }
+      const releaseQueueRoom = reserveQueueRoom(conversation.ownerId);
+      startingFollowUps.add(conversation.id);
+      try {
+        const text = await store.loadRunQuestion(latest.id);
+        if (!text) {
+          throw new RunEngineError("NOT_RETRYABLE", "That question was not saved; ask it again.");
+        }
+        if (retarget) {
+          const target = {
+            requestedVersion: input.version ?? null,
+            requestedRef: input.ref ?? null,
+          };
+          await store.updateConversation(conversation.id, target);
+          Object.assign(conversation, target);
+        }
+        // The failed attempt stays in the transcript but not in the history
+        // (no run that never reached the agent is): it is asked again now.
+        const history = historyFromTurns(await store.listHistoryTurns(conversation.id));
+        const resultStore = new MemoryResultStore();
+        await pruneAgentMessages(history, resultStore, { lastDispatchAt: 0 });
+        const started = await launchMainRun({
+          conversation,
+          trigger: "web_message",
+          text,
+          history,
+          resultStore,
+        });
+        if (retarget) {
+          // An open view shows the new target (its header, and what Try again asks about).
+          publish(conversation.id, {
+            type: "conversation.retargeted",
+            runId: started.runId,
+            requestedVersion: conversation.requestedVersion,
+            requestedRef: conversation.requestedRef,
+          });
+        }
+        return started;
+      } finally {
+        startingFollowUps.delete(conversation.id);
+        releaseQueueRoom();
+      }
+    },
+
+    async sweepStaleRuns(graceMs) {
+      const at = now();
+      // Live main and summary runs, and every helper still executing (one can
+      // outlive its main run's finish).
+      const liveIds = [...live.keys(), ...helperWriters.keys()];
+      const swept = await store.interruptStaleRuns(at, new Date(at.getTime() - graceMs), liveIds);
+      for (const run of swept) {
+        if (!run.conversationId) continue;
+        // An open live view would otherwise show it working until it reconnects.
+        bus.publish(run.conversationId, {
+          type: "run.finished",
+          runId: run.id,
+          ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}),
+          status: "interrupted",
+          stopReason: "interrupted",
+          answer: null,
+          error: null,
+          failure: null,
+        });
+        if (run.kind === "main") {
+          activity.publish(run.ownerId, {
+            conversationId: run.conversationId,
+            runId: run.id,
+            change: "finished",
+          });
+        }
+      }
+      return swept.length;
+    },
+
     async sendMessage(input) {
       requireRunning();
       requireModel();
@@ -2153,6 +2433,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
         parentRunId: null,
         kind: "main",
         phase: main.phase,
+        phaseDetail: main.phaseDetail,
         iterations: main.iterations,
         usage: usageView(liveUsage(main)),
         partial: main.partials.get(main.runId) ?? null,
@@ -2164,6 +2445,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           parentRunId: main.runId,
           kind: "helper",
           phase: "running",
+          phaseDetail: null,
           iterations: helper.iterations,
           usage: usageView(helper.usage),
           partial: main.partials.get(helperRunId) ?? null,

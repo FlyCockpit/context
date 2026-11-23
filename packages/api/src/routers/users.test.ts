@@ -35,7 +35,18 @@ vi.mock("@cockpit-context/runs", () => ({
 vi.mock("@cockpit-context/runs/answer-reuse", () => ({
   invalidateAnswersForOwner: invalidateAnswers,
 }));
-vi.mock("@cockpit-context/repos", () => ({ deleteRepository: deleteRepo }));
+vi.mock("@cockpit-context/repos", async () => {
+  const errors = await import("@cockpit-context/repos/errors");
+  return {
+    deleteRepository: deleteRepo,
+    REQUEST_LOCK_WAIT_MS: 10_000,
+    RepoError: errors.RepoError,
+    isRepoError: errors.isRepoError,
+    snapshotRefMissing: vi.fn(),
+    cloneRepository: vi.fn(),
+    updateSnapshotRepository: vi.fn(),
+  };
+});
 
 vi.mock("@cockpit-context/auth", () => {
   const authContext = {
@@ -712,7 +723,7 @@ describe("usersRouter", () => {
         userId: "other-user-id",
       });
       expect(runStop).toHaveBeenCalledExactlyOnceWith("other-user-id");
-      expect(deleteRepo).toHaveBeenCalledWith("private-1", { force: true });
+      expect(deleteRepo).toHaveBeenCalledWith("private-1", { force: true, lockWaitMs: 10_000 });
       expect(deleteRepo.mock.invocationCallOrder[0]).toBeLessThan(
         db.user.delete.mock.invocationCallOrder[0],
       );
@@ -728,7 +739,7 @@ describe("usersRouter", () => {
       );
       db.repository.findMany.mockResolvedValue([{ id: "private-1" }]);
       await cleanupBeforeUserDeletion("other-user-id");
-      expect(deleteRepo).toHaveBeenCalledWith("private-1", { force: true });
+      expect(deleteRepo).toHaveBeenCalledWith("private-1", { force: true, lockWaitMs: 10_000 });
       expect(db.user.delete).not.toHaveBeenCalled();
     });
 
@@ -977,15 +988,26 @@ describe("usersRouter", () => {
         },
       );
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      const [a, b] = await Promise.all([
-        client.passwordLink({ userId: "other-user-id" }),
-        client.passwordLink({ userId: "other-user-id" }),
-      ]);
-      expect(a.emailSent).toBe(false);
-      expect(b.emailSent).toBe(false);
+      // The second is refused at once (CONFLICT / PASSWORD_LINK_BUSY), never
+      // queued behind the first's mail budget; one link is issued.
+      const first = client.passwordLink({ userId: "other-user-id" });
+      const second = client.passwordLink({ userId: "other-user-id" }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await expect(first).resolves.toMatchObject({ emailSent: false });
+      expect(await second).toMatchObject({
+        code: "CONFLICT",
+        data: { reason: "PASSWORD_LINK_BUSY" },
+      });
       const live = [...rows.keys()].filter((id) => id.startsWith("reset-password:"));
       expect(live).toHaveLength(1);
-      expect(createVerificationValue).toHaveBeenCalledTimes(2);
+      expect(createVerificationValue).toHaveBeenCalledTimes(1);
+      // Free again once the first finished.
+      await expect(client.passwordLink({ userId: "other-user-id" })).resolves.toMatchObject({
+        emailSent: false,
+      });
+      expect([...rows.keys()].filter((id) => id.startsWith("reset-password:"))).toHaveLength(1);
     });
   });
 });

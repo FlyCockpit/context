@@ -1,16 +1,18 @@
 import prisma, { type Prisma } from "@cockpit-context/db";
+import { enqueueJob } from "@cockpit-context/jobs";
 import {
-  createSnapshotRepository,
+  createSnapshotRepositoryRow,
   deleteRepository,
   importSshKey,
   lookupRegistry,
   normalizeImportedPrivateKey,
+  REQUEST_LOCK_WAIT_MS,
   safeSnapshotError,
   snapshotRefMissing,
   toStoredEcosystem,
-  updateSnapshotRepository,
   validateRemoteUrl,
 } from "@cockpit-context/repos";
+import { fetchRepositoryJob } from "@cockpit-context/repos/jobs";
 import { z } from "zod";
 
 import { protectedProcedure } from "../index";
@@ -35,6 +37,13 @@ import {
 } from "../lib/packages";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
 import { entityId, longText, shortText } from "../lib/schemas";
+import {
+  cancelSnapshotSync,
+  type SnapshotSyncKind,
+  startSnapshotSync,
+  withSnapshotPackageGate,
+  withSnapshotTasksClosed,
+} from "../lib/snapshot-tasks";
 import { consumeKeyWriteBudget, pastedSshKeySchema } from "../lib/ssh-key-input";
 
 /**
@@ -191,21 +200,39 @@ export const packagesRouter = {
           data.repositoryId = null;
         }
       }
-      const write = async (db: Prisma.TransactionClient | typeof prisma) => {
+      const write = async (
+        db: Prisma.TransactionClient | typeof prisma,
+        repositoryId = current.repositoryId,
+      ) => {
         const { count } = await db.package.updateMany({ where: { id: current.id, ownerId }, data });
         if (count === 0) throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
-        if (current.isSnapshot && current.repositoryId && data.isSnapshot === false) {
+        if (current.isSnapshot && repositoryId && data.isSnapshot === false) {
           await db.repository.updateMany({
-            where: { id: current.repositoryId, ownerId, isSnapshot: true },
+            where: { id: repositoryId, ownerId, isSnapshot: true },
             data: {
               isSnapshot: false,
               sshKeyId: typeof data.sshKeyId === "string" ? data.sshKeyId : null,
+              snapshotSyncStatus: "NONE",
+              snapshotSyncError: null,
             },
           });
         }
       };
-      if (current.isSnapshot && data.isSnapshot === false) await prisma.$transaction(write);
-      else await write(prisma);
+      if (current.isSnapshot && data.isSnapshot === false) {
+        // No pasted-key task may go on (or start) for a package that is no
+        // longer a snapshot: serialized with re-keys, on the repository the
+        // package has now (a concurrent re-key may have attached a new one).
+        await withSnapshotPackageGate(current.id, async () => {
+          const fresh = await prisma.package.findFirst({
+            where: { id: current.id, ownerId },
+            select: { repositoryId: true },
+          });
+          if (!fresh) throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
+          await withSnapshotTasksClosed(fresh.repositoryId, () =>
+            prisma.$transaction((tx) => write(tx, fresh.repositoryId)),
+          );
+        });
+      } else await write(prisma);
       forgetPackageReuse(current.id);
       const row = await findOwnedOrThrow({
         find: (args) => prisma.package.findFirst(args),
@@ -216,7 +243,15 @@ export const packagesRouter = {
       return { ...serializePackage(row), ...serializeRecentCheckouts(row), notes: row.notes };
     }),
 
-  /** Pasted credentials stay in this request; no job or secret-bearing row is created. */
+  /**
+   * Re-key a snapshot package (pasted credentials). Answers at once: the
+   * pasted key lives only in the background task's memory (never in a job or
+   * any row) while it clones or refreshes, and the package shows the
+   * progress and outcome (`repository.snapshotSync`). A second call while one
+   * runs joins it. With `save`, the key is stored and the package becomes an
+   * ordinary SSH package: its repository is then fetched by a normal,
+   * durable job.
+   */
   updateSnapshot: protectedProcedure
     .input(z.object({ id: entityId, key: pastedSshKeySchema }))
     .handler(async ({ input, context }) => {
@@ -232,8 +267,8 @@ export const packagesRouter = {
       });
       await consumePackageWriteBudget(`user:${ownerId}`);
       await consumeKeyWriteBudget(`user:${ownerId}`);
-      const result = await withDomainErrors(async () => {
-        let unlinkedRepositoryId: string | undefined;
+      return withDomainErrors(async () => {
+        let createdRepositoryId: string | undefined;
         try {
           await validateRemoteUrl(current.gitUrl);
           const key = input.key;
@@ -249,58 +284,112 @@ export const packagesRouter = {
                 passphrase: key.passphrase,
               })
             : null;
-          const repo = current.repositoryId
-            ? await updateSnapshotRepository(current.repositoryId, ownerId, normalized.privateKey)
-            : await createSnapshotRepository(
-                { gitUrl: current.gitUrl, ownerId },
-                normalized.privateKey,
-              );
-          if (!current.repositoryId) unlinkedRepositoryId = repo.id;
-          await prisma.$transaction(async (tx) => {
-            const { count } = await tx.package.updateMany({
-              where: {
-                id: current.id,
-                ownerId,
-                isSnapshot: true,
-                repositoryId: current.repositoryId,
-              },
-              data: {
-                repositoryId: repo.id,
-                ...(saved ? { isSnapshot: false, sshKeyId: saved.id } : {}),
-              },
+          // Serialized per package, on the repository it has NOW: a concurrent
+          // re-key or conversion may have attached or converted one meanwhile.
+          return await withSnapshotPackageGate(current.id, async () => {
+            const fresh = await prisma.package.findFirst({
+              where: { id: current.id, ownerId, isSnapshot: true },
+              select: { repositoryId: true },
             });
-            if (count === 0) throw snapshotRefMissing();
-            if (saved)
-              await tx.repository.updateMany({
-                where: { id: repo.id, ownerId },
-                data: { isSnapshot: false, sshKeyId: saved.id },
+            if (!fresh) throw snapshotRefMissing();
+            if (saved) {
+              const repositoryIdNow = fresh.repositoryId;
+              // No pasted-key task may go on (or start) once the key is saved.
+              await withSnapshotTasksClosed(repositoryIdNow, () =>
+                prisma.$transaction(async (tx) => {
+                  const { count } = await tx.package.updateMany({
+                    where: {
+                      id: current.id,
+                      ownerId,
+                      isSnapshot: true,
+                      repositoryId: repositoryIdNow,
+                    },
+                    data: { isSnapshot: false, sshKeyId: saved.id },
+                  });
+                  if (count === 0) throw snapshotRefMissing();
+                  if (repositoryIdNow)
+                    await tx.repository.updateMany({
+                      where: { id: repositoryIdNow, ownerId },
+                      data: {
+                        isSnapshot: false,
+                        sshKeyId: saved.id,
+                        snapshotSyncStatus: "NONE",
+                        snapshotSyncError: null,
+                      },
+                    });
+                }),
+              );
+              if (repositoryIdNow) {
+                const slot = Math.floor(Date.now() / 60_000);
+                await enqueueJob(
+                  fetchRepositoryJob,
+                  { repositoryId: repositoryIdNow, mode: "default" },
+                  { dedupeKey: `repository.fetch:${repositoryIdNow}:rekey:${slot}` },
+                );
+              }
+              forgetPackageReuse(current.id);
+              return { ok: true as const, syncing: Boolean(repositoryIdNow) };
+            }
+            let repositoryId = fresh.repositoryId;
+            let kind: SnapshotSyncKind = "refresh";
+            if (!repositoryId) {
+              const repo = await createSnapshotRepositoryRow({ gitUrl: current.gitUrl, ownerId });
+              createdRepositoryId = repo.id;
+              const { count } = await prisma.package.updateMany({
+                where: { id: current.id, ownerId, isSnapshot: true, repositoryId: null },
+                data: { repositoryId: repo.id },
               });
+              if (count === 0) throw snapshotRefMissing();
+              createdRepositoryId = undefined;
+              repositoryId = repo.id;
+              kind = "clone";
+            }
+            await startSnapshotSync({
+              repositoryId,
+              ownerId,
+              privateKey: normalized.privateKey,
+              kind,
+              onSynced: () => forgetPackageReuse(current.id),
+            });
+            return { ok: true as const, syncing: true };
           });
-          unlinkedRepositoryId = undefined;
-          forgetPackageReuse(current.id);
-          return { ok: true as const };
         } catch (error) {
-          if (unlinkedRepositoryId) await deleteRepository(unlinkedRepositoryId).catch(() => {});
+          if (createdRepositoryId) await deleteRepository(createdRepositoryId).catch(() => {});
           throw safeSnapshotError(error);
         }
       });
-      return result;
     }),
 
+  /**
+   * Delete a package. A snapshot's own clone goes with it: its background
+   * clone or refresh is cancelled first, and the repository lock is waited
+   * for at most REQUEST_LOCK_WAIT_MS (then CONFLICT / REPOSITORY_BUSY).
+   */
   delete: protectedProcedure
     .input(z.object({ id: entityId }))
     .handler(async ({ input, context }) => {
       const ownerId = context.session.user.id;
-      const snapshot = await prisma.package.findFirst({
-        where: { id: input.id, ownerId, isSnapshot: true },
-        select: { repositoryId: true },
+      // Serialized with re-keys: a concurrent one cannot attach (and start
+      // cloning) a replacement snapshot this delete would then miss.
+      await withSnapshotPackageGate(input.id, async () => {
+        const snapshot = await prisma.package.findFirst({
+          where: { id: input.id, ownerId, isSnapshot: true },
+          select: { repositoryId: true },
+        });
+        if (snapshot?.repositoryId) {
+          const repositoryId = snapshot.repositoryId;
+          // Its clone or refresh is killed; the bounded lock wait below covers
+          // the unwinding (then REPOSITORY_BUSY, and the delete can be retried).
+          cancelSnapshotSync(repositoryId);
+          await withDomainErrors(() =>
+            deleteRepository(repositoryId, { lockWaitMs: REQUEST_LOCK_WAIT_MS }),
+          );
+        }
+        // Conversations keep `packageIdentifier` (their FK is SetNull); a live
+        // run notices on its next lease renewal.
+        const { count } = await prisma.package.deleteMany({ where: { id: input.id, ownerId } });
+        if (count === 0) throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
       });
-      if (snapshot?.repositoryId)
-        await withDomainErrors(() => deleteRepository(snapshot.repositoryId!));
-      // Conversations keep `packageIdentifier` (their FK is SetNull); a live
-      // run notices on its next lease renewal.
-      const { count } = await prisma.package.deleteMany({ where: { id: input.id, ownerId } });
-      if (count === 0) throw reasonError("NOT_FOUND", "PACKAGE_NOT_FOUND", "Package not found.");
       forgetPackageReuse(input.id);
       return { ok: true as const };
     }),

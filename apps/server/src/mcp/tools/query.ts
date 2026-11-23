@@ -324,6 +324,8 @@ function waitMs(requested: number | undefined, deps: QueryDeps): number {
 }
 
 const PHASE_TEXT: Record<RunPhase, string> = {
+  // Only web conversations resolve inside their run; MCP resolves first.
+  resolving: "resolving the version",
   preparing: "checking out",
   queued: "queued, waiting for a free investigation slot",
   running: "investigating",

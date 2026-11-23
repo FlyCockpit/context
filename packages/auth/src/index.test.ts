@@ -15,6 +15,7 @@ vi.mock("@cockpit-context/env/server", () => ({
 }));
 vi.mock("@cockpit-context/mailer", () => ({
   isEmailConfigured: () => false,
+  queueEmail: vi.fn(),
   renderResetPassword: vi.fn(),
   renderTwoFactorOtp: vi.fn(),
   renderVerifyEmail: vi.fn(),

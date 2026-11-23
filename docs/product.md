@@ -24,7 +24,7 @@ Users do not share packages, notes, proposals, conversations, credentials, priva
 
 Administrators manage users, settings and storage. They can see repository storage metadata (including private URLs and owners) and remove cached repositories; they have no application permission to read other users' conversations or keys. Host and database operators control the underlying infrastructure. See the [access matrix](./access-matrix.md).
 
-Private repositories use SSH. A saved key supports refreshes; a one-time key creates a snapshot that cannot automatically fetch new refs. Private repositories are never reused across owners, including identical URLs. HTTPS credential tokens and GitHub App access are not supported private-repository mechanisms. Git hosts on private networks are refused unless the operator lists them in `COCKPIT_CONTEXT_GIT_HOST_ALLOWLIST` ([deploy § Internal git hosts](./deploy.md#internal-git-hosts)).
+Private repositories use SSH. A saved key supports refreshes; a one-time key creates a snapshot that cannot automatically fetch new refs. Its clone or refresh runs in the background with the key held in server memory only, so a restart cancels it and the key must be pasted again. Private repositories are never reused across owners, including identical URLs. HTTPS credential tokens and GitHub App access are not supported private-repository mechanisms. Git hosts on private networks are refused unless the operator lists them in `COCKPIT_CONTEXT_GIT_HOST_ALLOWLIST` ([deploy § Internal git hosts](./deploy.md#internal-git-hosts)).
 
 ## Investigations and untrusted content
 
@@ -32,7 +32,7 @@ Version/ref resolution selects a checkout and records the resolved SHA. An unres
 
 Repository files can contain prompt injection. File tools label content untrusted and enforce checkout boundaries; language servers disable dependency installation and workspace code execution and use Landlock confinement by default. These controls reduce exposure, but do not guarantee that every model answer is safe or correct. Treat source and returned answers as data: do not follow instructions embedded in them to reveal secrets, change access controls or execute unrelated commands. Review cited source and commands before acting.
 
-Main runs can be steered; helper runs can be watched. Web follow-ups remain in the web conversation and do not notify the original coding agent. An MCP retry that starts a new query creates another investigation and can incur another model charge.
+A web conversation opens at once; its first run resolves the requested version (cloning or fetching) on the server, with progress in the conversation, and a question that never reached the agent (the version did not resolve, or it was stopped or interrupted first) can be asked again. Main runs can be steered; helper runs can be watched. Web follow-ups remain in the web conversation and do not notify the original coding agent. An MCP retry that starts a new query creates another investigation and can incur another model charge.
 
 ## Limits
 

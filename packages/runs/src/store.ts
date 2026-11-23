@@ -2,7 +2,7 @@ import type { AgentMessagePart } from "@cockpit-context/agent-runtime";
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { withRepositoryLock } from "@cockpit-context/repos";
 
-import type { RunKind, RunStatus, TurnRole } from "./events";
+import type { RunFailure, RunKind, RunStatus, TurnRole } from "./events";
 import { summarizeCheckoutJob } from "./job-definitions";
 
 /**
@@ -52,14 +52,35 @@ export interface NewConversation {
   packageIdentifier: string;
   requestedVersion: string | null;
   requestedRef: string | null;
-  checkoutId: string;
-  commitSha: string;
-  resolvedFrom: string;
+  /** Null (with `commitSha` and `resolvedFrom`) when the first run resolves the version. */
+  checkoutId: string | null;
+  commitSha: string | null;
+  resolvedFrom: string | null;
   origin: ConversationOrigin;
   mcpAgentTokenId: string | null;
   mcpGrantId: string | null;
   mcpConnectionLabel: string | null;
   title: string;
+}
+
+/** A run the stale sweep interrupted. */
+export interface StaleRun {
+  id: string;
+  ownerId: string;
+  conversationId: string | null;
+  parentRunId: string | null;
+  kind: RunKind;
+}
+
+export interface ConversationUpdate {
+  checkoutId?: string;
+  lastActivityAt?: Date;
+  /** Set together once the version resolved inside the first run. */
+  commitSha?: string;
+  resolvedFrom?: string;
+  /** A retry with another target (only while unresolved). */
+  requestedVersion?: string | null;
+  requestedRef?: string | null;
 }
 
 export interface NewRun {
@@ -91,6 +112,8 @@ export interface RunUpdate {
   startedAt?: Date;
   finishedAt?: Date;
   answer?: string | null;
+  /** Set once, by a run that failed before the agent started. */
+  failure?: RunFailure;
 }
 
 export interface NewTurn {
@@ -145,12 +168,13 @@ export interface RunStore {
   loadPackage(ownerId: string, packageId: string): Promise<PackageForRun | null>;
   createConversation(data: NewConversation): Promise<ConversationForRun>;
   loadConversation(ownerId: string, conversationId: string): Promise<ConversationForRun | null>;
-  /** The conversation's newest MAIN run, if any. */
-  latestMainRun(conversationId: string): Promise<{ id: string; status: RunStatus } | null>;
-  updateConversation(
+  /** The conversation's newest MAIN run, if any. `startedAt` is null until the agent ran. */
+  latestMainRun(
     conversationId: string,
-    data: { checkoutId?: string; lastActivityAt?: Date },
-  ): Promise<void>;
+  ): Promise<{ id: string; status: RunStatus; startedAt: Date | null } | null>;
+  updateConversation(conversationId: string, data: ConversationUpdate): Promise<void>;
+  /** The question a run was started with (its first, non-steering USER turn), or null. */
+  loadRunQuestion(runId: string): Promise<string | null>;
   createRun(data: NewRun): Promise<{ id: string }>;
   updateRun(runId: string, data: RunUpdate): Promise<void>;
   /**
@@ -178,7 +202,9 @@ export interface RunStore {
   getRun(ownerId: string, runId: string): Promise<RunRecord | null>;
   insertTurn(turn: NewTurn): Promise<void>;
   /**
-   * Turns of the conversation's finished MAIN runs, oldest run first, by seq.
+   * Turns of the conversation's finished MAIN runs that reached the agent
+   * (`startedAt` set: a question that never did, e.g. its version did not
+   * resolve, is no history; a retry asks it again), oldest run first, by seq.
    * Capped at the newest {@link MAX_HISTORY_TURNS}: a follow-up needs the
    * latest turns most, and `historyFromTurns` drops a tool result whose call
    * fell outside the cap.
@@ -218,6 +244,19 @@ export interface RunStore {
    * reads the checkout requests it again.
    */
   interruptOrphanRuns(finishedAt: Date, liveRunIds: string[]): Promise<number>;
+  /**
+   * The periodic sweep: like `interruptOrphanRuns`, but only for runs created
+   * before `createdBefore` (a run being created right now is not live yet),
+   * never a helper of a live run (`liveRunIds` holds live main and summary
+   * runs and executing helpers), and only those runs' leases. Catches a row
+   * whose own terminal writes all failed, without waiting for a restart.
+   * Returns the runs it moved, so the engine can tell live views.
+   */
+  interruptStaleRuns(
+    finishedAt: Date,
+    createdBefore: Date,
+    liveRunIds: string[],
+  ): Promise<StaleRun[]>;
   /**
    * Recovery, after `interruptOrphanRuns`: every PENDING summary that nothing
    * will finish (no queued/running SUMMARY run, and no `checkout.summarize`
@@ -373,6 +412,28 @@ function isForeignKeyViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "P2003";
 }
 
+/** Most stale runs one periodic sweep closes. */
+const STALE_SWEEP_BATCH = 500;
+
+/** A RunUpdate as Prisma data (the stored status spelling, the failure as JSON). */
+function runUpdateData(data: RunUpdate): Prisma.AgentRunUpdateManyMutationInput {
+  const { status, failure, ...rest } = data;
+  return {
+    ...rest,
+    ...(status ? { status: toDbStatus(status) } : {}),
+    ...(failure ? { failure: failureJson(failure) } : {}),
+  };
+}
+
+function failureJson(failure: RunFailure): Prisma.InputJsonObject {
+  return {
+    reason: failure.reason,
+    ...(failure.nearestTags ? { nearestTags: [...failure.nearestTags] } : {}),
+    ...(failure.host ? { host: failure.host } : {}),
+    ...(failure.port ? { port: failure.port } : {}),
+  };
+}
+
 export const prismaRunStore: RunStore = {
   async loadPackage(ownerId, packageId) {
     return prisma.package.findFirst({ where: { id: packageId, ownerId }, select: packageSelect });
@@ -410,9 +471,23 @@ export const prismaRunStore: RunStore = {
     const row = await prisma.agentRun.findFirst({
       where: { conversationId, kind: "MAIN" },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true, status: true },
+      select: { id: true, status: true, startedAt: true },
     });
-    return row ? { id: row.id, status: fromDbStatus(row.status) } : null;
+    return row ? { id: row.id, status: fromDbStatus(row.status), startedAt: row.startedAt } : null;
+  },
+
+  async loadRunQuestion(runId) {
+    const turn = await prisma.runTurn.findFirst({
+      where: { runId, role: "USER", steering: false },
+      orderBy: { seq: "asc" },
+      select: { parts: true },
+    });
+    if (!turn) return null;
+    const text = partsFromJson(turn.parts)
+      .flatMap((part) => (part.type === "text" ? [part.content] : []))
+      .join("")
+      .trim();
+    return text || null;
   },
 
   async updateConversation(conversationId, data) {
@@ -447,19 +522,17 @@ export const prismaRunStore: RunStore = {
   },
 
   async updateRun(runId, data) {
-    const { status, ...rest } = data;
     await prisma.agentRun.update({
       where: { id: runId },
-      data: { ...rest, ...(status ? { status: toDbStatus(status) } : {}) },
+      data: runUpdateData(data),
       select: { id: true },
     });
   },
 
   async finishRunIfActive(runId, data) {
-    const { status, ...rest } = data;
     const { count } = await prisma.agentRun.updateMany({
       where: { id: runId, status: { in: ACTIVE } },
-      data: { ...rest, ...(status ? { status: toDbStatus(status) } : {}) },
+      data: runUpdateData(data),
     });
     return count > 0;
   },
@@ -507,7 +580,14 @@ export const prismaRunStore: RunStore = {
   async listHistoryTurns(conversationId) {
     // Newest first so the cap drops the oldest turns, then back to oldest first.
     const rows = await prisma.runTurn.findMany({
-      where: { AgentRun: { conversationId, kind: "MAIN", status: { notIn: ACTIVE } } },
+      where: {
+        AgentRun: {
+          conversationId,
+          kind: "MAIN",
+          status: { notIn: ACTIVE },
+          startedAt: { not: null },
+        },
+      },
       orderBy: [{ AgentRun: { createdAt: "desc" } }, { runId: "desc" }, { seq: "desc" }],
       select: { id: true, runId: true, seq: true, role: true, parts: true, steering: true },
       take: MAX_HISTORY_TURNS,
@@ -648,6 +728,53 @@ export const prismaRunStore: RunStore = {
       }),
     ]);
     return interrupted.count;
+  },
+
+  async interruptStaleRuns(finishedAt, createdBefore, liveRunIds) {
+    // pagination:audited — bounded by STALE_SWEEP_BATCH; the next sweep takes the rest.
+    const stale = await prisma.agentRun.findMany({
+      where: {
+        status: { in: ACTIVE },
+        id: { notIn: liveRunIds },
+        createdAt: { lt: createdBefore },
+        // A helper of a live run ends with it (or is in `liveRunIds` while it executes).
+        OR: [{ kind: { not: "HELPER" } }, { parentRunId: { notIn: liveRunIds } }],
+      },
+      select: { id: true, ownerId: true, conversationId: true, parentRunId: true, kind: true },
+      orderBy: { createdAt: "asc" },
+      take: STALE_SWEEP_BATCH,
+    });
+    if (stale.length === 0) return [];
+    const ids = stale.map((row) => row.id);
+    const orphan = { id: { in: ids }, status: { in: ACTIVE } };
+    const [, , interrupted] = await prisma.$transaction([
+      prisma.checkout.updateMany({
+        where: { summaryStatus: "PENDING", AgentRuns: { some: { kind: "SUMMARY", ...orphan } } },
+        data: { summaryStatus: "NONE" },
+      }),
+      prisma.checkoutLease.deleteMany({ where: { runId: { in: ids } } }),
+      prisma.agentRun.updateMany({
+        where: orphan,
+        data: {
+          status: "INTERRUPTED",
+          stopReason: "interrupted",
+          error: "The run stopped without saving its end; the stale-run sweep closed it.",
+          finishedAt,
+        },
+      }),
+    ]);
+    if (interrupted.count === 0) return [];
+    let moved = stale;
+    if (interrupted.count < stale.length) {
+      // Some finished on their own meanwhile: report only the ones this sweep closed.
+      const closed = await prisma.agentRun.findMany({
+        where: { id: { in: ids }, status: "INTERRUPTED", finishedAt },
+        select: { id: true },
+      });
+      const closedIds = new Set(closed.map((row) => row.id));
+      moved = stale.filter((row) => closedIds.has(row.id));
+    }
+    return moved.map((row) => ({ ...row, kind: fromDbKind(row.kind) }));
   },
 
   async resetOrphanSummaries() {

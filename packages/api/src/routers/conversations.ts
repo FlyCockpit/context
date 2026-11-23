@@ -1,6 +1,11 @@
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { env } from "@cockpit-context/env/server";
-import { getRunEngine, partsFromJson, type RunEvent } from "@cockpit-context/runs";
+import {
+  getRunEngine,
+  partsFromJson,
+  type RunEvent,
+  runFailureFromJson,
+} from "@cockpit-context/runs";
 import { z } from "zod";
 
 import { protectedProcedure } from "../index";
@@ -220,6 +225,7 @@ const runSelect = {
   model: true,
   focus: true,
   stopReason: true,
+  failure: true,
   iterations: true,
   startedAt: true,
   finishedAt: true,
@@ -309,6 +315,8 @@ async function loadConversationDetail(ownerId: string, conversationId: string) {
       model: run.model,
       focus: run.focus,
       stopReason: run.stopReason,
+      /** Why a run that never reached the agent failed (a RepoError code and safe details). */
+      failure: runFailureFromJson(run.failure),
       iterations: run.iterations,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
@@ -535,7 +543,13 @@ export const conversationsRouter = {
     }
   }),
 
-  /** Start a web conversation about an own package (spends model tokens). */
+  /**
+   * Start a web conversation about an own package (spends model tokens). It
+   * answers at once: the conversation opens unresolved and its first run
+   * resolves the version (cloning or fetching) in its `resolving` phase,
+   * shown live by `watch`. That work belongs to the run, so a slow first clone
+   * never holds this request open (docs/deploy.md).
+   */
   create: protectedProcedure
     .input(
       z
@@ -550,7 +564,7 @@ export const conversationsRouter = {
           path: ["ref"],
         }),
     )
-    .handler(async ({ input, context, signal }) => {
+    .handler(async ({ input, context }) => {
       const ownerId = context.session.user.id;
       await findOwnedOrThrow({
         find: (args) => prisma.package.findFirst(args),
@@ -558,21 +572,53 @@ export const conversationsRouter = {
         owner: ownerOf(context),
         notFound: "Package not found.",
       });
-      // Charged before resolution on purpose: resolving a version or ref
-      // clones or fetches from the user-named remote (outbound work), so a
-      // request that then fails (VERSION_NOT_FOUND, HOST_KEY_UNCONFIRMED)
-      // still costs its point. Otherwise unresolvable versions would be a
-      // free way to make the server fetch.
+      // Charged up front on purpose: resolving a version or ref clones or
+      // fetches from the user-named remote (outbound work), so a run that
+      // then fails (VERSION_NOT_FOUND, HOST_KEY_UNCONFIRMED) still costs its
+      // point. Otherwise unresolvable versions would be a free way to make
+      // the server fetch.
       await consumeRunBudget(`user:${ownerId}`);
       return withDomainErrors(() =>
-        getRunEngine().startConversation({
+        getRunEngine().openConversation({
           ownerId,
           packageId: input.packageId,
           text: input.text,
           version: input.version ?? null,
           ref: input.ref ?? null,
           origin: "web",
-          signal,
+        }),
+      );
+    }),
+
+  /**
+   * Ask the latest question again when its run never reached the agent
+   * (resolving or preparing failed, or it was stopped or interrupted before
+   * it started). While the conversation is unresolved, a `version` or `ref`
+   * may replace the target (e.g. a nearest tag). Costs a run point, as `send`.
+   */
+  retry: protectedProcedure
+    .input(
+      z
+        .object({
+          id: entityId,
+          version: z.string().trim().min(1).max(100).optional(),
+          ref: z.string().trim().min(1).max(250).optional(),
+        })
+        .refine((value) => !(value.version && value.ref), {
+          message: "Give a version or a ref, not both",
+          path: ["ref"],
+        }),
+    )
+    .handler(async ({ input, context }) => {
+      const ownerId = context.session.user.id;
+      const conversation = await ownedConversation(context, input.id);
+      await consumeRunBudget(`user:${ownerId}`);
+      return withDomainErrors(() =>
+        getRunEngine().retryConversation({
+          ownerId,
+          conversationId: conversation.id,
+          ...(input.version ? { version: input.version } : {}),
+          ...(input.ref ? { ref: input.ref } : {}),
         }),
       );
     }),

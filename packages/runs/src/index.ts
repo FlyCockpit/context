@@ -45,13 +45,16 @@ export {
   type RunActivityEvent,
   type RunEvent,
   type RunEventBus,
+  type RunFailure,
   type RunKind,
   type RunPhase,
+  type RunPhaseDetail,
   type RunStatus,
   type RunUsageView,
   runEvents,
   type TurnRole,
   type TurnView,
 } from "./events";
+export { runFailureFrom, runFailureFromJson } from "./failure";
 export { historyFromTurns } from "./history";
 export { type ConversationOrigin, partsFromJson, prismaRunStore, type RunStore } from "./store";

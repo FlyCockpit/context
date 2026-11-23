@@ -68,6 +68,7 @@ Public HTTPS repository clones, checkouts and generated overviews can be shared 
 | Watch own conversations' activity (live lists) | implemented | none | own | own | `conversations.activity` |  |
 | Start a web conversation about an own package | implemented | none | own | own | `conversations.create` |  |
 | Send a follow-up message in a finished conversation | implemented | none | own | own | `conversations.send` |  |
+| Retry a question that never reached the agent | implemented | none | own | own | `conversations.retry` |  |
 | Steer a running run | implemented | none | own | own | `conversations.steer` |  |
 | Stop a running run | implemented | none | own | own | `conversations.stop` |  |
 | Delete a conversation | implemented | none | own | own | `conversations.delete` |  |

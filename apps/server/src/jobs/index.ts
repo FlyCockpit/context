@@ -1,4 +1,5 @@
 import { backupFreshnessEnabled } from "@cockpit-context/api/lib/backup-freshness";
+import { sweepStaleSnapshotSyncs } from "@cockpit-context/api/lib/snapshot-tasks";
 import { env } from "@cockpit-context/env/server";
 import {
   createJobRunner,
@@ -11,7 +12,7 @@ import {
   type RegisteredJob,
   startPeriodicJob,
 } from "@cockpit-context/jobs";
-import { recoverInterruptedGitWork, sweepTmpDir } from "@cockpit-context/repos";
+import { recoverInterruptedGitWork, sweepTmpDir, sweepTrash } from "@cockpit-context/repos";
 import { pruneStorageJob } from "@cockpit-context/repos/jobs";
 import { getRunEngine, onSummaryFailure } from "@cockpit-context/runs";
 import { summarizeCheckoutJob } from "@cockpit-context/runs/jobs";
@@ -40,6 +41,11 @@ import {
 } from "./reap-expired-auth-tokens.js";
 import { fetchRepositoryHandler, pruneStorageHandler } from "./repository-jobs.js";
 import { summarizeCheckoutHandler } from "./run-jobs.js";
+import {
+  SWEEP_STALE_WORK_SCHEDULE,
+  sweepStaleWorkHandler,
+  sweepStaleWorkJob,
+} from "./sweep-stale-work.js";
 
 /**
  * Every job type this server runs. Adding a job: define it with `defineJob`,
@@ -57,6 +63,7 @@ export const SERVER_JOBS: readonly RegisteredJob[] = [
   oauthCleanupHandler,
   conversationRetentionHandler,
   notifyDataDeletionsHandler,
+  sweepStaleWorkHandler,
 ];
 
 /** Longest a shutdown waits for interrupted agent runs to save their state. */
@@ -101,6 +108,21 @@ export async function startBackgroundJobs(): Promise<BackgroundJobs> {
     .catch((error: unknown) => {
       console.warn("[jobs] could not recover interrupted clones and checkouts", error);
     });
+  // Snapshot clones/refreshes the last process was running: their pasted key
+  // died with it, so they cannot resume. The package page asks for it again.
+  await sweepStaleSnapshotSyncs(0)
+    .then((failed: number) => {
+      if (failed > 0)
+        console.log(`[snapshots] Marked ${failed} interrupted snapshot sync(s) failed.`);
+    })
+    .catch((error: unknown) => {
+      console.warn("[jobs] could not mark interrupted snapshot syncs failed", error);
+    });
+  // Deleted clones and worktrees left in trash/ (their files are removed in
+  // the background; this can take a while on a slow disk, so it is not awaited).
+  void sweepTrash().catch((error: unknown) => {
+    console.warn("[repos] could not empty the trash", error);
+  });
   // A `checkout.summarize` job succeeds once its run has started, so a summary
   // run that later fails raises its own alert, naming the run and checkout,
   // under the job type's cooldown. Interrupted summaries (shutdown) raise nothing.
@@ -143,6 +165,12 @@ export async function startBackgroundJobs(): Promise<BackgroundJobs> {
       definition: reapExpiredAuthTokensJob,
       payload: { reason: "schedule" },
       ...REAP_EXPIRED_AUTH_TOKENS_SCHEDULE,
+    }),
+    // Every 5 minutes: active runs and snapshot syncs nothing in this process owns.
+    startPeriodicJob({
+      definition: sweepStaleWorkJob,
+      payload: { reason: "schedule" },
+      ...SWEEP_STALE_WORK_SCHEDULE,
     }),
     // Hourly at :23: expired MCP OAuth tokens and abandoned registrations.
     startPeriodicJob({

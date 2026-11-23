@@ -16,8 +16,8 @@ type Fn = ReturnType<typeof vi.fn>;
 const db = prisma as unknown as {
   package: { findFirst: Fn };
   conversation: { findFirst: Fn; create: Fn };
-  agentRun: { create: Fn; update: Fn; findFirst: Fn; updateMany: Fn };
-  runTurn: { create: Fn; findMany: Fn };
+  agentRun: { create: Fn; update: Fn; findFirst: Fn; updateMany: Fn; findMany: Fn };
+  runTurn: { create: Fn; findMany: Fn; findFirst: Fn };
   checkoutLease: { upsert: Fn; deleteMany: Fn; updateMany: Fn };
   checkout: { updateMany: Fn; findFirst: Fn; findUnique: Fn };
   user: { findUnique: Fn };
@@ -131,7 +131,12 @@ describe("prismaRunStore", () => {
     ]);
     const args = db.runTurn.findMany.mock.calls[0]?.[0];
     expect(args.where).toEqual({
-      AgentRun: { conversationId: "c1", kind: "MAIN", status: { notIn: ["QUEUED", "RUNNING"] } },
+      AgentRun: {
+        conversationId: "c1",
+        kind: "MAIN",
+        status: { notIn: ["QUEUED", "RUNNING"] },
+        startedAt: { not: null },
+      },
     });
     expect(args.orderBy).toEqual([
       { AgentRun: { createdAt: "desc" } },
@@ -359,6 +364,116 @@ describe("prismaRunStore", () => {
       select: { body: true },
     });
     await expect(prismaRunStore.loadSummaryOverride("k1", "u2")).resolves.toBeNull();
+  });
+});
+
+describe("prismaRunStore: background resolution and the stale sweep", () => {
+  it("stores a run failure as JSON and leaves the column alone otherwise", async () => {
+    db.agentRun.update.mockResolvedValue({ id: "r1" });
+    await prismaRunStore.updateRun("r1", {
+      status: "failed",
+      stopReason: "resolve-failed",
+      failure: { reason: "VERSION_NOT_FOUND", nearestTags: ["v1"] },
+    });
+    expect(db.agentRun.update.mock.calls[0]?.[0].data).toEqual({
+      status: "FAILED",
+      stopReason: "resolve-failed",
+      failure: { reason: "VERSION_NOT_FOUND", nearestTags: ["v1"] },
+    });
+    await prismaRunStore.updateRun("r1", { iterations: 2 });
+    expect(db.agentRun.update.mock.calls[1]?.[0].data).toEqual({ iterations: 2 });
+  });
+
+  it("reads the latest main run's start and a run's question", async () => {
+    const startedAt = new Date("2026-11-23T00:00:00Z");
+    db.agentRun.findFirst.mockResolvedValue({ id: "r1", status: "FAILED", startedAt });
+    await expect(prismaRunStore.latestMainRun("c1")).resolves.toEqual({
+      id: "r1",
+      status: "failed",
+      startedAt,
+    });
+    db.runTurn.findFirst.mockResolvedValue({
+      parts: [
+        { type: "text", content: "How " },
+        { type: "text", content: "do I pad?" },
+      ],
+    });
+    await expect(prismaRunStore.loadRunQuestion("r1")).resolves.toBe("How do I pad?");
+    expect(db.runTurn.findFirst.mock.calls[0]?.[0].where).toEqual({
+      runId: "r1",
+      role: "USER",
+      steering: false,
+    });
+    db.runTurn.findFirst.mockResolvedValue(null);
+    await expect(prismaRunStore.loadRunQuestion("r2")).resolves.toBeNull();
+  });
+
+  it("leaves runs that never reached the agent out of the history", async () => {
+    db.runTurn.findMany.mockResolvedValue([]);
+    await prismaRunStore.listHistoryTurns("c1");
+    expect(db.runTurn.findMany.mock.calls[0]?.[0].where).toEqual({
+      AgentRun: {
+        conversationId: "c1",
+        kind: "MAIN",
+        status: { notIn: ["QUEUED", "RUNNING"] },
+        startedAt: { not: null },
+      },
+    });
+  });
+
+  it("sweeps only old, non-live MAIN and SUMMARY rows, with their leases, in one batch", async () => {
+    db.agentRun.findMany.mockResolvedValue([
+      { id: "old-1", ownerId: "u", conversationId: "c1", parentRunId: null, kind: "MAIN" },
+      { id: "old-2", ownerId: "u", conversationId: null, parentRunId: null, kind: "SUMMARY" },
+    ]);
+    db.$transaction.mockImplementation(async () => [{ count: 0 }, { count: 1 }, { count: 2 }]);
+    const cutoff = new Date("2026-11-23T00:00:00Z");
+    const at = new Date("2026-11-23T00:05:00Z");
+    await expect(prismaRunStore.interruptStaleRuns(at, cutoff, ["live-1"])).resolves.toEqual([
+      { id: "old-1", ownerId: "u", conversationId: "c1", parentRunId: null, kind: "main" },
+      { id: "old-2", ownerId: "u", conversationId: null, parentRunId: null, kind: "summary" },
+    ]);
+    expect(db.agentRun.findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        status: { in: ["QUEUED", "RUNNING"] },
+        id: { notIn: ["live-1"] },
+        createdAt: { lt: cutoff },
+        // Never a helper of a live run.
+        OR: [{ kind: { not: "HELPER" } }, { parentRunId: { notIn: ["live-1"] } }],
+      },
+      take: 500,
+    });
+    expect(db.checkoutLease.deleteMany).toHaveBeenCalledWith({
+      where: { runId: { in: ["old-1", "old-2"] } },
+    });
+    expect(db.agentRun.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["old-1", "old-2"] }, status: { in: ["QUEUED", "RUNNING"] } },
+      data: expect.objectContaining({
+        status: "INTERRUPTED",
+        stopReason: "interrupted",
+        finishedAt: at,
+      }),
+    });
+  });
+
+  it("reports only the runs this sweep closed when some finished meanwhile", async () => {
+    db.agentRun.findMany
+      .mockResolvedValueOnce([
+        { id: "old-1", ownerId: "u", conversationId: "c1", parentRunId: null, kind: "MAIN" },
+        { id: "old-2", ownerId: "u", conversationId: "c2", parentRunId: null, kind: "MAIN" },
+      ])
+      .mockResolvedValueOnce([{ id: "old-2" }]);
+    db.$transaction.mockResolvedValue([{ count: 0 }, { count: 0 }, { count: 1 }]);
+    const swept = await prismaRunStore.interruptStaleRuns(new Date(), new Date(), []);
+    expect(swept.map((run) => run.id)).toEqual(["old-2"]);
+  });
+
+  it("does nothing without stale rows", async () => {
+    db.agentRun.findMany.mockResolvedValue([]);
+    await expect(prismaRunStore.interruptStaleRuns(new Date(), new Date(), [])).resolves.toEqual(
+      [],
+    );
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 });
 

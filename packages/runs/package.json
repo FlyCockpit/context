@@ -14,6 +14,9 @@
     "./errors": {
       "default": "./src/errors.ts"
     },
+    "./failure": {
+      "default": "./src/failure.ts"
+    },
     "./answer-reuse": {
       "default": "./src/answer-reuse.ts"
     }

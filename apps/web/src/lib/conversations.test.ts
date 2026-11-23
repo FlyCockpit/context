@@ -17,6 +17,7 @@ import {
   type MessagePart,
   type RunView,
   readableToolOutput,
+  retryableRun,
   sameRuns,
   sameToolCallView,
   summarizeToolCall,
@@ -52,6 +53,7 @@ function detailRun(overrides: Partial<DetailRun> = {}): DetailRun {
     startedAt: NOW,
     finishedAt: NOW,
     answer: "It pads.",
+    failure: null,
     usage: USAGE,
     turns: [],
     ...overrides,
@@ -142,6 +144,7 @@ describe("applyWatchEvent", () => {
           parentRunId: null,
           kind: "main",
           phase: "running",
+          phaseDetail: null,
           iterations: 8,
           usage: { ...USAGE, costUsdMicros: 3000 },
           partial: null,
@@ -167,6 +170,7 @@ describe("applyWatchEvent", () => {
           parentRunId: null,
           kind: "main",
           phase: "running",
+          phaseDetail: null,
           iterations: 1,
           usage: { ...USAGE, costUsdMicros: 3000, unpricedCalls: 1 },
           partial: null,
@@ -185,6 +189,7 @@ describe("applyWatchEvent", () => {
           parentRunId: null,
           kind: "main",
           phase: "running",
+          phaseDetail: null,
           iterations: 4,
           usage: { ...USAGE, costUsdMicros: 9_000 },
           partial,
@@ -388,6 +393,10 @@ describe("tool calls", () => {
 
 describe("assignHelpers", () => {
   const helper = (id: string, helperIndex: number | null): RunView => ({
+    phaseDetail: null,
+    started: true,
+    failure: null,
+    createdAt: 0,
     id,
     parentRunId: "run-1",
     kind: "helper",
@@ -590,6 +599,10 @@ describe("render comparators", () => {
   });
 
   const helper = (id: string): RunView => ({
+    phaseDetail: null,
+    started: true,
+    failure: null,
+    createdAt: 0,
     id,
     parentRunId: "run-1",
     kind: "helper",
@@ -718,5 +731,126 @@ describe("costCertainty", () => {
   it("is a lower bound when some calls were unpriced, and unknown when none were priced", () => {
     expect(costCertainty(41_830, 1)).toBe("partial");
     expect(costCertainty(0, 3)).toBe("unknown");
+  });
+});
+
+describe("web conversations that resolve inside their first run", () => {
+  const unresolved = (runs: DetailRun[]) =>
+    detail(runs, { commitSha: null, resolvedFrom: null, checkoutAvailable: false });
+  const queuedRun = detailRun({
+    status: "queued",
+    stopReason: null,
+    answer: null,
+    startedAt: null,
+    finishedAt: null,
+    turns: [
+      { seq: 0, role: "user", parts: [text("How do I pad?")], steering: false, createdAt: NOW },
+    ],
+  });
+
+  it("follows resolving with clone/fetch detail, then the resolved commit", () => {
+    let state = fold([
+      snapshot(unresolved([queuedRun]), [
+        {
+          runId: "run-1",
+          parentRunId: null,
+          kind: "main",
+          phase: "resolving",
+          phaseDetail: "cloning",
+          iterations: 0,
+          usage: USAGE,
+          partial: null,
+        },
+      ]),
+    ]);
+    expect(state.runs[0]).toMatchObject({
+      phase: "resolving",
+      phaseDetail: "cloning",
+      started: false,
+    });
+    expect(composerMode(state)).toEqual({ kind: "disabled", reason: "resolving", live: true });
+    state = fold([
+      snapshot(unresolved([queuedRun])),
+      { type: "run.phase", runId: "run-1", phase: "resolving", detail: "fetching" },
+      {
+        type: "conversation.resolved",
+        runId: "run-1",
+        commitSha: "b".repeat(40),
+        resolvedFrom: "tag:v1.3.0",
+        stale: false,
+      },
+      { type: "run.phase", runId: "run-1", phase: "preparing" },
+    ]);
+    expect(state.conversation).toMatchObject({
+      commitSha: "b".repeat(40),
+      resolvedFrom: "tag:v1.3.0",
+      checkoutAvailable: false,
+    });
+    expect(state.runs[0]).toMatchObject({ phase: "preparing", phaseDetail: null });
+    state = applyWatchEvent(state, { type: "run.phase", runId: "run-1", phase: "queued" })!;
+    expect(state.conversation.checkoutAvailable).toBe(true);
+    state = applyWatchEvent(state, {
+      type: "run.started",
+      runId: "run-1",
+      kind: "main",
+      startedAt: NOW.toISOString(),
+    })!;
+    expect(state.runs[0]?.started).toBe(true);
+  });
+
+  it("shows the target a retry switched to", () => {
+    const state = fold([
+      snapshot(unresolved([queuedRun])),
+      {
+        type: "conversation.retargeted",
+        runId: "run-2",
+        requestedVersion: null,
+        requestedRef: "v1.3.1",
+      },
+    ]);
+    expect(state.conversation).toMatchObject({ requestedVersion: null, requestedRef: "v1.3.1" });
+  });
+
+  it("keeps a resolution failure and offers a retry, but no follow-up", () => {
+    const state = fold([
+      snapshot(unresolved([queuedRun])),
+      {
+        type: "run.finished",
+        runId: "run-1",
+        status: "failed",
+        stopReason: "resolve-failed",
+        answer: null,
+        failure: { reason: "VERSION_NOT_FOUND", nearestTags: ["v1.3.1"] },
+      },
+    ]);
+    expect(state.runs[0]?.failure).toEqual({
+      reason: "VERSION_NOT_FOUND",
+      nearestTags: ["v1.3.1"],
+    });
+    expect(retryableRun(state)?.id).toBe("run-1");
+    expect(composerMode(state)).toEqual({ kind: "disabled", reason: "retry", live: false });
+  });
+
+  it("reads the failure from saved rows, and never offers a retry once the agent started", () => {
+    const failed = detailRun({
+      status: "failed",
+      stopReason: "resolve-failed",
+      answer: null,
+      startedAt: null,
+      failure: { reason: "GIT_FAILED" },
+    });
+    const state = fold([snapshot(unresolved([failed]))]);
+    expect(state.runs[0]).toMatchObject({ started: false, failure: { reason: "GIT_FAILED" } });
+    expect(retryableRun(state)?.id).toBe("run-1");
+    // The agent ran (startedAt set), or the package is gone: no retry.
+    expect(retryableRun(fold([snapshot(detail([detailRun({ status: "failed" })]))]))).toBeNull();
+    expect(
+      retryableRun(fold([snapshot(unresolved([failed]))].map((event) => event))),
+    ).not.toBeNull();
+    expect(
+      retryableRun(fold([snapshot(detail([failed], { packageId: null, commitSha: null }))])),
+    ).toBeNull();
+    // A completed run is never retried.
+    expect(retryableRun(fold([snapshot(detail([detailRun()]))]))).toBeNull();
   });
 });

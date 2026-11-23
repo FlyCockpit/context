@@ -2,6 +2,7 @@ import prisma from "@cockpit-context/db";
 import { ADMIN_EMAILS, env, FORCE_SSO, SSO_ENABLED } from "@cockpit-context/env/server";
 import {
   isEmailConfigured,
+  queueEmail,
   renderResetPassword,
   renderTwoFactorOtp,
   renderVerifyEmail,
@@ -245,8 +246,9 @@ export const auth = betterAuth({
       // { status: true } (otp/index.ts) — it will NOT surface an SMTP failure to
       // the caller. The login challenge therefore preflights SMTP reachability
       // via `auth.verifyEmailTransport` (→ mailer `verifyTransport()`) before
-      // claiming a code was sent. Here we just do the real send and let a
-      // failure throw so it is logged server-side.
+      // claiming a code was sent. Since a failure here can never reach the
+      // caller, the code is mailed after the response (queueEmail: bounded,
+      // in memory, failures logged), so a slow relay never holds the request.
       ...(emailConfigured
         ? {
             otpOptions: {
@@ -271,7 +273,7 @@ export const auth = betterAuth({
                   otp,
                   locale: row?.locale ?? "en-US",
                 });
-                await sendEmail({ to: user.email, subject, html });
+                queueEmail({ to: user.email, subject, html }, "two-factor code");
               },
             },
           }

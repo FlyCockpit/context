@@ -16,6 +16,8 @@ export type RunEngineErrorCode =
   | "RUN_FINISHED"
   /** Follow-up refused: the conversation's main run is still queued or running (steer instead). */
   | "RUN_ACTIVE"
+  /** Retry refused: the latest main run reached the agent (or a resolved conversation was retargeted). */
+  | "NOT_RETRYABLE"
   /** OPENROUTER_API_KEY or COCKPIT_CONTEXT_MODEL is not set. */
   | "MODEL_NOT_CONFIGURED"
   /** The server is shutting down and accepts no new runs. */

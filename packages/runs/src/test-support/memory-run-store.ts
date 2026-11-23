@@ -1,7 +1,8 @@
-import type { RunStatus } from "../events";
+import type { RunFailure, RunStatus } from "../events";
 import type {
   CheckoutForRun,
   ConversationForRun,
+  ConversationUpdate,
   NewConversation,
   NewRun,
   NewTurn,
@@ -9,6 +10,7 @@ import type {
   RunRecord,
   RunStore,
   RunUpdate,
+  StaleRun,
   StoredTurn,
   SummaryStatus,
 } from "../store";
@@ -20,9 +22,12 @@ import type {
  */
 
 export type MemoryRun = NewRun &
-  Required<Omit<RunUpdate, "checkoutId" | "startedAt" | "finishedAt">> & {
+  Required<Omit<RunUpdate, "checkoutId" | "startedAt" | "finishedAt" | "failure">> & {
     id: string;
     createdAt: number;
+    /** Wall-clock creation time (the stale sweep's cutoff compares it). */
+    createdAtDate: Date;
+    failure?: RunFailure;
     startedAt: Date | null;
     finishedAt: Date | null;
   };
@@ -83,15 +88,26 @@ export class MemoryRunStore implements RunStore {
       .filter((run) => run.conversationId === conversationId && run.kind === "main")
       .sort((a, b) => b.createdAt - a.createdAt);
     const latest = mains[0];
-    return latest ? { id: latest.id, status: latest.status } : null;
+    return latest
+      ? { id: latest.id, status: latest.status, startedAt: latest.startedAt ?? null }
+      : null;
   }
 
-  async updateConversation(
-    conversationId: string,
-    data: { checkoutId?: string; lastActivityAt?: Date },
-  ) {
+  async updateConversation(conversationId: string, data: ConversationUpdate) {
     const row = this.conversations.get(conversationId);
-    if (row) Object.assign(row, data);
+    if (!row) return;
+    const { lastActivityAt: _at, ...fields } = data;
+    Object.assign(row, fields);
+  }
+
+  async loadRunQuestion(runId: string) {
+    const turn = this.turnsOf(runId).find((entry) => entry.role === "user" && !entry.steering);
+    if (!turn) return null;
+    const text = turn.parts
+      .flatMap((part) => (part.type === "text" ? [part.content] : []))
+      .join("")
+      .trim();
+    return text || null;
   }
 
   async createRun(data: NewRun) {
@@ -100,6 +116,7 @@ export class MemoryRunStore implements RunStore {
       ...data,
       id,
       createdAt: this.counter,
+      createdAtDate: new Date(),
       stopReason: null,
       error: null,
       inputTokens: 0,
@@ -184,6 +201,7 @@ export class MemoryRunStore implements RunStore {
       .filter(
         (run) =>
           run.conversationId === conversationId &&
+          run.startedAt !== null &&
           run.kind === "main" &&
           run.status !== "queued" &&
           run.status !== "running",
@@ -304,6 +322,29 @@ export class MemoryRunStore implements RunStore {
       }
     }
     return count;
+  }
+
+  async interruptStaleRuns(finishedAt: Date, createdBefore: Date, liveRunIds: string[]) {
+    const live = new Set(liveRunIds);
+    const active: RunStatus[] = ["queued", "running"];
+    const swept: StaleRun[] = [];
+    for (const run of this.runs.values()) {
+      if (!active.includes(run.status) || live.has(run.id)) continue;
+      if (run.kind === "helper" && run.parentRunId && live.has(run.parentRunId)) continue;
+      if (run.createdAtDate.getTime() >= createdBefore.getTime()) continue;
+      this.leases.delete(run.id);
+      run.status = "interrupted";
+      run.stopReason = "interrupted";
+      run.finishedAt = finishedAt;
+      swept.push({
+        id: run.id,
+        ownerId: run.ownerId,
+        conversationId: run.conversationId,
+        parentRunId: run.parentRunId,
+        kind: run.kind,
+      });
+    }
+    return swept;
   }
 
   async resetOrphanSummaries() {

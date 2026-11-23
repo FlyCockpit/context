@@ -13,7 +13,7 @@ import {
   assertFullSha,
   checkoutDir,
   ensureDataDirs,
-  removeInsideDataDir,
+  moveToTrash,
   repositoryCheckoutsDir,
   repositoryDir,
   reposRoot,
@@ -145,7 +145,8 @@ export async function ensureRepository(
   options: CloneOptions = {},
   deps: GitLayerDeps = {},
 ): Promise<RepositoryRecord> {
-  if (source.isSnapshot) return snapshotRepositoryFor(source, deps, { touch: options.touch });
+  if (source.isSnapshot)
+    return snapshotRepositoryFor(source, deps, { touch: options.touch, signal: options.signal });
   const remote = parseRemoteUrl(source.gitUrl);
   let ownerId: string | null = null;
   let sshKeyId: string | null = null;
@@ -196,9 +197,14 @@ export async function ensureRepository(
   return cloneRepository(repo.id, options, deps);
 }
 
+/** What a long git step is doing, for a caller that shows progress. */
+export type GitProgressStep = "cloning" | "fetching";
+
 export interface CloneOptions {
   signal?: AbortSignal;
   privateKey?: string;
+  /** Called once a clone actually starts (never for a clone that is already there). */
+  onProgress?: (step: GitProgressStep) => void;
   /**
    * Record use (`lastUsedAt`) when the clone is already there. Default true;
    * `resolveTarget` passes false because it writes `lastUsedAt` itself once
@@ -232,6 +238,7 @@ export async function cloneRepository(
         });
       }
       if (repo.isSnapshot && !options.privateKey) throw snapshotRefMissing();
+      options.onProgress?.("cloning");
       await ensureDataDirs();
       await prisma.repository.update({
         where: { id: repo.id },
@@ -240,7 +247,7 @@ export async function cloneRepository(
       });
       const staging = `${dir}.clone-${randomBytes(6).toString("hex")}`;
       try {
-        await removeInsideDataDir(dir);
+        await moveToTrash(dir);
         await withGitNetwork(
           { ...connectSpecFor(repo), privateKey: options.privateKey, signal: options.signal },
           (network) =>
@@ -285,7 +292,9 @@ export async function cloneRepository(
           select: repositorySelect,
         });
       } catch (error) {
-        await removeInsideDataDir(staging).catch(() => {});
+        // Renamed away (the files go in the background): an aborted clone of a
+        // large repository must not keep its caller waiting on the disk.
+        await moveToTrash(staging).catch(() => {});
         await prisma.repository.update({
           where: { id: repo.id },
           data: {
@@ -322,7 +331,7 @@ export function snapshotRefMissing(): RepoError {
 async function snapshotRepositoryFor(
   pkg: { ownerId: string; repositoryId?: string | null },
   deps: GitLayerDeps,
-  options: { touch?: boolean } = {},
+  options: { touch?: boolean; signal?: AbortSignal } = {},
 ): Promise<RepositoryRecord> {
   if (!pkg.repositoryId) throw snapshotRefMissing();
   const repo = await prisma.repository.findFirst({
@@ -330,19 +339,24 @@ async function snapshotRepositoryFor(
     select: repositorySelect,
   });
   if (!repo) throw snapshotRefMissing();
-  // Never a key here: a snapshot without its clone stays missing.
-  return cloneRepository(repo.id, { touch: options.touch }, deps);
+  // Never a key here: a snapshot without its clone stays missing. The signal
+  // lets a stopped run leave the lock queue (a snapshot refresh may hold it).
+  return cloneRepository(repo.id, { touch: options.touch, signal: options.signal }, deps);
 }
 
-/** Fresh isolated private row, even for another package using the same remote. No secret is persisted. */
-export async function createSnapshotRepository(
-  source: { gitUrl: string; ownerId: string },
-  privateKey: string,
-  deps: GitLayerDeps = {},
-): Promise<RepositoryRecord> {
+/**
+ * A fresh isolated private snapshot row (PENDING, nothing on disk), even for
+ * another package using the same remote. Its clone runs separately, with the
+ * pasted key held in memory only (`cloneRepository(id, { privateKey })`).
+ * No secret is persisted.
+ */
+export async function createSnapshotRepositoryRow(source: {
+  gitUrl: string;
+  ownerId: string;
+}): Promise<RepositoryRecord> {
   const remote = parseRemoteUrl(source.gitUrl);
   if (remote.kind !== "ssh") throw new RepoError("INVALID_REMOTE_URL", "Snapshots require SSH.");
-  const repo = await prisma.repository.create({
+  return prisma.repository.create({
     data: {
       remoteUrl: remote.remoteUrl,
       remoteKey: remote.remoteKey,
@@ -350,38 +364,41 @@ export async function createSnapshotRepository(
       ownerScope: `snapshot:${randomUUID()}`,
       visibility: "PRIVATE",
       isSnapshot: true,
+      // RUNNING from birth: a crash before its clone task starts leaves a row
+      // the boot sweep marks interrupted, never one that waits for ever.
+      snapshotSyncStatus: "RUNNING",
+      snapshotSyncStartedAt: new Date(),
     },
     select: repositorySelect,
   });
-  try {
-    return await cloneRepository(repo.id, { privateKey }, deps);
-  } catch (error) {
-    await deleteRepository(repo.id).catch(() => {});
-    throw safeSnapshotError(error);
-  }
 }
 
-/** Inline only: never enqueue the key. Both branches and all tags are fetched under the clone lock. */
+/** Never enqueue the key. Both branches and all tags are fetched under the clone lock. */
 export async function updateSnapshotRepository(
   repositoryId: string,
   ownerId: string,
   privateKey: string,
   deps: GitLayerDeps = {},
+  options: { signal?: AbortSignal } = {},
 ): Promise<RepositoryRecord> {
   const owned = await prisma.repository.findFirst({
     where: { id: repositoryId, ownerId, isSnapshot: true },
     select: repositorySelect,
   });
   if (!owned) throw snapshotRefMissing();
-  await cloneRepository(repositoryId, { privateKey }, deps);
-  return withLock(repositoryLockKey(repositoryId), async () => {
-    const repo = await prisma.repository.findFirst({
-      where: { id: repositoryId, ownerId, isSnapshot: true },
-      select: repositorySelect,
-    });
-    if (!repo) throw snapshotRefMissing();
-    return fetchLocked(repo, "tags", { privateKey }, deps);
-  });
+  await cloneRepository(repositoryId, { privateKey, signal: options.signal }, deps);
+  return withLock(
+    repositoryLockKey(repositoryId),
+    async () => {
+      const repo = await prisma.repository.findFirst({
+        where: { id: repositoryId, ownerId, isSnapshot: true },
+        select: repositorySelect,
+      });
+      if (!repo) throw snapshotRefMissing();
+      return fetchLocked(repo, "tags", { privateKey, signal: options.signal }, deps);
+    },
+    options.signal,
+  );
 }
 
 export type FetchMode = "default" | "tags";
@@ -605,6 +622,8 @@ export function isFetchStale(
 export interface ResolveTargetInput extends ResolveInput {
   package: ResolvePackageRecord;
   signal?: AbortSignal;
+  /** Clone or fetch started (progress for a caller that shows it). */
+  onProgress?: (step: GitProgressStep) => void;
 }
 
 export interface ResolvedTarget extends Resolution {
@@ -627,10 +646,14 @@ export async function resolveTarget(
   const pkg = input.package;
   // `touch: false`: lastUsedAt is written once, below, after a successful resolution.
   const repo = pkg.isSnapshot
-    ? await snapshotRepositoryFor(pkg, deps, { touch: false })
+    ? await snapshotRepositoryFor(pkg, deps, { touch: false, signal: input.signal })
     : await ensureRepository(
         { gitUrl: pkg.gitUrl, ownerId: pkg.ownerId, sshKeyId: pkg.sshKeyId, packageId: pkg.id },
-        { signal: input.signal, touch: false },
+        {
+          signal: input.signal,
+          touch: false,
+          ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+        },
         deps,
       );
   return withLock(
@@ -641,6 +664,7 @@ export async function resolveTarget(
       const refs = bareRepoRefs(repositoryDir(repo.id), {
         async fetchIfStale() {
           if (current.isSnapshot || !isFetchStale(current.lastFetchedAt, now(deps))) return;
+          input.onProgress?.("fetching");
           try {
             current = await fetchLocked(current, "default", { signal: input.signal }, deps);
           } catch (error) {
@@ -655,9 +679,11 @@ export async function resolveTarget(
         },
         async fetchTags() {
           if (current.isSnapshot) return;
+          input.onProgress?.("fetching");
           current = await fetchLocked(current, "tags", { signal: input.signal }, deps);
         },
         async fetchCommit(sha) {
+          input.onProgress?.("fetching");
           await fetchCommitLocked(current, sha, { signal: input.signal }, deps);
         },
       });
@@ -705,35 +731,44 @@ const MAX_CHECKOUTS_PER_REPOSITORY = 10_000;
  */
 export async function deleteRepository(
   repositoryId: string,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; lockWaitMs?: number } = {},
   deps: GitLayerDeps = {},
 ): Promise<{ freedBytes: bigint }> {
-  return withLock(repositoryLockKey(repositoryId), async () => {
-    const repo = await loadRepository(repositoryId);
-    if (!options.force) {
-      const leased = await prisma.checkoutLease.count({
-        where: { Checkout: { repositoryId }, expiresAt: { gt: now(deps) } },
-      });
-      if (leased > 0) {
-        throw new RepoError("CHECKOUT_LEASED", "A running investigation is using this repository.");
+  return withLock(
+    repositoryLockKey(repositoryId),
+    async () => {
+      const repo = await loadRepository(repositoryId);
+      if (!options.force) {
+        const leased = await prisma.checkoutLease.count({
+          where: { Checkout: { repositoryId }, expiresAt: { gt: now(deps) } },
+        });
+        if (leased > 0) {
+          throw new RepoError(
+            "CHECKOUT_LEASED",
+            "A running investigation is using this repository.",
+          );
+        }
       }
-    }
-    const checkouts = await prisma.checkout.aggregate({
-      where: { repositoryId },
-      _sum: { diskBytes: true },
-    });
-    const doomed = await prisma.checkout.findMany({
-      where: { repositoryId },
-      select: { id: true },
-      take: MAX_CHECKOUTS_PER_REPOSITORY,
-    });
-    await notifyCheckoutRemoval(doomed.map((row) => row.id));
-    await removeInsideDataDir(repositoryCheckoutsDir(repositoryId));
-    await removeInsideDataDir(repositoryDir(repositoryId));
-    await prisma.repository.delete({ where: { id: repositoryId }, select: { id: true } });
-    notifyRepositoryChange(repositoryId, "deleted");
-    return { freedBytes: repo.diskBytes + (checkouts._sum.diskBytes ?? 0n) };
-  });
+      const checkouts = await prisma.checkout.aggregate({
+        where: { repositoryId },
+        _sum: { diskBytes: true },
+      });
+      const doomed = await prisma.checkout.findMany({
+        where: { repositoryId },
+        select: { id: true },
+        take: MAX_CHECKOUTS_PER_REPOSITORY,
+      });
+      await notifyCheckoutRemoval(doomed.map((row) => row.id));
+      // Renamed away in one step each; the files go in the background (./paths.ts).
+      await moveToTrash(repositoryCheckoutsDir(repositoryId));
+      await moveToTrash(repositoryDir(repositoryId));
+      await prisma.repository.delete({ where: { id: repositoryId }, select: { id: true } });
+      notifyRepositoryChange(repositoryId, "deleted");
+      return { freedBytes: repo.diskBytes + (checkouts._sum.diskBytes ?? 0n) };
+    },
+    undefined,
+    options.lockWaitMs === undefined ? {} : { waitMs: options.lockWaitMs },
+  );
 }
 
 export interface MeasureResult {

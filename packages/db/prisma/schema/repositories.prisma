@@ -15,6 +15,15 @@ enum RepositoryVisibility {
   PRIVATE
 }
 
+/// A snapshot's background clone or refresh (packages/api/src/lib/snapshot-tasks.ts).
+/// The pasted key lives only in that process's memory, so a restart cannot
+/// resume one: boot and the stale sweep turn RUNNING into FAILED.
+enum SnapshotSyncStatus {
+  NONE
+  RUNNING
+  FAILED
+}
+
 enum RepositoryStatus {
   PENDING
   CLONING
@@ -23,35 +32,40 @@ enum RepositoryStatus {
 }
 
 model Repository {
-  id            String               @id @default(cuid(2))
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @default(now()) @updatedAt
+  id                    String               @id @default(cuid(2))
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @default(now()) @updatedAt
   /// The validated remote URL git is given.
-  remoteUrl     String
+  remoteUrl             String
   /// Normalized remote (lowercased host, no `.git`, no trailing slash) — the
   /// dedupe key together with `ownerScope`.
-  remoteKey     String
-  visibility    RepositoryVisibility
+  remoteKey             String
+  visibility            RepositoryVisibility
   /// Null for PUBLIC rows; the owning user for PRIVATE rows.
-  ownerId       String?
-  Owner         User?                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId               String?
+  Owner                 User?                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   /// Normal clones use `ownerId ?? ""`; snapshots use an isolated random scope.
   /// Postgres treats NULLs as distinct in unique indexes, so
   /// uniqueness on `(remoteKey, ownerId)` would allow duplicate public rows;
   /// the app writes this alongside `ownerId`.
-  ownerScope    String               @default("")
+  ownerScope            String               @default("")
   /// One-time SSH clone: never automatically fetched or evicted.
-  isSnapshot    Boolean              @default(false)
+  isSnapshot            Boolean              @default(false)
   /// The key used for the last clone/fetch of a PRIVATE row. SetNull when the
   /// key is deleted; the next fetch uses the package's current key.
-  sshKeyId      String?
-  SshKey        SshKey?              @relation(fields: [sshKeyId], references: [id], onDelete: SetNull)
-  status        RepositoryStatus     @default(PENDING)
-  lastError     String?
-  defaultBranch String?
-  diskBytes     BigInt               @default(0)
-  lastFetchedAt DateTime?
-  lastUsedAt    DateTime?
+  sshKeyId              String?
+  SshKey                SshKey?              @relation(fields: [sshKeyId], references: [id], onDelete: SetNull)
+  status                RepositoryStatus     @default(PENDING)
+  lastError             String?
+  defaultBranch         String?
+  diskBytes             BigInt               @default(0)
+  lastFetchedAt         DateTime?
+  lastUsedAt            DateTime?
+  /// Snapshot rows only: the background clone/refresh with a pasted key.
+  snapshotSyncStatus    SnapshotSyncStatus   @default(NONE)
+  /// The RepoError code of the last failed snapshot clone/refresh (never git output).
+  snapshotSyncError     String?
+  snapshotSyncStartedAt DateTime?
 
   Checkouts Checkout[]
   Packages  Package[]

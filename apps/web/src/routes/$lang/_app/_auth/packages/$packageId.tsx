@@ -119,7 +119,11 @@ function isNotFound(error: unknown): boolean {
 function PackageDetailPage() {
   const { lang, packageId } = Route.useParams();
   const { t } = useTranslation(["dashboard"]);
-  const pkg = useQuery(orpc.packages.get.queryOptions({ input: { id: packageId } }));
+  const pkg = useQuery({
+    ...orpc.packages.get.queryOptions({ input: { id: packageId } }),
+    // A snapshot cloning or refreshing in the background: follow it to the end.
+    refetchInterval: (query) => (snapshotBusy(query.state.data) ? BUSY_REFRESH_MS : false),
+  });
   // Started now rather than when the cards mount; a failure surfaces in the card.
   usePrefetchInfiniteQuery({
     ...checkoutsInfiniteOptions(packageId),
@@ -372,6 +376,17 @@ function Mono({ value, empty }: { value: string | null; empty: string }) {
   return <span className="block truncate font-mono text-sm">{value}</span>;
 }
 
+/** A snapshot package whose background clone or refresh has not finished. */
+function snapshotBusy(pkg: PackageDetail | undefined): boolean {
+  const repository = pkg?.repository;
+  if (!pkg?.isSnapshot || !repository) return false;
+  return (
+    repository.snapshotSync.status === "running" ||
+    (repository.snapshotSync.status === "none" &&
+      (repository.status === "pending" || repository.status === "cloning"))
+  );
+}
+
 const REPOSITORY_TONE: Record<string, PillTone> = {
   pending: "muted",
   cloning: "busy",
@@ -408,6 +423,38 @@ function RepositoryStatus({ pkg }: { pkg: PackageDetail }) {
           <TimeAgo value={repository.lastFetchedAt} />
         </span>
       ) : null}
+      {pkg.isSnapshot ? <SnapshotSyncNote pkg={pkg} /> : null}
+    </span>
+  );
+}
+
+/** A snapshot's background clone or refresh: in progress, or why it did not finish. */
+function SnapshotSyncNote({ pkg }: { pkg: PackageDetail }) {
+  const { t, i18n } = useTranslation(["dashboard", "errors"]);
+  const repository = pkg.repository;
+  if (!repository) return null;
+  if (snapshotBusy(pkg)) {
+    return (
+      <span className="block w-full space-y-0.5 text-xs text-muted-foreground" aria-live="polite">
+        <span className="block font-medium text-foreground">
+          {t(
+            repository.status === "ready"
+              ? "dashboard:packages.snapshot.refreshing"
+              : "dashboard:packages.snapshot.cloning",
+          )}
+        </span>
+        <span className="block">{t("dashboard:packages.snapshot.runningHint")}</span>
+      </span>
+    );
+  }
+  if (repository.snapshotSync.status !== "failed") return null;
+  const key = repository.snapshotSync.error
+    ? `errors:reasons.${repository.snapshotSync.error}`
+    : null;
+  return (
+    <span role="alert" className="block w-full text-xs text-destructive">
+      {t("dashboard:packages.snapshot.syncFailed")}
+      {key && i18n.exists(key) ? ` ${t(key)}` : ""}
     </span>
   );
 }

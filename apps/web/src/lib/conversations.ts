@@ -31,6 +31,9 @@ type LiveMessage = NonNullable<LiveRunState["partial"]>;
 export type RunStatus = DetailRun["status"];
 type RunKind = DetailRun["kind"];
 type RunPhase = LiveRunState["phase"];
+type RunPhaseDetail = LiveRunState["phaseDetail"];
+/** Why a run that never reached the agent failed: a RepoError code and its safe details. */
+type RunFailure = NonNullable<DetailRun["failure"]>;
 export type RunUsage = DetailRun["usage"];
 
 interface TurnItem {
@@ -57,6 +60,14 @@ export interface RunView {
   partial: LiveMessage | null;
   /** Finer than `status` while the run is live in the server process. */
   phase: RunPhase | null;
+  /** While `resolving`: whether the repository is being cloned or fetched. */
+  phaseDetail: RunPhaseDetail;
+  /** The agent loop started (false for a run that ended while resolving, preparing or queued). */
+  started: boolean;
+  /** A failure before the agent started (`resolve-failed`), safe to show. */
+  failure: RunFailure | null;
+  /** When the run was created (epoch ms; first sight for a run heard of live). */
+  createdAt: number;
   /** 0-based helper index across the parent run's `delegate_explore` calls (live only). */
   helperIndex: number | null;
 }
@@ -112,6 +123,10 @@ function runFromDetail(run: DetailRun): RunView {
       })),
     partial: null,
     phase: null,
+    phaseDetail: null,
+    started: run.startedAt !== null,
+    failure: run.failure,
+    createdAt: new Date(run.createdAt).getTime(),
     helperIndex: null,
   };
 }
@@ -132,8 +147,17 @@ function placeholderRun(runId: string, parentRunId: string | null): RunView {
     turns: [],
     partial: null,
     phase: null,
+    phaseDetail: null,
+    started: parentRunId !== null,
+    failure: null,
+    createdAt: Date.now(),
     helperIndex: null,
   };
+}
+
+/** A live run's phases before its agent starts (its status still reads `queued`). */
+function waitingPhase(phase: RunPhase): boolean {
+  return phase === "resolving" || phase === "preparing" || phase === "queued";
 }
 
 /** The view state a `snapshot` describes: saved rows, overlaid with the engine's live state. */
@@ -147,6 +171,7 @@ function stateFromSnapshot(event: SnapshotEvent): ConversationViewState {
     return {
       ...view,
       phase: current.phase,
+      phaseDetail: current.phaseDetail,
       iterations: Math.max(view.iterations, current.iterations),
       usage: current.usage,
       partial: current.partial,
@@ -157,8 +182,10 @@ function stateFromSnapshot(event: SnapshotEvent): ConversationViewState {
     views.push({
       ...placeholderRun(current.runId, current.parentRunId),
       kind: current.kind,
-      status: current.phase === "preparing" || current.phase === "queued" ? "queued" : "running",
+      status: waitingPhase(current.phase) ? "queued" : "running",
+      started: !waitingPhase(current.phase),
       phase: current.phase,
+      phaseDetail: current.phaseDetail,
       iterations: current.iterations,
       usage: current.usage,
       partial: current.partial,
@@ -211,17 +238,38 @@ export function applyWatchEvent(
         ...run,
         kind: event.kind,
         status: "running",
+        started: true,
       }));
     case "run.phase": {
       const next = updateRun(state, event.runId, null, (run) => ({
         ...run,
         phase: event.phase,
+        phaseDetail: event.detail ?? null,
         status: event.phase === "running" || event.phase === "finishing" ? "running" : run.status,
       }));
       // Past `preparing`, the checkout exists again (a pruned one was re-created).
-      if (event.phase === "preparing" || next.conversation.checkoutAvailable) return next;
+      if (waitingPhase(event.phase) && event.phase !== "queued") return next;
+      if (next.conversation.checkoutAvailable) return next;
       return { ...next, conversation: { ...next.conversation, checkoutAvailable: true } };
     }
+    case "conversation.retargeted":
+      return {
+        ...state,
+        conversation: {
+          ...state.conversation,
+          requestedVersion: event.requestedVersion,
+          requestedRef: event.requestedRef,
+        },
+      };
+    case "conversation.resolved":
+      return {
+        ...state,
+        conversation: {
+          ...state.conversation,
+          commitSha: event.commitSha,
+          resolvedFrom: event.resolvedFrom,
+        },
+      };
     case "turn":
       return updateRun(state, event.runId, event.parentRunId ?? null, (run) => ({
         ...run,
@@ -260,7 +308,9 @@ export function applyWatchEvent(
         status: event.status,
         stopReason: event.stopReason,
         answer: event.answer,
+        failure: event.failure ?? null,
         phase: null,
+        phaseDetail: null,
         // A stopped run keeps what was streaming; a finished one saved it as a turn.
         partial: event.status === "completed" ? null : run.partial,
       }));
@@ -302,7 +352,7 @@ export type ComposerMode =
   | { kind: "followUp"; recreatesCheckout: boolean }
   | {
       kind: "disabled";
-      reason: "preparing" | "recreating" | "finishing" | "packageDeleted";
+      reason: "resolving" | "preparing" | "recreating" | "finishing" | "packageDeleted" | "retry";
       /** Stop stays available while the run is live. */
       live: boolean;
     };
@@ -317,6 +367,7 @@ export function composerMode(state: ConversationViewState): ComposerMode {
   const main = latestMainRun(state);
   const recreating = !state.conversation.checkoutAvailable;
   if (main && isActive(main.status)) {
+    if (main.phase === "resolving") return { kind: "disabled", reason: "resolving", live: true };
     if (main.phase === "preparing") {
       return { kind: "disabled", reason: recreating ? "recreating" : "preparing", live: true };
     }
@@ -326,7 +377,23 @@ export function composerMode(state: ConversationViewState): ComposerMode {
   if (state.conversation.packageId === null) {
     return { kind: "disabled", reason: "packageDeleted", live: false };
   }
+  // The version never resolved: nothing to follow up on; the ended note offers a retry.
+  if (state.conversation.commitSha === null) {
+    return { kind: "disabled", reason: "retry", live: false };
+  }
   return { kind: "followUp", recreatesCheckout: recreating };
+}
+
+/**
+ * The run `conversations.retry` would replace: the latest main run, when it
+ * ended (failed, stopped, interrupted) before the agent started, and the
+ * package still exists. Null otherwise.
+ */
+export function retryableRun(state: ConversationViewState): RunView | null {
+  const main = latestMainRun(state);
+  if (!main || isActive(main.status) || main.status === "completed" || main.started) return null;
+  if (state.conversation.packageId === null) return null;
+  return main;
 }
 
 // ── Parts ──
@@ -895,6 +962,7 @@ const KNOWN_STOP_REASONS = [
   "model-error",
   "engine-error",
   "interrupted",
+  "resolve-failed",
 ] as const;
 
 export type KnownStopReason = (typeof KNOWN_STOP_REASONS)[number];

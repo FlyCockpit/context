@@ -1,5 +1,7 @@
+import { Button } from "@cockpit-context/ui/components/button";
 import { CodeSnippet } from "@cockpit-context/ui/components/code-snippet";
 import { cn } from "@cockpit-context/ui/lib/utils";
+import { Link } from "@tanstack/react-router";
 import {
   Archive,
   Braces,
@@ -18,7 +20,9 @@ import { useTranslation } from "react-i18next";
 
 import { Markdown } from "@/components/markdown";
 import { RunStatusPill } from "@/components/run-status-pill";
+import { useNow } from "@/hooks/use-now";
 import {
+  formatElapsed,
   isActive,
   isKnownStopReason,
   type MessagePart,
@@ -63,26 +67,48 @@ function PulseDot({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Asking a question again whose run never reached the agent
+ * (`conversations.retry`): offered on that run's ended note.
+ */
+export interface RetryControls {
+  runId: string;
+  pending: boolean;
+  lang: string;
+  /** `ref`: ask about a nearest tag instead (only while the version is unresolved). */
+  onRetry: (target?: { ref: string }) => void;
+}
+
 export function TranscriptBlocks({
   blocks,
   askedBy,
+  retry = null,
 }: {
   blocks: TranscriptBlock[];
   /** The MCP connection that asked the first question; null for the web. */
   askedBy: string | null;
+  retry?: RetryControls | null;
 }) {
   return (
     <ol className="min-w-0 space-y-5">
       {blocks.map((block) => (
         <li key={block.key} className="min-w-0">
-          <Block block={block} askedBy={askedBy} />
+          <Block block={block} askedBy={askedBy} retry={retry} />
         </li>
       ))}
     </ol>
   );
 }
 
-function Block({ block, askedBy }: { block: TranscriptBlock; askedBy: string | null }) {
+function Block({
+  block,
+  askedBy,
+  retry,
+}: {
+  block: TranscriptBlock;
+  askedBy: string | null;
+  retry: RetryControls | null;
+}) {
   const { t } = useTranslation(["dashboard"]);
   switch (block.kind) {
     case "question":
@@ -140,7 +166,7 @@ function Block({ block, askedBy }: { block: TranscriptBlock; askedBy: string | n
     case "working":
       return <WorkingLine run={block.run} />;
     case "ended":
-      return <EndedNote run={block.run} />;
+      return <EndedNote run={block.run} retry={retry?.runId === block.run.id ? retry : null} />;
   }
 }
 
@@ -430,20 +456,45 @@ function HelperPanelView({ run, position }: { run: RunView; position?: number })
 function WorkingLine({ run }: { run: RunView }) {
   const { t } = useTranslation(["dashboard"]);
   const phase = run.phase ?? (run.status === "queued" ? "queued" : "running");
+  // Resolving can take minutes (a first clone): say what git is doing, and for how long.
+  const resolving = phase === "resolving";
+  const now = useNow(1_000, resolving);
+  const label =
+    resolving && run.phaseDetail
+      ? t(`dashboard:conversation.phase.${run.phaseDetail}`)
+      : t(`dashboard:conversation.phase.${phase}`);
   return (
-    <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
-      <PulseDot className="text-primary-text" />
-      {t(`dashboard:conversation.phase.${phase}`)}
-    </p>
+    <div className="min-w-0 space-y-1" aria-live="polite">
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <PulseDot className="text-primary-text" />
+        <span className="min-w-0">{label}</span>
+        {resolving ? (
+          <span className="shrink-0 font-mono text-xs tabular-nums" aria-hidden="true">
+            {formatElapsed(Math.max(0, now - run.createdAt))}
+          </span>
+        ) : null}
+      </p>
+      {resolving ? (
+        <p className="ps-4 text-xs text-muted-foreground">
+          {t("dashboard:conversation.resolvingHint")}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
-function EndedNote({ run }: { run: RunView }) {
-  const { t } = useTranslation(["dashboard"]);
-  const reason = isKnownStopReason(run.stopReason)
-    ? t(`dashboard:conversation.stopReasons.${run.stopReason}`)
-    : null;
+function EndedNote({ run, retry }: { run: RunView; retry: RetryControls | null }) {
+  const { t, i18n } = useTranslation(["dashboard", "errors"]);
+  const failureKey = run.failure ? `errors:reasons.${run.failure.reason}` : null;
+  const reason =
+    failureKey && i18n.exists(failureKey)
+      ? t(failureKey)
+      : isKnownStopReason(run.stopReason)
+        ? t(`dashboard:conversation.stopReasons.${run.stopReason}`)
+        : null;
   const tone = run.status === "failed" ? "bad" : "muted";
+  const tags = retry ? (run.failure?.nearestTags ?? []) : [];
+  const host = run.failure?.reason === "HOST_KEY_UNCONFIRMED" ? run.failure.host : undefined;
   return (
     <div
       className={cn(
@@ -458,9 +509,58 @@ function EndedNote({ run }: { run: RunView }) {
           tone === "bad" ? "text-destructive" : "text-muted-foreground",
         )}
       />
-      <div className="min-w-0 space-y-0.5">
-        <p className="font-medium">{t(`dashboard:conversation.ended.${run.status}`)}</p>
-        {reason ? <p className="text-muted-foreground">{reason}</p> : null}
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="space-y-0.5">
+          <p className="font-medium">{t(`dashboard:conversation.ended.${run.status}`)}</p>
+          {reason ? <p className="text-muted-foreground">{reason}</p> : null}
+        </div>
+        {tags.length > 0 && retry ? (
+          <div className="min-w-0 space-y-1.5">
+            <p className="text-xs text-muted-foreground">
+              {t("dashboard:conversation.retry.nearestTags")}
+            </p>
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              {tags.map((tag) => (
+                <Button
+                  key={tag}
+                  type="button"
+                  variant="outline"
+                  size="touch"
+                  className="max-w-full font-mono"
+                  disabled={retry.pending}
+                  onClick={() => retry.onRetry({ ref: tag })}
+                >
+                  <span className="truncate">{tag}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {host && retry ? (
+          <Link
+            to="/$lang/access/known-hosts"
+            params={{ lang: retry.lang }}
+            search={run.failure?.port ? { host, port: run.failure.port } : { host }}
+            className="inline-flex min-h-[44px] items-center font-medium text-primary-text underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t("dashboard:ask.confirmHost")}
+          </Link>
+        ) : null}
+        {retry ? (
+          <div>
+            <Button
+              type="button"
+              size="touch"
+              variant={tags.length > 0 ? "outline" : "default"}
+              disabled={retry.pending}
+              onClick={() => retry.onRetry()}
+            >
+              {retry.pending
+                ? t("dashboard:conversation.retry.pending")
+                : t("dashboard:conversation.retry.action")}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

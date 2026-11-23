@@ -16,6 +16,9 @@
     "./lib/slug": {
       "default": "./src/lib/slug.ts"
     },
+    "./lib/snapshot-tasks": {
+      "default": "./src/lib/snapshot-tasks.ts"
+    },
     "./lib/backup-freshness": {
       "default": "./src/lib/backup-freshness.ts"
     },

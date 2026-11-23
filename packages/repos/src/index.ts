@@ -37,7 +37,7 @@ export {
   scanKnownHost,
   trustedHostKeys,
 } from "./known-hosts";
-export { withRepositoryLock } from "./locks";
+export { REQUEST_LOCK_WAIT_MS, withRepositoryLock } from "./locks";
 export { fetchNpmGitHead } from "./npm-registry";
 export type { PublicKey, SupportedKeyType } from "./openssh";
 export {
@@ -51,7 +51,7 @@ export {
   type StoredEcosystem,
   toStoredEcosystem,
 } from "./package-names";
-export { checkoutDir, repositoryDir, sweepTmpDir } from "./paths";
+export { checkoutDir, repositoryDir, sweepTmpDir, sweepTrash } from "./paths";
 export { type PruneStorageOptions, type PruneStorageResult, pruneStorage } from "./prune";
 export { type RecoveryResult, recoverInterruptedGitWork } from "./recovery";
 export {
@@ -69,12 +69,13 @@ export {
 } from "./removal-hooks";
 export {
   cloneRepository,
-  createSnapshotRepository,
+  createSnapshotRepositoryRow,
   deleteRepository,
   ensureRepository,
   type FetchMode,
   fetchRepository,
   type GitLayerDeps,
+  type GitProgressStep,
   isFetchStale,
   type MeasureResult,
   measure,

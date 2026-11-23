@@ -84,6 +84,10 @@ const MAPPING: Record<DomainCode, { code: OrpcCode; message: string }> = {
     code: "CONFLICT",
     message: "A running investigation is using this checkout.",
   },
+  REPOSITORY_BUSY: {
+    code: "CONFLICT",
+    message: "This repository is being cloned or fetched. Try again in a few minutes.",
+  },
   GIT_FAILED: { code: "BAD_GATEWAY", message: "The git server refused or failed the request." },
   GIT_TIMEOUT: { code: "GATEWAY_TIMEOUT", message: "The git server took too long to answer." },
   PACKAGE_NOT_FOUND: { code: "NOT_FOUND", message: "Package not found." },
@@ -91,6 +95,10 @@ const MAPPING: Record<DomainCode, { code: OrpcCode; message: string }> = {
   RUN_NOT_FOUND: { code: "NOT_FOUND", message: "Run not found." },
   RUN_FINISHED: { code: "CONFLICT", message: "That run has already finished." },
   RUN_ACTIVE: { code: "CONFLICT", message: "That conversation is still running." },
+  NOT_RETRYABLE: {
+    code: "CONFLICT",
+    message: "Only a question that never reached the agent can be asked again.",
+  },
   BUSY: {
     code: "TOO_MANY_REQUESTS",
     message: "Too many of your questions are waiting for an investigation slot.",

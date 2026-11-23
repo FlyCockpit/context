@@ -19,14 +19,18 @@ vi.mock("@cockpit-context/repos", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@cockpit-context/repos")>()),
   validateRemoteUrl: vi.fn(),
   lookupRegistry: vi.fn(),
-  createSnapshotRepository: vi.fn(),
+  createSnapshotRepositoryRow: vi.fn(),
+  cloneRepository: vi.fn(),
   updateSnapshotRepository: vi.fn(),
   importSshKey: vi.fn(),
   normalizeImportedPrivateKey: vi.fn(),
   deleteRepository: vi.fn(),
 }));
 
-vi.mock("@cockpit-context/jobs", () => ({ enqueueJob: vi.fn() }));
+vi.mock("@cockpit-context/jobs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@cockpit-context/jobs")>()),
+  enqueueJob: vi.fn(),
+}));
 vi.mock("@cockpit-context/runs/answer-reuse", () => ({ invalidateAnswersForPackage: vi.fn() }));
 const { invalidateAnswersForPackage } = await import("@cockpit-context/runs/answer-reuse");
 
@@ -71,6 +75,9 @@ function packageRow(overrides: Record<string, unknown> = {}) {
       visibility: "PUBLIC",
       defaultBranch: "main",
       lastFetchedAt: NOW,
+      snapshotSyncStatus: "NONE",
+      snapshotSyncError: null,
+      snapshotSyncStartedAt: null,
       Checkouts: [
         {
           id: "co-1",
@@ -392,6 +399,19 @@ describe("one-time SSH packages", () => {
     repositoryId: "repo-snapshot",
   };
   const owner = () => client(sessionContext({ id: "snapshot-owner" }));
+  const settle = async () => {
+    for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  };
+  /** A clone/refresh that finishes when the test says so. */
+  const gate = () => {
+    let release: (error?: Error) => void = () => {};
+    const promise = new Promise<never>((resolve, reject) => {
+      release = (error) => (error ? reject(error) : resolve(undefined as never));
+    });
+    return { promise, release };
+  };
+  const repoWrites = () =>
+    vi.mocked(prisma.repository.updateMany).mock.calls.map((call) => call[0]);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -404,15 +424,19 @@ describe("one-time SSH packages", () => {
       privateKey: "NORMALIZED_SENTINEL",
       publicKey: { keyType: "ssh-ed25519", publicKey: "public", fingerprint: "fp" },
     });
-    vi.mocked(repos.createSnapshotRepository).mockResolvedValue({ id: "repo-snapshot" } as Awaited<
-      ReturnType<typeof repos.createSnapshotRepository>
-    >);
-    vi.mocked(repos.updateSnapshotRepository).mockResolvedValue({ id: "repo-snapshot" } as Awaited<
-      ReturnType<typeof repos.updateSnapshotRepository>
-    >);
+    vi.mocked(repos.createSnapshotRepositoryRow).mockResolvedValue({
+      id: "repo-snapshot",
+    } as Awaited<ReturnType<typeof repos.createSnapshotRepositoryRow>>);
+    vi.mocked(repos.cloneRepository).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof repos.cloneRepository>>,
+    );
+    vi.mocked(repos.updateSnapshotRepository).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof repos.updateSnapshotRepository>>,
+    );
     vi.mocked(repos.importSshKey).mockResolvedValue({ id: "saved-key" } as Awaited<
       ReturnType<typeof repos.importSshKey>
     >);
+    vi.mocked(prisma.repository.updateMany).mockResolvedValue({ count: 1 });
     db.package.create.mockResolvedValue(packageRow({ isSnapshot: true }));
     db.package.updateMany.mockResolvedValue({ count: 1 });
   });
@@ -429,16 +453,17 @@ describe("one-time SSH packages", () => {
     const text = JSON.stringify(writes);
     for (const secret of [key.privateKey, key.passphrase, "NORMALIZED_SENTINEL"])
       expect(text).not.toContain(secret);
-    expect(enqueueJob).not.toHaveBeenCalled();
   };
 
-  it("clones immediately, stores only snapshot metadata and never queues or stores credentials", async () => {
+  it("answers before the clone, which runs in the background with the key in memory only", async () => {
+    const clone = gate();
+    vi.mocked(repos.cloneRepository).mockReturnValueOnce(clone.promise);
     await owner().create(input);
     expect(repos.normalizeImportedPrivateKey).toHaveBeenCalledWith(key.privateKey, key.passphrase);
-    expect(repos.createSnapshotRepository).toHaveBeenCalledWith(
-      { gitUrl: input.gitUrl, ownerId: "snapshot-owner" },
-      "NORMALIZED_SENTINEL",
-    );
+    expect(repos.createSnapshotRepositoryRow).toHaveBeenCalledWith({
+      gitUrl: input.gitUrl,
+      ownerId: "snapshot-owner",
+    });
     expect(db.package.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -448,8 +473,45 @@ describe("one-time SSH packages", () => {
         }),
       }),
     );
+    // The request is done; the clone is still running, marked durably.
+    expect(repoWrites()).toContainEqual(
+      expect.objectContaining({
+        where: { id: "repo-snapshot", ownerId: "snapshot-owner", isSnapshot: true },
+        data: expect.objectContaining({ snapshotSyncStatus: "RUNNING", snapshotSyncError: null }),
+      }),
+    );
+    expect(repos.cloneRepository).toHaveBeenCalledWith("repo-snapshot", {
+      privateKey: "NORMALIZED_SENTINEL",
+      signal: expect.any(AbortSignal),
+    });
+    expect(repoWrites().some((write) => write.data.snapshotSyncStatus === "NONE")).toBe(false);
+    clone.release();
+    await settle();
+    expect(repoWrites()).toContainEqual({
+      where: { id: "repo-snapshot", snapshotSyncStatus: "RUNNING" },
+      data: { snapshotSyncStatus: "NONE", snapshotSyncError: null },
+    });
     expect(repos.importSshKey).not.toHaveBeenCalled();
     await assertNoPersistedSecret();
+  });
+
+  it("records a failed clone as FAILED with its code only, never the key or git output", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(repos.cloneRepository).mockRejectedValueOnce(
+      new repos.RepoError("HOST_KEY_UNCONFIRMED", key.privateKey, { host: "example.com" }),
+    );
+    try {
+      await owner().create(input);
+      await settle();
+      expect(repoWrites()).toContainEqual({
+        where: { id: "repo-snapshot", snapshotSyncStatus: "RUNNING" },
+        data: { snapshotSyncStatus: "FAILED", snapshotSyncError: "HOST_KEY_UNCONFIRMED" },
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(key.privateKey);
+      await assertNoPersistedSecret();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("save checkbox goes through the existing encrypted import path and creates a normal package", async () => {
@@ -460,7 +522,8 @@ describe("one-time SSH packages", () => {
       privateKey: key.privateKey,
       passphrase: key.passphrase,
     });
-    expect(repos.createSnapshotRepository).not.toHaveBeenCalled();
+    expect(repos.createSnapshotRepositoryRow).not.toHaveBeenCalled();
+    expect(repos.cloneRepository).not.toHaveBeenCalled();
     expect(db.package.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ sshKeyId: "saved-key", isSnapshot: false }),
@@ -468,35 +531,176 @@ describe("one-time SSH packages", () => {
     );
   });
 
-  it.each([false, true])("updates inline with save=%s", async (save) => {
+  it("drops the prepared row and never clones when the package cannot be created", async () => {
+    db.package.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    await expect(owner().create(input)).rejects.toBeDefined();
+    expect(repos.deleteRepository).toHaveBeenCalledWith("repo-snapshot");
+    expect(repos.cloneRepository).not.toHaveBeenCalled();
+  });
+
+  it("refreshes in the background on update, and a second update while it runs joins it", async () => {
+    const refresh = gate();
+    vi.mocked(repos.updateSnapshotRepository).mockReturnValueOnce(refresh.promise);
     db.package.findFirst.mockResolvedValue(snapshot);
-    await owner().updateSnapshot({
-      id: snapshot.id,
-      key: { ...key, save, name: save ? "deploy" : undefined },
+    await expect(owner().updateSnapshot({ id: snapshot.id, key })).resolves.toEqual({
+      ok: true,
+      syncing: true,
+    });
+    expect(db.package.findFirst.mock.calls[0][0].where).toEqual({
+      AND: [{ id: snapshot.id, isSnapshot: true }, { ownerId: "snapshot-owner" }],
     });
     expect(repos.updateSnapshotRepository).toHaveBeenCalledWith(
       "repo-snapshot",
       "snapshot-owner",
       "NORMALIZED_SENTINEL",
+      {},
+      { signal: expect.any(AbortSignal) },
     );
-    expect(db.package.findFirst.mock.calls[0][0].where).toEqual({
-      AND: [{ id: snapshot.id, isSnapshot: true }, { ownerId: "snapshot-owner" }],
+    await owner().updateSnapshot({ id: snapshot.id, key });
+    expect(repos.updateSnapshotRepository).toHaveBeenCalledTimes(1);
+    refresh.release();
+    await settle();
+    expect(invalidateAnswersForPackage).toHaveBeenCalledWith(snapshot.id);
+    expect(repos.importSshKey).not.toHaveBeenCalled();
+    await assertNoPersistedSecret();
+  });
+
+  it("with save, stores the key, turns the package into an SSH package and queues a normal fetch", async () => {
+    const { enqueueJob } = await import("@cockpit-context/jobs");
+    db.package.findFirst.mockResolvedValue(snapshot);
+    await expect(
+      owner().updateSnapshot({ id: snapshot.id, key: { ...key, save: true, name: "deploy" } }),
+    ).resolves.toEqual({ ok: true, syncing: true });
+    expect(repos.importSshKey).toHaveBeenCalledTimes(1);
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: snapshot.id,
+        ownerId: "snapshot-owner",
+        isSnapshot: true,
+        repositoryId: "repo-snapshot",
+      },
+      data: { isSnapshot: false, sshKeyId: "saved-key" },
     });
-    expect(db.package.updateMany).toHaveBeenCalledWith(
+    expect(repoWrites()).toContainEqual({
+      where: { id: "repo-snapshot", ownerId: "snapshot-owner" },
+      data: {
+        isSnapshot: false,
+        sshKeyId: "saved-key",
+        snapshotSyncStatus: "NONE",
+        snapshotSyncError: null,
+      },
+    });
+    expect(enqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "repository.fetch" }),
+      { repositoryId: "repo-snapshot", mode: "default" },
+      expect.objectContaining({ dedupeKey: expect.stringContaining("repo-snapshot") }),
+    );
+    expect(repos.updateSnapshotRepository).not.toHaveBeenCalled();
+    await assertNoPersistedSecret();
+  });
+
+  it("serializes a re-key and a save on one package: the save converts the clone the re-key attached", async () => {
+    // A tiny package row: the snapshot's clone was deleted (repositoryId null).
+    let repositoryId: string | null = null;
+    let isSnapshot = true;
+    db.package.findFirst.mockImplementation(async () =>
+      isSnapshot ? { ...snapshot, repositoryId } : null,
+    );
+    db.package.updateMany.mockImplementation(
+      async (args: { data: { repositoryId?: string; isSnapshot?: boolean } }) => {
+        if (args.data.repositoryId) repositoryId = args.data.repositoryId;
+        if (args.data.isSnapshot === false) isSnapshot = false;
+        return { count: 1 };
+      },
+    );
+    let seen: AbortSignal | undefined;
+    vi.mocked(repos.cloneRepository).mockImplementationOnce(
+      (_id, options) =>
+        new Promise((_, reject) => {
+          seen = options?.signal;
+          options?.signal?.addEventListener("abort", () => reject(new Error("killed")), {
+            once: true,
+          });
+        }),
+    );
+    const [refresh, save] = await Promise.all([
+      owner().updateSnapshot({ id: snapshot.id, key }),
+      owner().updateSnapshot({ id: snapshot.id, key: { ...key, save: true, name: "deploy" } }),
+    ]);
+    expect(refresh).toEqual({ ok: true, syncing: true });
+    expect(save).toEqual({ ok: true, syncing: true });
+    // The save saw the replacement clone: it converted it, killed its task and queued its fetch.
+    expect(repoWrites()).toContainEqual(
       expect.objectContaining({
-        data: save
-          ? { repositoryId: "repo-snapshot", isSnapshot: false, sshKeyId: "saved-key" }
-          : { repositoryId: "repo-snapshot" },
+        where: { id: "repo-snapshot", ownerId: "snapshot-owner" },
+        data: expect.objectContaining({ isSnapshot: false, sshKeyId: "saved-key" }),
       }),
     );
-    expect(repos.importSshKey).toHaveBeenCalledTimes(save ? 1 : 0);
-    await assertNoPersistedSecret();
+    expect(seen?.aborted).toBe(true);
+    await settle();
+    db.package.findFirst.mockReset();
+    db.package.updateMany.mockReset();
+  });
+
+  it("a delete racing a re-key never leaves the re-key's replacement clone running or on disk", async () => {
+    let repositoryId: string | null = null;
+    let exists = true;
+    db.package.findFirst.mockImplementation(async () =>
+      exists ? { ...snapshot, repositoryId } : null,
+    );
+    db.package.updateMany.mockImplementation(async (args: { data: { repositoryId?: string } }) => {
+      if (args.data.repositoryId) repositoryId = args.data.repositoryId;
+      return { count: 1 };
+    });
+    db.package.deleteMany.mockImplementation(async () => {
+      exists = false;
+      return { count: 1 };
+    });
+    let rowCreated: () => void = () => {};
+    const created = new Promise<void>((resolve) => {
+      rowCreated = resolve;
+    });
+    vi.mocked(repos.createSnapshotRepositoryRow).mockImplementationOnce(async () => {
+      rowCreated();
+      return { id: "repo-replacement" } as Awaited<
+        ReturnType<typeof repos.createSnapshotRepositoryRow>
+      >;
+    });
+    let seen: AbortSignal | undefined;
+    vi.mocked(repos.cloneRepository).mockImplementationOnce(
+      (_id, options) =>
+        new Promise((_, reject) => {
+          seen = options?.signal;
+          options?.signal?.addEventListener("abort", () => reject(new Error("killed")), {
+            once: true,
+          });
+        }),
+    );
+    const rekey = owner().updateSnapshot({ id: snapshot.id, key });
+    // The delete arrives while the re-key is attaching its replacement clone.
+    await created;
+    const removal = owner().delete({ id: snapshot.id });
+    await expect(rekey).resolves.toEqual({ ok: true, syncing: true });
+    await expect(removal).resolves.toEqual({ ok: true });
+    // The delete saw the replacement: killed its clone and removed it.
+    expect(seen?.aborted).toBe(true);
+    expect(repos.deleteRepository).toHaveBeenCalledWith("repo-replacement", { lockWaitMs: 10_000 });
+    await settle();
+    db.package.findFirst.mockReset();
+    db.package.updateMany.mockReset();
+    db.package.deleteMany.mockReset();
   });
 
   it("re-clones a manually deleted snapshot only when the user supplies a key", async () => {
     db.package.findFirst.mockResolvedValue({ ...snapshot, repositoryId: null });
     await owner().updateSnapshot({ id: snapshot.id, key });
-    expect(repos.createSnapshotRepository).toHaveBeenCalled();
+    expect(repos.createSnapshotRepositoryRow).toHaveBeenCalled();
+    expect(db.package.updateMany).toHaveBeenCalledWith({
+      where: { id: snapshot.id, ownerId: "snapshot-owner", isSnapshot: true, repositoryId: null },
+      data: { repositoryId: "repo-snapshot" },
+    });
+    await settle();
+    expect(repos.cloneRepository).toHaveBeenCalled();
     expect(repos.updateSnapshotRepository).not.toHaveBeenCalled();
     await assertNoPersistedSecret();
   });
@@ -507,11 +711,15 @@ describe("one-time SSH packages", () => {
       code: "NOT_FOUND",
     });
     expect(repos.normalizeImportedPrivateKey).not.toHaveBeenCalled();
-    expect(repos.createSnapshotRepository).not.toHaveBeenCalled();
+    expect(repos.createSnapshotRepositoryRow).not.toHaveBeenCalled();
   });
 
   it("converts to an owned saved key through the edit sheet's existing validation", async () => {
-    db.package.findFirst.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(packageRow());
+    // The package, its repository read again inside the gate, the result.
+    db.package.findFirst
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(packageRow());
     db.sshKey.findFirst.mockResolvedValue({ id: "saved-key" });
     await owner().update({ id: snapshot.id, sshKeyId: "saved-key" });
     expect(db.sshKey.findFirst).toHaveBeenCalledWith(
@@ -526,8 +734,38 @@ describe("one-time SSH packages", () => {
     );
     expect(prisma.repository.updateMany).toHaveBeenCalledWith({
       where: { id: "repo-snapshot", ownerId: "snapshot-owner", isSnapshot: true },
-      data: { isSnapshot: false, sshKeyId: "saved-key" },
+      data: {
+        isSnapshot: false,
+        sshKeyId: "saved-key",
+        snapshotSyncStatus: "NONE",
+        snapshotSyncError: null,
+      },
     });
+  });
+
+  it("kills a running pasted-key clone when the edit sheet turns the snapshot into an SSH package", async () => {
+    let seen: AbortSignal | undefined;
+    vi.mocked(repos.updateSnapshotRepository).mockImplementationOnce(
+      (_id, _owner, _key, _deps, options) =>
+        new Promise((_, reject) => {
+          seen = options?.signal;
+          options?.signal?.addEventListener("abort", () => reject(new Error("killed")), {
+            once: true,
+          });
+        }),
+    );
+    // updateSnapshot reads the package, then its repository again inside the gate.
+    db.package.findFirst.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(snapshot);
+    await owner().updateSnapshot({ id: snapshot.id, key });
+    // The package, its repository read again inside the gate, the result.
+    db.package.findFirst
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(packageRow());
+    db.sshKey.findFirst.mockResolvedValue({ id: "saved-key" });
+    await owner().update({ id: snapshot.id, sshKeyId: "saved-key" });
+    expect(seen?.aborted).toBe(true);
+    await settle();
   });
 
   it("keeps the snapshot if the chosen saved key belongs to another user", async () => {
@@ -543,7 +781,7 @@ describe("one-time SSH packages", () => {
   it("sanitizes dependency errors before persistence, logs or client errors can contain the key", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(repos.createSnapshotRepository).mockRejectedValueOnce(
+    vi.mocked(repos.createSnapshotRepositoryRow).mockRejectedValueOnce(
       new repos.RepoError("GIT_FAILED", key.privateKey + key.passphrase),
     );
     try {
@@ -592,11 +830,41 @@ describe("one-time SSH packages", () => {
     expect(repos.normalizeImportedPrivateKey).not.toHaveBeenCalled();
   });
 
-  it("deletes the protected clone on an owner's confirmed package deletion", async () => {
+  it("on delete, cancels a clone still running, then deletes the clone with a bounded lock wait", async () => {
+    let seen: AbortSignal | undefined;
+    vi.mocked(repos.cloneRepository).mockImplementationOnce(
+      (_id, options) =>
+        new Promise((_, reject) => {
+          seen = options?.signal;
+          options?.signal?.addEventListener("abort", () => reject(new Error("killed")), {
+            once: true,
+          });
+        }),
+    );
+    await owner().create(input);
     db.package.findFirst.mockResolvedValue({ repositoryId: "repo-snapshot" });
     db.package.deleteMany.mockResolvedValue({ count: 1 });
     await owner().delete({ id: snapshot.id });
-    expect(repos.deleteRepository).toHaveBeenCalledWith("repo-snapshot");
+    expect(seen?.aborted).toBe(true);
+    // The delete did not wait for the clone to unwind; it records its end on its own.
+    await settle();
+    expect(repoWrites()).toContainEqual({
+      where: { id: "repo-snapshot", snapshotSyncStatus: "RUNNING" },
+      data: { snapshotSyncStatus: "FAILED", snapshotSyncError: "SNAPSHOT_CANCELLED" },
+    });
+    expect(repos.deleteRepository).toHaveBeenCalledWith("repo-snapshot", { lockWaitMs: 10_000 });
+  });
+
+  it("answers REPOSITORY_BUSY instead of waiting on a long clone or fetch", async () => {
+    db.package.findFirst.mockResolvedValue({ repositoryId: "repo-snapshot" });
+    vi.mocked(repos.deleteRepository).mockRejectedValueOnce(
+      new repos.RepoError("REPOSITORY_BUSY", "busy"),
+    );
+    await expect(owner().delete({ id: snapshot.id })).rejects.toMatchObject({
+      code: "CONFLICT",
+      data: { reason: "REPOSITORY_BUSY" },
+    });
+    expect(db.package.deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -613,8 +881,8 @@ it("cleans an unlinked replacement snapshot when another request changed the pac
     privateKey: "normalized",
     publicKey: { keyType: "ssh-ed25519", publicKey: "public", fingerprint: "fp" },
   });
-  vi.mocked(repos.createSnapshotRepository).mockResolvedValue({ id: "orphan-repo" } as Awaited<
-    ReturnType<typeof repos.createSnapshotRepository>
+  vi.mocked(repos.createSnapshotRepositoryRow).mockResolvedValue({ id: "orphan-repo" } as Awaited<
+    ReturnType<typeof repos.createSnapshotRepositoryRow>
   >);
   vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
     if (typeof fn !== "function") throw new Error("test expects callback transaction");
@@ -628,4 +896,6 @@ it("cleans an unlinked replacement snapshot when another request changed the pac
     }),
   ).rejects.toMatchObject({ data: { reason: "PACKAGE_SNAPSHOT_REF_MISSING" } });
   expect(repos.deleteRepository).toHaveBeenCalledWith("orphan-repo");
+  // Nothing was cloned for the row that lost the race.
+  expect(repos.cloneRepository).not.toHaveBeenCalled();
 });

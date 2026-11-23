@@ -57,6 +57,8 @@ export type RepoErrorCode =
   | "CHECKOUT_NOT_FOUND"
   /** A run holds a lease on the checkout; it cannot be deleted now. */
   | "CHECKOUT_LEASED"
+  /** A clone, fetch or checkout holds the repository's lock longer than a request may wait. */
+  | "REPOSITORY_BUSY"
   /** git exited non-zero (clone/fetch/worktree). */
   | "GIT_FAILED"
   /** git ran past its time budget and was killed. */

@@ -228,7 +228,7 @@ describe("repositoriesRouter", () => {
       });
       expectCheckoutOwnership("user-a", "co-1");
       // Never forced: a leased checkout is refused by the git layer.
-      expect(deleteCheckout).toHaveBeenCalledWith("co-1");
+      expect(deleteCheckout).toHaveBeenCalledWith("co-1", { lockWaitMs: 10_000 });
     });
 
     it("is NOT_FOUND when none of the caller's packages reaches it", async () => {

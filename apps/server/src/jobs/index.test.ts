@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   startPeriodicJob: vi.fn(),
   scheduleStops: [] as Array<ReturnType<typeof vi.fn>>,
   sweepTmpDir: vi.fn(),
+  sweepTrash: vi.fn(async () => 0),
+  sweepStaleSnapshotSyncs: vi.fn(async () => 0),
   recoverInterruptedGitWork: vi.fn(),
   engine: {
     recover: vi.fn(async () => 0),
@@ -45,8 +47,12 @@ vi.mock("@cockpit-context/api/lib/backup-freshness", () => ({
   checkBackupFreshness: vi.fn(),
   writeBackupFreshness: vi.fn(),
 }));
+vi.mock("@cockpit-context/api/lib/snapshot-tasks", () => ({
+  sweepStaleSnapshotSyncs: state.sweepStaleSnapshotSyncs,
+}));
 vi.mock("@cockpit-context/repos", () => ({
   sweepTmpDir: state.sweepTmpDir,
+  sweepTrash: state.sweepTrash,
   recoverInterruptedGitWork: state.recoverInterruptedGitWork,
   fetchRepository: vi.fn(),
   pruneStorage: vi.fn(),
@@ -114,6 +120,7 @@ describe("startBackgroundJobs", () => {
         "storage.prune",
         "checkout.summarize",
         "conversations.retention",
+        "work.sweep-stale",
       ]),
     );
     // The engine clones and creates checkouts inline; those job types are gone.
@@ -141,6 +148,7 @@ describe("startBackgroundJobs", () => {
       "jobs.prune",
       "storage.prune",
       "auth.reap-expired-tokens",
+      "work.sweep-stale",
       "oauth.cleanup",
       "conversations.retention",
       "backup.check-freshness",
@@ -159,6 +167,25 @@ describe("startBackgroundJobs", () => {
         everyMs: 15 * 60_000,
       }),
     );
+  });
+
+  it("fails snapshot syncs a dead process left RUNNING and empties the trash, before the runner starts", async () => {
+    const order: string[] = [];
+    state.sweepStaleSnapshotSyncs.mockImplementation(async () => {
+      order.push("snapshots");
+      return 0;
+    });
+    state.sweepTrash.mockImplementation(async () => {
+      order.push("trash");
+      return 0;
+    });
+    state.runner.start.mockImplementation(async () => {
+      order.push("runner");
+    });
+    await startBackgroundJobs();
+    // Boot: no grace, nothing in this process is running yet.
+    expect(state.sweepStaleSnapshotSyncs).toHaveBeenCalledWith(0);
+    expect(order).toEqual(["snapshots", "trash", "runner"]);
   });
 
   it("sweeps leftover git temp files before the runner starts", async () => {

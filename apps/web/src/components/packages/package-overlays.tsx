@@ -346,10 +346,20 @@ export function UpdateSnapshotDialog({
             onCancel={() => onOpenChange(false)}
             onSubmit={async (values) => {
               try {
-                await update.mutateAsync({ id: pkg.id, key: pastedKeyInput(values) });
+                const result = await update.mutateAsync({
+                  id: pkg.id,
+                  key: pastedKeyInput(values),
+                });
                 invalidate();
                 void queryClient.invalidateQueries({ queryKey: orpc.sshKeys.key() });
-                toast.success(t("dashboard:packages.snapshot.updated"));
+                // The clone or refresh runs on the server; the package page follows it.
+                toast.success(
+                  t(
+                    result.syncing
+                      ? "dashboard:packages.snapshot.started"
+                      : "dashboard:packages.snapshot.updated",
+                  ),
+                );
                 onOpenChange(false);
               } finally {
                 update.reset();

@@ -30,18 +30,20 @@ const engine = {
   activity,
   liveState: vi.fn<() => LiveConversationState>(() => ({ runs: [] })),
   startConversation: vi.fn(),
+  openConversation: vi.fn(),
+  retryConversation: vi.fn(),
   sendMessage: vi.fn(),
   steer: vi.fn(),
   stop: vi.fn(),
 };
-vi.mock("@cockpit-context/runs", () => ({
+vi.mock("@cockpit-context/runs", async () => ({
   getRunEngine: () => engine,
   partsFromJson: (value: unknown) => (Array.isArray(value) ? value : []),
+  runFailureFromJson: (await import("@cockpit-context/runs/failure")).runFailureFromJson,
 }));
 
 const { default: prisma } = await import("@cockpit-context/db");
 const { RunEngineError } = await import("@cockpit-context/runs/errors");
-const { RepoError } = await import("@cockpit-context/repos/errors");
 const { conversationsRouter } = await import("./conversations");
 const { announceUserBanned } = await import("@cockpit-context/auth/ban");
 const { liveStreamCount } = await import("../lib/live-streams");
@@ -251,6 +253,47 @@ describe("conversationsRouter", () => {
   });
 
   describe("get", () => {
+    it("shows a run's failure allowlisted, never its server-side error text", async () => {
+      db.conversation.findFirst.mockResolvedValue(
+        conversationRow("c-2", "FAILED", { commitSha: null, resolvedFrom: null, checkoutId: null }),
+      );
+      db.agentRun.findMany.mockResolvedValue([
+        {
+          id: "run-1",
+          createdAt: NOW,
+          parentRunId: null,
+          kind: "MAIN",
+          status: "FAILED",
+          trigger: "WEB_MESSAGE",
+          model: "m",
+          focus: null,
+          stopReason: "resolve-failed",
+          failure: { reason: "VERSION_NOT_FOUND", nearestTags: ["v2.32.1"], stderr: "fatal: x" },
+          iterations: 0,
+          startedAt: null,
+          finishedAt: NOW,
+          answer: null,
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+          costUsdMicros: 0,
+          unpricedCalls: 0,
+        },
+      ]);
+      db.runTurn.findMany.mockResolvedValue([]);
+      db.agentRun.groupBy.mockResolvedValue([] as never);
+      const detail = await client().get({ id: "c-2" });
+      expect(detail.commitSha).toBeNull();
+      expect(detail.checkoutAvailable).toBe(false);
+      expect(detail.runs[0]?.failure).toEqual({
+        reason: "VERSION_NOT_FOUND",
+        nearestTags: ["v2.32.1"],
+      });
+      expect(JSON.stringify(detail)).not.toContain("fatal");
+      // `error` is never selected.
+      expect(db.agentRun.findMany.mock.calls[0]?.[0].select).not.toHaveProperty("error");
+    });
+
     it("loads runs and turns owner-scoped at every level", async () => {
       db.conversation.findFirst.mockResolvedValue(conversationRow("c-1"));
       db.agentRun.findMany.mockResolvedValue([
@@ -721,28 +764,24 @@ describe("conversationsRouter", () => {
   });
 
   describe("create", () => {
-    it("starts a web conversation on an own package", async () => {
+    it("opens a web conversation on an own package at once, leaving resolution to its run", async () => {
       db.package.findFirst.mockResolvedValue({ id: "pkg-1" });
-      engine.startConversation.mockResolvedValue({
-        conversationId: "c-new",
-        runId: "run-new",
-        commitSha: "d".repeat(40),
-        resolvedFrom: "tag:v1",
-      });
+      engine.openConversation.mockResolvedValue({ conversationId: "c-new", runId: "run-new" });
       await expect(
         client().create({ packageId: "pkg-1", text: "How do sessions work?", version: "1.0.0" }),
-      ).resolves.toMatchObject({ conversationId: "c-new" });
+      ).resolves.toEqual({ conversationId: "c-new", runId: "run-new" });
       expect(db.package.findFirst.mock.calls[0]?.[0].where).toEqual(ownedBy("pkg-1", "user-a"));
-      expect(engine.startConversation).toHaveBeenCalledWith(
-        expect.objectContaining({
-          ownerId: "user-a",
-          packageId: "pkg-1",
-          text: "How do sessions work?",
-          version: "1.0.0",
-          ref: null,
-          origin: "web",
-        }),
-      );
+      expect(engine.openConversation).toHaveBeenCalledWith({
+        ownerId: "user-a",
+        packageId: "pkg-1",
+        text: "How do sessions work?",
+        version: "1.0.0",
+        ref: null,
+        origin: "web",
+      });
+      // The request's signal is never handed over: the clone is not the request's.
+      expect(engine.openConversation.mock.calls[0]?.[0]).not.toHaveProperty("signal");
+      expect(engine.startConversation).not.toHaveBeenCalled();
     });
 
     it("is NOT_FOUND for another user's package and never starts a run", async () => {
@@ -750,7 +789,7 @@ describe("conversationsRouter", () => {
       await expect(
         client(sessionContext({ id: "user-b" })).create({ packageId: "pkg-1", text: "q" }),
       ).rejects.toSatisfy(expectReason("NOT_FOUND"));
-      expect(engine.startConversation).not.toHaveBeenCalled();
+      expect(engine.openConversation).not.toHaveBeenCalled();
     });
 
     it("refuses a version and a ref together", async () => {
@@ -759,21 +798,60 @@ describe("conversationsRouter", () => {
       ).rejects.toSatisfy(expectReason("BAD_REQUEST"));
     });
 
-    it("maps an unresolvable version to its reason with the nearest tags", async () => {
+    it("maps the cheap refusals the engine still makes up front", async () => {
       db.package.findFirst.mockResolvedValue({ id: "pkg-1" });
-      engine.startConversation.mockRejectedValue(
-        new RepoError("VERSION_NOT_FOUND", "no tag", { nearestTags: ["v1.0.1", "v0.9.0"] }),
+      engine.openConversation.mockRejectedValue(new RunEngineError("BUSY", "full"));
+      await expect(client().create({ packageId: "pkg-1", text: "q" })).rejects.toSatisfy(
+        (error: ORPCError<string, { reason: string }>) => {
+          expect(error.code).toBe("TOO_MANY_REQUESTS");
+          expect(error.data).toEqual({ reason: "BUSY" });
+          return true;
+        },
       );
-      await expect(
-        client().create({ packageId: "pkg-1", text: "q", version: "1.0.0" }),
-      ).rejects.toSatisfy((error: ORPCError<string, { reason: string; nearestTags: string[] }>) => {
-        expect(error.code).toBe("BAD_REQUEST");
-        expect(error.data).toEqual({
-          reason: "VERSION_NOT_FOUND",
-          nearestTags: ["v1.0.1", "v0.9.0"],
-        });
-        return true;
+    });
+  });
+
+  describe("retry", () => {
+    it("retries an own conversation, optionally on another target", async () => {
+      db.conversation.findFirst.mockResolvedValue({ id: "c-1" });
+      engine.retryConversation.mockResolvedValue({ conversationId: "c-1", runId: "run-2" });
+      await expect(client().retry({ id: "c-1" })).resolves.toEqual({
+        conversationId: "c-1",
+        runId: "run-2",
       });
+      expect(engine.retryConversation).toHaveBeenLastCalledWith({
+        ownerId: "user-a",
+        conversationId: "c-1",
+      });
+      await client().retry({ id: "c-1", ref: "v1.0.1" });
+      expect(engine.retryConversation).toHaveBeenLastCalledWith({
+        ownerId: "user-a",
+        conversationId: "c-1",
+        ref: "v1.0.1",
+      });
+    });
+
+    it("is NOT_FOUND for another user's conversation and never retries", async () => {
+      db.conversation.findFirst.mockResolvedValue(null);
+      await expect(client(sessionContext({ id: "user-b" })).retry({ id: "c-1" })).rejects.toSatisfy(
+        expectReason("NOT_FOUND"),
+      );
+      expect(engine.retryConversation).not.toHaveBeenCalled();
+    });
+
+    it("maps a refusal to CONFLICT / NOT_RETRYABLE and refuses two targets", async () => {
+      db.conversation.findFirst.mockResolvedValue({ id: "c-1" });
+      engine.retryConversation.mockRejectedValue(new RunEngineError("NOT_RETRYABLE", "no"));
+      await expect(client().retry({ id: "c-1" })).rejects.toSatisfy(
+        (error: ORPCError<string, { reason: string }>) => {
+          expect(error.code).toBe("CONFLICT");
+          expect(error.data).toEqual({ reason: "NOT_RETRYABLE" });
+          return true;
+        },
+      );
+      await expect(client().retry({ id: "c-1", version: "1", ref: "main" })).rejects.toSatisfy(
+        expectReason("BAD_REQUEST"),
+      );
     });
   });
 

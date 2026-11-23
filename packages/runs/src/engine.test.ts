@@ -2918,3 +2918,443 @@ describe("stopAllForOwner (archive/delete)", () => {
     expect(exploreRun).not.toHaveBeenCalled();
   });
 });
+
+describe("web conversations resolve inside their first run", () => {
+  const open = (
+    engine: ReturnType<typeof makeEngine>,
+    extra: { version?: string; ref?: string } = {},
+  ) =>
+    engine.openConversation({
+      ownerId: OWNER,
+      packageId: "pkg1",
+      text: "How do I pad?",
+      version: extra.version ?? null,
+      ref: extra.ref ?? null,
+      origin: "web",
+    });
+  const repoError = (code: string, details: Record<string, unknown> = {}) =>
+    Object.assign(new Error(`${code} detail with /data/repos path and stderr`), {
+      name: "RepoError",
+      code,
+      details,
+    });
+  const phasesOf = (runId: string) =>
+    events.flatMap(({ event }) =>
+      event.type === "run.phase" && event.runId === runId
+        ? [event.detail ? `${event.phase}:${event.detail}` : event.phase]
+        : [],
+    );
+
+  it("answers before resolving, then resolves, saves the commit and runs the agent", async () => {
+    const gate = deferred();
+    let seenSignal: AbortSignal | undefined;
+    vi.mocked(deps.repos.resolveTarget).mockImplementation(async (input) => {
+      seenSignal = input.signal;
+      input.onProgress?.("cloning");
+      await gate.promise;
+      input.onProgress?.("fetching");
+      return {
+        sha: SHA,
+        resolvedFrom: "tag:v1.3.0",
+        repositoryId: "repo1",
+        stale: false,
+        fetchedAt: null,
+      };
+    });
+    const engine = makeEngine();
+    const started = await open(engine, { version: "1.3.0" });
+    // The conversation exists, unresolved, while the clone is still running.
+    const conversation = store.conversations.get(started.conversationId);
+    expect(conversation).toMatchObject({
+      commitSha: null,
+      checkoutId: null,
+      requestedVersion: "1.3.0",
+    });
+    await settle();
+    expect(engine.liveState(OWNER, started.conversationId).runs[0]).toMatchObject({
+      phase: "resolving",
+      phaseDetail: "cloning",
+    });
+    expect(exploreRun).not.toHaveBeenCalled();
+    // The run owns the clone: the signal is the run's, not a request's.
+    expect(seenSignal?.aborted).toBe(false);
+    gate.resolve();
+    const snapshot = await engine.waitForRun({
+      ownerId: OWNER,
+      runId: started.runId,
+      timeoutMs: 5_000,
+    });
+    expect(snapshot.status).toBe("completed");
+    expect(store.conversations.get(started.conversationId)).toMatchObject({
+      commitSha: SHA,
+      resolvedFrom: "tag:v1.3.0",
+    });
+    expect(store.conversations.get(started.conversationId)?.checkoutId).toBeTruthy();
+    expect(store.runs.get(started.runId)?.checkoutId).toBe(
+      store.conversations.get(started.conversationId)?.checkoutId,
+    );
+    expect(phasesOf(started.runId)).toEqual([
+      "resolving",
+      "resolving:cloning",
+      "resolving:fetching",
+      "preparing",
+      "queued",
+      "running",
+    ]);
+    expect(events.map(({ event }) => event)).toContainEqual({
+      type: "conversation.resolved",
+      runId: started.runId,
+      commitSha: SHA,
+      resolvedFrom: "tag:v1.3.0",
+      stale: false,
+    });
+    expect(vi.mocked(deps.repos.resolveTarget).mock.calls[0]?.[0]).toMatchObject({
+      version: "1.3.0",
+      ref: null,
+    });
+  });
+
+  it("ends failed / resolve-failed with a client-safe failure, keeping git detail server-side", async () => {
+    vi.mocked(deps.repos.resolveTarget).mockRejectedValue(
+      repoError("VERSION_NOT_FOUND", { nearestTags: ["v1.3.1", "v1.2.9"] }),
+    );
+    const engine = makeEngine();
+    const started = await open(engine, { version: "1.3.0" });
+    const snapshot = await engine.waitForRun({
+      ownerId: OWNER,
+      runId: started.runId,
+      timeoutMs: 5_000,
+    });
+    expect(snapshot).toMatchObject({ status: "failed", stopReason: "resolve-failed" });
+    const row = store.runs.get(started.runId);
+    expect(row?.failure).toEqual({
+      reason: "VERSION_NOT_FOUND",
+      nearestTags: ["v1.3.1", "v1.2.9"],
+    });
+    expect(row?.error).toContain("VERSION_NOT_FOUND");
+    expect(row?.startedAt).toBeNull();
+    const finished = events.find(({ event }) => event.type === "run.finished")?.event;
+    expect(finished).toMatchObject({
+      failure: { reason: "VERSION_NOT_FOUND", nearestTags: ["v1.3.1", "v1.2.9"] },
+    });
+    expect(exploreRun).not.toHaveBeenCalled();
+    // The question is saved all the same.
+    expect(await store.loadRunQuestion(started.runId)).toBe("How do I pad?");
+  });
+
+  it("keeps only the host and port of an unconfirmed host key, and no detail of other errors", async () => {
+    vi.mocked(deps.repos.resolveTarget).mockRejectedValueOnce(
+      repoError("HOST_KEY_UNCONFIRMED", { host: "git.example.com", port: 2222, reason: "x" }),
+    );
+    const engine = makeEngine();
+    const first = await open(engine);
+    await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+    expect(store.runs.get(first.runId)?.failure).toEqual({
+      reason: "HOST_KEY_UNCONFIRMED",
+      host: "git.example.com",
+      port: 2222,
+    });
+    vi.mocked(deps.repos.resolveTarget).mockRejectedValueOnce(new Error("ECONNRESET /secret/path"));
+    const second = await open(engine);
+    const snapshot = await engine.waitForRun({
+      ownerId: OWNER,
+      runId: second.runId,
+      timeoutMs: 5_000,
+    });
+    expect(snapshot).toMatchObject({ status: "failed", stopReason: "resolve-failed" });
+    expect(store.runs.get(second.runId)?.failure).toBeUndefined();
+  });
+
+  it("stops a resolving run: the clone's signal aborts and the run ends stopped", async () => {
+    let seenSignal: AbortSignal | undefined;
+    vi.mocked(deps.repos.resolveTarget).mockImplementation(
+      (input) =>
+        new Promise((_, reject) => {
+          seenSignal = input.signal;
+          input.signal?.addEventListener("abort", () => reject(input.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const engine = makeEngine();
+    const started = await open(engine);
+    await settle();
+    await expect(
+      engine.stop({ ownerId: OWNER, conversationId: started.conversationId }),
+    ).resolves.toBe(true);
+    const snapshot = await engine.waitForRun({
+      ownerId: OWNER,
+      runId: started.runId,
+      timeoutMs: 5_000,
+    });
+    expect(seenSignal?.aborted).toBe(true);
+    expect(snapshot.status).toBe("stopped");
+    expect(store.conversations.get(started.conversationId)?.commitSha).toBeNull();
+  });
+
+  it("a shutdown interrupts a resolving run (and boot recovery would too)", async () => {
+    vi.mocked(deps.repos.resolveTarget).mockImplementation(
+      (input) =>
+        new Promise((_, reject) => {
+          input.signal?.addEventListener("abort", () => reject(input.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const engine = makeEngine();
+    const started = await open(engine);
+    await settle();
+    await engine.shutdown(1_000);
+    expect(store.runs.get(started.runId)?.status).toBe("interrupted");
+  });
+
+  it("refuses up front, opening nothing, when the queue is full or no model is set", async () => {
+    const engine = makeEngine({ config: { ...config, apiKey: undefined } });
+    await expect(open(engine)).rejects.toMatchObject({ code: "MODEL_NOT_CONFIGURED" });
+    expect(store.conversations.size).toBe(0);
+    await expect(
+      makeEngine().openConversation({
+        ownerId: OTHER,
+        packageId: "pkg1",
+        text: "q",
+        origin: "web",
+      }),
+    ).rejects.toMatchObject({ code: "PACKAGE_NOT_FOUND" });
+    expect(store.conversations.size).toBe(0);
+  });
+
+  describe("retryConversation", () => {
+    it("asks the same question again after a resolution failure, on a nearest tag", async () => {
+      vi.mocked(deps.repos.resolveTarget).mockRejectedValueOnce(
+        repoError("VERSION_NOT_FOUND", { nearestTags: ["v1.3.1"] }),
+      );
+      const engine = makeEngine();
+      const first = await open(engine, { version: "1.3.0" });
+      await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+      const retried = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+        ref: "v1.3.1",
+      });
+      expect(retried.conversationId).toBe(first.conversationId);
+      expect(retried.runId).not.toBe(first.runId);
+      const snapshot = await engine.waitForRun({
+        ownerId: OWNER,
+        runId: retried.runId,
+        timeoutMs: 5_000,
+      });
+      expect(snapshot.status).toBe("completed");
+      expect(store.conversations.get(first.conversationId)).toMatchObject({
+        requestedVersion: null,
+        requestedRef: "v1.3.1",
+        commitSha: SHA,
+      });
+      expect(vi.mocked(deps.repos.resolveTarget).mock.calls.at(-1)?.[0]).toMatchObject({
+        version: null,
+        ref: "v1.3.1",
+      });
+      // Same question, and the failed attempt is not in the agent's history.
+      const options = exploreRun.mock.calls.at(-1)?.[0];
+      expect(options?.question).toBe("How do I pad?");
+      expect(options?.history).toEqual([]);
+      // The failed attempt stays in the transcript.
+      expect(store.runs.get(first.runId)?.status).toBe("failed");
+      // An open view hears about the new target.
+      expect(events.map(({ event }) => event)).toContainEqual({
+        type: "conversation.retargeted",
+        runId: retried.runId,
+        requestedVersion: null,
+        requestedRef: "v1.3.1",
+      });
+    });
+
+    it("keeps every attempt that never reached the agent out of the history", async () => {
+      vi.mocked(deps.repos.resolveTarget)
+        .mockRejectedValueOnce(repoError("GIT_FAILED"))
+        .mockRejectedValueOnce(repoError("GIT_TIMEOUT"));
+      const engine = makeEngine();
+      const first = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+      const second = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: second.runId, timeoutMs: 5_000 });
+      expect(store.runs.get(second.runId)?.status).toBe("failed");
+      const third = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: third.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "completed" });
+      expect(exploreRun.mock.calls.at(-1)?.[0].history).toEqual([]);
+      // A follow-up's history has the answered question once, not the failed attempts.
+      const follow = await engine.sendMessage({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+        text: "And then?",
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: follow.runId, timeoutMs: 5_000 });
+      const history = exploreRun.mock.calls.at(-1)?.[0].history ?? [];
+      const questions = history.filter((message) => message.role === "user");
+      expect(questions).toHaveLength(1);
+    });
+
+    it("retries an interrupted or stopped run that never started, keeping the target", async () => {
+      const engine = makeEngine();
+      const first = await open(engine, { version: "1.3.0" });
+      await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+      // Simulate a restart before the agent started.
+      const row = store.runs.get(first.runId);
+      if (!row) throw new Error("no run");
+      Object.assign(row, { status: "interrupted", startedAt: null });
+      store.conversations.get(first.conversationId)!.commitSha = null;
+      const retried = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: retried.runId, timeoutMs: 5_000 });
+      expect(vi.mocked(deps.repos.resolveTarget).mock.calls.at(-1)?.[0]).toMatchObject({
+        version: "1.3.0",
+      });
+    });
+
+    it("refuses a run that reached the agent, a live run, a retarget once resolved, and others' conversations", async () => {
+      const engine = makeEngine();
+      const done = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: done.runId, timeoutMs: 5_000 });
+      await expect(
+        engine.retryConversation({ ownerId: OWNER, conversationId: done.conversationId }),
+      ).rejects.toMatchObject({ code: "NOT_RETRYABLE" });
+      await expect(
+        engine.retryConversation({ ownerId: OTHER, conversationId: done.conversationId }),
+      ).rejects.toMatchObject({ code: "CONVERSATION_NOT_FOUND" });
+
+      const gate = deferred();
+      vi.mocked(deps.repos.resolveTarget).mockImplementationOnce(async () => {
+        await gate.promise;
+        throw repoError("GIT_FAILED");
+      });
+      const live = await open(engine);
+      await settle();
+      await expect(
+        engine.retryConversation({ ownerId: OWNER, conversationId: live.conversationId }),
+      ).rejects.toMatchObject({ code: "RUN_ACTIVE" });
+      gate.resolve();
+      await engine.waitForRun({ ownerId: OWNER, runId: live.runId, timeoutMs: 5_000 });
+
+      // Resolved, then failed while preparing the checkout: a retry, but no retarget.
+      materialize.mockRejectedValueOnce(new Error("disk full"));
+      const prep = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: prep.runId, timeoutMs: 5_000 });
+      expect(store.runs.get(prep.runId)).toMatchObject({ status: "failed", startedAt: null });
+      await expect(
+        engine.retryConversation({ ownerId: OWNER, conversationId: prep.conversationId, ref: "x" }),
+      ).rejects.toMatchObject({ code: "NOT_RETRYABLE" });
+      const again = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: prep.conversationId,
+      });
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: again.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "completed" });
+    });
+  });
+
+  describe("sweepStaleRuns", () => {
+    it("closes a helper whose main run is gone, but never one still executing", async () => {
+      const engine = makeEngine();
+      const orphanHelper = await store.createRun({
+        ownerId: OWNER,
+        conversationId: null,
+        parentRunId: "main-gone",
+        checkoutId: null,
+        kind: "helper",
+        trigger: "web_message",
+        status: "running",
+        model: "m",
+        focus: "x",
+        startedAt: new Date(),
+      });
+      store.runs.get(orphanHelper.id)!.createdAtDate = new Date(Date.now() - 10 * 60_000);
+      await expect(engine.sweepStaleRuns(5 * 60_000)).resolves.toBe(1);
+      expect(store.runs.get(orphanHelper.id)?.status).toBe("interrupted");
+    });
+
+    it("interrupts old active rows no live run owns, and leaves live and recent ones", async () => {
+      const engine = makeEngine();
+      const gate = deferred();
+      vi.mocked(deps.repos.resolveTarget).mockImplementationOnce(async () => {
+        await gate.promise;
+        throw repoError("GIT_FAILED");
+      });
+      const live = await open(engine);
+      await settle();
+      const orphan = await store.createRun({
+        ownerId: OWNER,
+        conversationId: live.conversationId,
+        parentRunId: null,
+        checkoutId: null,
+        kind: "main",
+        trigger: "web_message",
+        status: "queued",
+        model: "m",
+        focus: null,
+        startedAt: null,
+      });
+      const recent = await store.createRun({
+        ownerId: OWNER,
+        conversationId: null,
+        parentRunId: null,
+        checkoutId: null,
+        kind: "summary",
+        trigger: "summary",
+        status: "running",
+        model: "m",
+        focus: null,
+        startedAt: null,
+      });
+      const helper = await store.createRun({
+        ownerId: OWNER,
+        conversationId: live.conversationId,
+        parentRunId: live.runId,
+        checkoutId: null,
+        kind: "helper",
+        trigger: "web_message",
+        status: "running",
+        model: "m",
+        focus: "x",
+        startedAt: new Date(),
+      });
+      store.runs.get(helper.id)!.createdAtDate = new Date(Date.now() - 10 * 60_000);
+      store.runs.get(orphan.id)!.createdAtDate = new Date(Date.now() - 10 * 60_000);
+      store.runs.get(live.runId)!.createdAtDate = new Date(Date.now() - 10 * 60_000);
+      await expect(engine.sweepStaleRuns(5 * 60_000)).resolves.toBe(1);
+      expect(store.runs.get(orphan.id)?.status).toBe("interrupted");
+      expect(store.runs.get(recent.id)?.status).toBe("running");
+      expect(store.runs.get(live.runId)?.status).toBe("queued");
+      // A live main run's helpers are not in the live map: never swept.
+      expect(store.runs.get(helper.id)?.status).toBe("running");
+      // An open live view and the live lists hear about the swept run.
+      expect(events).toContainEqual({
+        topic: live.conversationId,
+        event: {
+          type: "run.finished",
+          runId: orphan.id,
+          status: "interrupted",
+          stopReason: "interrupted",
+          answer: null,
+          error: null,
+          failure: null,
+        },
+      });
+      expect(activityEvents).toContainEqual({
+        topic: OWNER,
+        event: { conversationId: live.conversationId, runId: orphan.id, change: "finished" },
+      });
+      gate.resolve();
+      await engine.waitForRun({ ownerId: OWNER, runId: live.runId, timeoutMs: 5_000 });
+    });
+  });
+});

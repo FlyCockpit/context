@@ -14,6 +14,7 @@ import {
   preparePackageSource,
   refSchema,
   serializePackage,
+  startPreparedSnapshot,
   subdirectorySchema,
   tagPatternSchema,
 } from "../lib/packages";
@@ -193,6 +194,9 @@ export const proposalsRouter = {
           await discardPreparedSnapshot(source);
           throw error;
         });
+      // A one-time key's clone runs in the background from here; the package
+      // shows its progress (docs/deploy.md).
+      await startPreparedSnapshot(source);
       return { created: true, packageId: pkg.id, package: serializePackage(pkg) };
     }),
 

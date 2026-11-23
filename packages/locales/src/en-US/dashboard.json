@@ -526,7 +526,12 @@
       "updated": "Snapshot updated.",
       "failed": "Couldn’t update the snapshot. Try again.",
       "lastUpdated": "Last updated",
-      "deleteWarning": "This snapshot cannot be restored without your SSH key. Its conversations keep the package name."
+      "deleteWarning": "This snapshot cannot be restored without your SSH key. Its conversations keep the package name.",
+      "cloning": "Cloning the snapshot with your key…",
+      "refreshing": "Updating the snapshot with your key…",
+      "syncFailed": "The last snapshot update didn’t finish.",
+      "started": "Snapshot update started. This page shows when it’s done.",
+      "runningHint": "This runs on the server: you can leave this page. Your key is held in memory only until it finishes."
     }
   },
   "checkouts": {
@@ -634,7 +639,7 @@
     "valueRequired": "Enter a version or a ref, or choose Default.",
     "submit": "Ask",
     "pending": "Starting…",
-    "resolving": "Finding that version. The first question about a package clones its repository, which can take a minute.",
+    "resolving": "Opening the conversation. If the repository has to be cloned first, you’ll see its progress there.",
     "failed": "Couldn’t start the investigation. Try again.",
     "nearestTags": "Tags close to that version. Pick one to ask about it:",
     "confirmHost": "Confirm the host’s SSH key",
@@ -722,12 +727,16 @@
       "streaming": "Writing…"
     },
     "phase": {
+      "resolving": "Finding that version…",
       "preparing": "Preparing the checkout…",
       "queued": "Waiting for a free slot…",
       "running": "Investigating…",
-      "finishing": "Writing the final answer…"
+      "finishing": "Writing the final answer…",
+      "cloning": "Cloning the repository…",
+      "fetching": "Fetching the latest changes…"
     },
     "phaseShort": {
+      "resolving": "Finding the version",
       "preparing": "Preparing checkout",
       "queued": "Waiting for a slot",
       "running": "Investigating",
@@ -770,7 +779,8 @@
       "package-deleted": "The package was deleted.",
       "model-error": "The model provider returned an error. Try again in a moment.",
       "engine-error": "Something went wrong on the server.",
-      "interrupted": "The server restarted while it was running."
+      "interrupted": "The server restarted while it was running.",
+      "resolve-failed": "The version you asked about couldn’t be found or fetched."
     },
     "composer": {
       "steerLabel": "Steer the agent",
@@ -788,7 +798,9 @@
         "preparing": "Getting the checkout ready. You can steer once the agent starts.",
         "recreating": "Re-creating this version’s checkout. You can steer once the agent starts.",
         "finishing": "The agent is writing its final answer, so it can’t take new instructions. Ask a follow-up once it finishes.",
-        "packageDeleted": "This package was deleted, so this conversation can’t continue."
+        "packageDeleted": "This package was deleted, so this conversation can’t continue.",
+        "resolving": "Finding the version you asked about. You can steer once the agent starts.",
+        "retry": "This question never reached the agent, so there’s nothing to follow up on yet. Try it again above."
       },
       "nothingToStop": "Nothing was running.",
       "steerTooLate": "The agent has already finished its investigation. Ask a follow-up instead; your text is still in the box.",
@@ -803,6 +815,13 @@
       "typePrompt": "Type “{{token}}” to confirm",
       "copy": "Copy the confirmation word",
       "done": "Conversation deleted."
+    },
+    "resolvingHint": "A package’s first question clones its repository, which can take a few minutes. You can leave this page: the work goes on, and the answer will be here.",
+    "retry": {
+      "action": "Try again",
+      "pending": "Retrying…",
+      "failed": "Couldn’t ask again. Try again in a moment.",
+      "nearestTags": "Tags close to that version. Pick one to ask about it instead:"
     }
   },
   "conversations": {

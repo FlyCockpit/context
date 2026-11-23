@@ -4,6 +4,7 @@ import {
   deleteCheckout,
   deleteRepository,
   maxStorageBytes,
+  REQUEST_LOCK_WAIT_MS,
   totalStorageBytes,
 } from "@cockpit-context/repos";
 import { pruneStorageJob } from "@cockpit-context/repos/jobs";
@@ -122,8 +123,8 @@ export const adminStorageRouter = {
     .handler(async ({ input }) => {
       const { freedBytes } = await withDomainErrors(() =>
         input.kind === "checkout"
-          ? deleteCheckout(input.id, { force: input.force })
-          : deleteRepository(input.id, { force: input.force }),
+          ? deleteCheckout(input.id, { force: input.force, lockWaitMs: REQUEST_LOCK_WAIT_MS })
+          : deleteRepository(input.id, { force: input.force, lockWaitMs: REQUEST_LOCK_WAIT_MS }),
       );
       return { freedBytes: Number(freedBytes) };
     }),

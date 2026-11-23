@@ -1,6 +1,6 @@
 import prisma, { type Prisma } from "@cockpit-context/db";
 import {
-  createSnapshotRepository,
+  createSnapshotRepositoryRow,
   deleteRepository,
   ECOSYSTEMS,
   type Ecosystem,
@@ -24,6 +24,7 @@ import { findOwnedOrThrow } from "./ownership";
 import { createProcedureBudget } from "./procedure-budget";
 import { cockpitContextRateBudget } from "./rate-budgets";
 import { entityId, longText, shortText } from "./schemas";
+import { startSnapshotSync } from "./snapshot-tasks";
 import { consumeKeyWriteBudget, pastedSshKeySchema } from "./ssh-key-input";
 
 /**
@@ -197,6 +198,9 @@ export const packageViewSelect = {
       visibility: true,
       defaultBranch: true,
       lastFetchedAt: true,
+      snapshotSyncStatus: true,
+      snapshotSyncError: true,
+      snapshotSyncStartedAt: true,
     },
   },
 } satisfies Prisma.PackageSelect;
@@ -228,6 +232,16 @@ export function serializePackage(row: PackageViewRow) {
           visibility: lower(row.Repository.visibility),
           defaultBranch: row.Repository.defaultBranch,
           lastFetchedAt: row.Repository.lastFetchedAt,
+          /**
+           * A snapshot's background clone or refresh with a pasted key:
+           * `running`, `failed` (with the RepoError code, never git output)
+           * or `none`. Always `none` for other repositories.
+           */
+          snapshotSync: {
+            status: lower(row.Repository.snapshotSyncStatus),
+            error: row.Repository.snapshotSyncError,
+            startedAt: row.Repository.snapshotSyncStartedAt,
+          },
         }
       : null,
   };
@@ -288,12 +302,15 @@ export async function createPackageForOwner(
 ): Promise<PackageViewRow> {
   normalizeNameOrThrow(draft.ecosystem, draft.name);
   const source = await preparePackageSource(ownerId, draft);
+  let row: PackageViewRow;
   try {
-    return await insertPackage(prisma, ownerId, { ...draft, ...source });
+    row = await insertPackage(prisma, ownerId, { ...draft, ...source });
   } catch (error) {
     await discardPreparedSnapshot(source);
     throw error;
   }
+  await startPreparedSnapshot(source);
+  return row;
 }
 
 /** Human-only create/approve source preparation; MCP calls never accept oneTimeKey. */
@@ -331,21 +348,68 @@ export async function preparePackageSource(
         key.privateKey,
         key.passphrase || undefined,
       );
-      const repo = await createSnapshotRepository(
-        { gitUrl: remote.remoteUrl, ownerId },
-        normalized.privateKey,
+      // Only the row now; the clone runs in the background once the package
+      // exists (startPreparedSnapshot), so this request never waits for it.
+      const repo = await createSnapshotRepositoryRow({ gitUrl: remote.remoteUrl, ownerId });
+      const prepared = {
+        gitUrl: remote.remoteUrl,
+        sshKeyId: null,
+        isSnapshot: true,
+        repositoryId: repo.id,
+      };
+      const privateKey = normalized.privateKey;
+      pendingSnapshotClones.set(prepared, () =>
+        startSnapshotSync({
+          repositoryId: repo.id,
+          ownerId,
+          privateKey,
+          kind: "clone",
+        }).then(() => {}),
       );
-      return { gitUrl: remote.remoteUrl, sshKeyId: null, isSnapshot: true, repositoryId: repo.id };
+      return prepared;
     } catch (error) {
       throw safeSnapshotError(error);
     }
   });
 }
 
+/**
+ * Prepared snapshot sources → the start of their background clone. The key
+ * lives only in that closure: never on the source object, which callers
+ * spread into package rows.
+ */
+const pendingSnapshotClones = new WeakMap<object, () => Promise<void>>();
+
+/**
+ * After the package row exists: start the prepared snapshot's background
+ * clone (no-op for any other source). It never throws: a start that fails
+ * leaves the snapshot FAILED for the package page to offer a retry.
+ */
+export async function startPreparedSnapshot(source: object): Promise<void> {
+  const start = pendingSnapshotClones.get(source);
+  if (!start) return;
+  pendingSnapshotClones.delete(source);
+  const { repositoryId } = source as { repositoryId?: string };
+  try {
+    await start();
+  } catch (error) {
+    console.warn(`[snapshots] could not start the clone of ${repositoryId}`, error);
+    if (repositoryId) {
+      await prisma.repository
+        .updateMany({
+          where: { id: repositoryId },
+          data: { snapshotSyncStatus: "FAILED", snapshotSyncError: "GIT_FAILED" },
+        })
+        .catch(() => {});
+    }
+  }
+}
+
 export async function discardPreparedSnapshot(source: {
   isSnapshot?: boolean;
   repositoryId?: string;
 }) {
+  pendingSnapshotClones.delete(source);
   if (source.isSnapshot && source.repositoryId)
     await deleteRepository(source.repositoryId).catch(() => {});
 }

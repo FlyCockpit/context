@@ -1,6 +1,6 @@
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { enqueueJob, MINUTE, slotStart } from "@cockpit-context/jobs";
-import { deleteCheckout } from "@cockpit-context/repos";
+import { deleteCheckout, REQUEST_LOCK_WAIT_MS } from "@cockpit-context/repos";
 import { fetchRepositoryJob } from "@cockpit-context/repos/jobs";
 import { getRunEngine, loadRunConfig } from "@cockpit-context/runs";
 import { invalidateAnswersForRepository } from "@cockpit-context/runs/answer-reuse";
@@ -230,7 +230,9 @@ export const repositoriesRouter = {
     .input(z.object({ checkoutId: entityId }))
     .handler(async ({ input, context }) => {
       await ownedPackageForCheckout(context, input.checkoutId);
-      const { freedBytes } = await withDomainErrors(() => deleteCheckout(input.checkoutId));
+      const { freedBytes } = await withDomainErrors(() =>
+        deleteCheckout(input.checkoutId, { lockWaitMs: REQUEST_LOCK_WAIT_MS }),
+      );
       return { freedBytes: Number(freedBytes) };
     }),
 

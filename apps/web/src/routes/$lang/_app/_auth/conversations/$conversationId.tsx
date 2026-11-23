@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 
 import { Composer } from "@/components/conversations/composer";
 import { ConversationHeader } from "@/components/conversations/conversation-header";
-import { TranscriptBlocks } from "@/components/conversations/transcript";
+import { type RetryControls, TranscriptBlocks } from "@/components/conversations/transcript";
 import { EmptyState } from "@/components/empty-state";
 import { InlineRetry } from "@/components/inline-retry";
 import { useConversationWatch } from "@/hooks/use-conversation-watch";
@@ -21,6 +21,7 @@ import {
   composerMode,
   isActive,
   latestMainRun,
+  retryableRun,
   transcriptActivityKey,
 } from "@/lib/conversations";
 import { errorCode, errorReason, friendly } from "@/utils/friendly-error";
@@ -49,6 +50,7 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
   const { state } = watch;
   const blocks = useMemo(() => (state ? buildTranscript(state) : []), [state]);
   const scroll = useStickToBottom(transcriptActivityKey(state), conversationId);
+  const retry = useRetryControls(state, conversationId, lang);
 
   if (!state) {
     if (watch.status === "failed") {
@@ -115,7 +117,7 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
               {t("dashboard:conversation.truncated")}
             </p>
           ) : null}
-          <TranscriptBlocks blocks={blocks} askedBy={askedBy} />
+          <TranscriptBlocks blocks={blocks} askedBy={askedBy} retry={retry} />
         </section>
         {scroll.following ? null : (
           <button
@@ -138,6 +140,40 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
       </div>
     </div>
   );
+}
+
+/**
+ * Retry for a question whose run never reached the agent (the version did
+ * not resolve, or it was stopped or interrupted first): the ended note's
+ * actions. The new run arrives through the live view like any other.
+ */
+function useRetryControls(
+  state: ConversationViewState | null,
+  conversationId: string,
+  lang: string,
+): RetryControls | null {
+  const { t } = useTranslation(["dashboard"]);
+  const queryClient = useQueryClient();
+  const retry = useMutation({
+    ...orpc.conversations.retry.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: orpc.conversations.list.key() });
+        void queryClient.invalidateQueries({ queryKey: orpc.home.key() });
+      },
+      onError: (error) => {
+        toast.error(friendly(error, t("dashboard:conversation.retry.failed")));
+      },
+    }),
+    meta: { skipGlobalErrorToast: true },
+  });
+  const run = state ? retryableRun(state) : null;
+  if (!run) return null;
+  return {
+    runId: run.id,
+    pending: retry.isPending,
+    lang,
+    onRetry: (target) => retry.mutate({ id: conversationId, ...(target ?? {}) }),
+  };
 }
 
 function ConversationComposer({

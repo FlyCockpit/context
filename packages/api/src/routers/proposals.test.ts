@@ -34,7 +34,8 @@ vi.mock("@cockpit-context/repos", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@cockpit-context/repos")>()),
   validateRemoteUrl: vi.fn(),
   normalizeImportedPrivateKey: vi.fn(),
-  createSnapshotRepository: vi.fn(),
+  createSnapshotRepositoryRow: vi.fn(),
+  cloneRepository: vi.fn(),
   deleteRepository: vi.fn(),
 }));
 
@@ -282,14 +283,27 @@ it("lets the owner approve an SSH proposal with a one-time key without persistin
     privateKey: "NORMALIZED",
     publicKey: { keyType: "ssh-ed25519", publicKey: "public", fingerprint: "fp" },
   });
-  vi.mocked(repos.createSnapshotRepository).mockResolvedValue({ id: "snapshot-repo" } as Awaited<
-    ReturnType<typeof repos.createSnapshotRepository>
-  >);
+  vi.mocked(repos.createSnapshotRepositoryRow).mockResolvedValue({
+    id: "snapshot-repo",
+  } as Awaited<ReturnType<typeof repos.createSnapshotRepositoryRow>>);
+  vi.mocked(prisma.repository.updateMany).mockResolvedValue({ count: 1 });
+  let finishClone: () => void = () => {};
+  vi.mocked(repos.cloneRepository).mockReturnValue(
+    new Promise((resolve) => {
+      finishClone = () => resolve({} as Awaited<ReturnType<typeof repos.cloneRepository>>);
+    }),
+  );
+  // Answers while the clone is still running (it was never awaited).
   await client().approve({
     id: "prop-1",
     gitUrl: "git@example.com:me/requests",
     oneTimeKey: { privateKey: "PASTED_SENTINEL" },
   });
+  expect(repos.cloneRepository).toHaveBeenCalledWith("snapshot-repo", {
+    privateKey: "NORMALIZED",
+    signal: expect.any(AbortSignal),
+  });
+  finishClone();
   expect(db.package.create).toHaveBeenCalledWith(
     expect.objectContaining({
       data: expect.objectContaining({
@@ -300,8 +314,12 @@ it("lets the owner approve an SSH proposal with a one-time key without persistin
       }),
     }),
   );
-  expect(
-    JSON.stringify([db.package.create.mock.calls, db.packageProposal.updateMany.mock.calls]),
-  ).not.toContain("PASTED_SENTINEL");
+  const writes = JSON.stringify([
+    db.package.create.mock.calls,
+    db.packageProposal.updateMany.mock.calls,
+    vi.mocked(prisma.repository.updateMany).mock.calls,
+  ]);
+  expect(writes).not.toContain("PASTED_SENTINEL");
+  expect(writes).not.toContain("NORMALIZED");
   expect(budget.keys).toContain("rl:ssh-keys-write:user:user-a");
 });

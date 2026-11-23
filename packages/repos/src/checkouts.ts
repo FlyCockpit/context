@@ -9,7 +9,7 @@ import { withGitNetwork } from "./network";
 import {
   assertFullSha,
   checkoutDir,
-  removeInsideDataDir,
+  moveToTrash,
   repositoryCheckoutsDir,
   repositoryDir,
 } from "./paths";
@@ -69,10 +69,10 @@ export async function removeWorktree(repositoryId: string, path: string): Promis
     () => true,
     () => false,
   );
-  if (hasRepo) {
-    await runGit(["worktree", "remove", "--force", "--force", path], { gitDir }).catch(() => {});
-  }
-  await removeInsideDataDir(path);
+  // Renamed away in one step (the files go in the background, ./paths.ts);
+  // `git worktree prune` then drops the worktree's metadata, since its
+  // directory is gone, so the same path can be added again at once.
+  await moveToTrash(path);
   if (hasRepo) await runGit(["worktree", "prune"], { gitDir }).catch(() => {});
 }
 
@@ -229,7 +229,7 @@ export async function materializeCheckout(
  */
 export async function deleteCheckout(
   checkoutId: string,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; lockWaitMs?: number } = {},
   deps: GitLayerDeps = {},
 ): Promise<{ freedBytes: bigint }> {
   const row = await prisma.checkout.findUnique({
@@ -237,18 +237,29 @@ export async function deleteCheckout(
     select: checkoutSelect,
   });
   if (!row) throw new RepoError("CHECKOUT_NOT_FOUND", "Checkout not found.");
-  return withLock(repositoryLockKey(row.repositoryId), async () => {
-    if (!options.force) {
-      const leased = await prisma.checkoutLease.count({
-        where: { checkoutId, expiresAt: { gt: deps.now?.() ?? new Date() } },
+  return withLock(
+    repositoryLockKey(row.repositoryId),
+    async () => {
+      // Deleted by whoever held the lock before us.
+      const current = await prisma.checkout.findUnique({
+        where: { id: checkoutId },
+        select: { id: true },
       });
-      if (leased > 0) {
-        throw new RepoError("CHECKOUT_LEASED", "A running investigation is using this checkout.");
+      if (!current) throw new RepoError("CHECKOUT_NOT_FOUND", "Checkout not found.");
+      if (!options.force) {
+        const leased = await prisma.checkoutLease.count({
+          where: { checkoutId, expiresAt: { gt: deps.now?.() ?? new Date() } },
+        });
+        if (leased > 0) {
+          throw new RepoError("CHECKOUT_LEASED", "A running investigation is using this checkout.");
+        }
       }
-    }
-    await notifyCheckoutRemoval([checkoutId]);
-    await removeWorktree(row.repositoryId, checkoutDir(row.repositoryId, row.sha));
-    await prisma.checkout.delete({ where: { id: checkoutId }, select: { id: true } });
-    return { freedBytes: row.diskBytes };
-  });
+      await notifyCheckoutRemoval([checkoutId]);
+      await removeWorktree(row.repositoryId, checkoutDir(row.repositoryId, row.sha));
+      await prisma.checkout.delete({ where: { id: checkoutId }, select: { id: true } });
+      return { freedBytes: row.diskBytes };
+    },
+    undefined,
+    options.lockWaitMs === undefined ? {} : { waitMs: options.lockWaitMs },
+  );
 }

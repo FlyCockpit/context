@@ -31,6 +31,7 @@
     "REPOSITORY_NOT_FOUND": "The repository wasn’t found.",
     "CHECKOUT_NOT_FOUND": "That checkout wasn’t found. It may have been removed.",
     "CHECKOUT_LEASED": "A running question is reading this checkout. Try again when it finishes.",
+    "REPOSITORY_BUSY": "This repository is being cloned or fetched right now. Try again in a few minutes.",
     "GIT_FAILED": "The git server refused or failed the request.",
     "GIT_TIMEOUT": "The git server took too long to answer. Try again.",
     "MODEL_NOT_CONFIGURED": "No model is set up on this server. Ask the admin.",
@@ -63,7 +64,11 @@
     "JOB_NOT_FAILED": "Only failed jobs can be retried. This one has already moved on.",
     "PACKAGE_SNAPSHOT_REF_MISSING": "This version is not in the snapshot. Update it with your SSH key in Cockpit Context, then try again.",
     "PASSWORD_LINK_ADMIN_TARGET": "An administrator can't receive a password link. Demote the account to a user first.",
-    "PASSWORD_LINK_DELIVERY_FAILED": "The password link email couldn't be sent, so no link was issued. Check the mail settings and try again."
+    "PASSWORD_LINK_DELIVERY_FAILED": "The password link email couldn't be sent, so no link was issued. Check the mail settings and try again.",
+    "NOT_RETRYABLE": "This question already reached the agent. Ask a follow-up instead.",
+    "SNAPSHOT_INTERRUPTED": "The server restarted before the snapshot finished, and your key is never stored. Update it with your SSH key again.",
+    "SNAPSHOT_CANCELLED": "The snapshot update was cancelled.",
+    "PASSWORD_LINK_BUSY": "A password link for this user is still being sent. Try again in a moment."
   },
   "pageNotFound": {
     "title": "Page not found",

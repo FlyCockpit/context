@@ -5,12 +5,30 @@ import { createEventBus, type EventBus } from "@cockpit-context/jobs/event-bus";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "stopped" | "interrupted";
 export type RunKind = "main" | "helper" | "summary";
 /**
- * Where a live run is, finer than its status: `preparing` = making sure the
- * checkout exists (re-creating a pruned one can take a while), `queued` =
- * waiting for a concurrency slot, `running` = the agent loop, `finishing` =
- * the force-final synthesis (steering is closed).
+ * Where a live run is, finer than its status: `resolving` = turning a web
+ * conversation's version or ref into a commit (the first clone of a large
+ * repository can take minutes), `preparing` = making sure the checkout exists
+ * (re-creating a pruned one can take a while), `queued` = waiting for a
+ * concurrency slot, `running` = the agent loop, `finishing` = the force-final
+ * synthesis (steering is closed).
  */
-export type RunPhase = "preparing" | "queued" | "running" | "finishing";
+export type RunPhase = "resolving" | "preparing" | "queued" | "running" | "finishing";
+/** What a `resolving` run's git work is doing right now (absent while it only reads refs). */
+export type RunPhaseDetail = "cloning" | "fetching";
+
+/**
+ * Why a run failed before the agent started, in a shape safe for its owner:
+ * the stable RepoError code and its allowlisted details, never git output
+ * (`error` keeps that, server-side only).
+ */
+export interface RunFailure {
+  reason: string;
+  /** VERSION_NOT_FOUND: up to 10 tags near the requested version. */
+  nearestTags?: string[];
+  /** HOST_KEY_UNCONFIRMED: the host and port to confirm. */
+  host?: string;
+  port?: number;
+}
 export type TurnRole = "user" | "assistant" | "tool";
 
 export interface RunUsageView {
@@ -39,7 +57,23 @@ export interface TurnView {
  */
 export type RunEvent =
   | { type: "run.started"; runId: string; kind: RunKind; startedAt: string }
-  | { type: "run.phase"; runId: string; phase: RunPhase }
+  | { type: "run.phase"; runId: string; phase: RunPhase; detail?: RunPhaseDetail }
+  /** A retry asked about another target (`runId`: the new run). */
+  | {
+      type: "conversation.retargeted";
+      runId: string;
+      requestedVersion: string | null;
+      requestedRef: string | null;
+    }
+  /** A web conversation's version resolved inside its first run (phase `resolving`). */
+  | {
+      type: "conversation.resolved";
+      runId: string;
+      commitSha: string;
+      resolvedFrom: string;
+      /** A refresh failed and local refs were used. */
+      stale: boolean;
+    }
   | { type: "turn"; runId: string; parentRunId?: string; turn: TurnView }
   /** The in-flight (not yet finished) assistant message, throttled to ~10/s. */
   | { type: "delta"; runId: string; parentRunId?: string; message: AgentMessage }
@@ -65,6 +99,8 @@ export type RunEvent =
       stopReason: string | null;
       answer: string | null;
       error: string | null;
+      /** Client-safe reason of a failure before the agent started; null otherwise. */
+      failure?: RunFailure | null;
     };
 
 export type RunEventBus = EventBus<RunEvent>;

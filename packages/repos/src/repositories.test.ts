@@ -124,7 +124,7 @@ describe("ensureRepository", () => {
     );
     expect(await fixtureGit(dir, "config", "remote.origin.partialclonefilter")).toBe("blob:none");
     // Staging directories never survive.
-    expect(await readdir(path.join(state.dataDir, "repos"))).toEqual([`${repo.id}.git`]);
+    expect(await reposEntries()).toEqual([`${repo.id}.git`]);
   });
 
   it("does not clone again when the clone is READY", async () => {
@@ -199,7 +199,8 @@ describe("ensureRepository", () => {
     );
     const [row] = fake.repositories.values();
     expect(row).toMatchObject({ status: "FAILED", lastError: "connect refused" });
-    expect(await readdir(path.join(state.dataDir, "repos"))).toEqual([]);
+    // The staging dir went to the trash (removed in the background), not left in place.
+    expect(await reposEntries()).toEqual([]);
   });
 });
 
@@ -542,6 +543,17 @@ describe("clobberedTags", () => {
   });
 });
 
+/** The clone root's entries, without its trash directory. */
+async function reposEntries(): Promise<string[]> {
+  return (await readdir(path.join(state.dataDir, "repos"))).filter((entry) => entry !== ".trash");
+}
+
+/** A snapshot row, then its clone with the pasted key (what the API's background task does). */
+async function createSnapshot(source: { gitUrl: string; ownerId: string }, key: string) {
+  const row = await repos.createSnapshotRepositoryRow(source);
+  return repos.cloneRepository(row.id, { privateKey: key });
+}
+
 describe("snapshot repositories", () => {
   const source = { gitUrl: "ssh://git@example.com/o/r", ownerId: "user-1" };
   const key = "ONE_TIME_KEY_SENTINEL";
@@ -554,9 +566,9 @@ describe("snapshot repositories", () => {
   });
 
   it("isolates clones across users and packages and never persists key material", async () => {
-    const a = await repos.createSnapshotRepository(source, key);
-    const b = await repos.createSnapshotRepository({ ...source, ownerId: "user-2" }, key);
-    const c = await repos.createSnapshotRepository(source, key);
+    const a = await createSnapshot(source, key);
+    const b = await createSnapshot({ ...source, ownerId: "user-2" }, key);
+    const c = await createSnapshot(source, key);
     expect(new Set([a.id, b.id, c.id]).size).toBe(3);
     expect(a).toMatchObject({
       isSnapshot: true,
@@ -585,7 +597,7 @@ describe("snapshot repositories", () => {
   });
 
   it("never auto-fetches even stale branches and reports missing refs without registry requests", async () => {
-    const a = await repos.createSnapshotRepository(source, key);
+    const a = await createSnapshot(source, key);
     networkCalls.length = 0;
     const npmGitHead = vi.fn();
     await repos.resolveTarget(
@@ -610,7 +622,7 @@ describe("snapshot repositories", () => {
   });
 
   it("updates tags only on an explicit pasted-key update, records its timestamp, and scopes by owner", async () => {
-    const a = await repos.createSnapshotRepository(source, key);
+    const a = await createSnapshot(source, key);
     const name = "snapshot-added-tag";
     await fixtureGit(state.remoteDir, "tag", "-f", name);
     const packageInput = snapshotPkg(a.id);
@@ -630,7 +642,7 @@ describe("snapshot repositories", () => {
   });
 
   it("does not re-clone a manually removed snapshot without a key", async () => {
-    const a = await repos.createSnapshotRepository(source, key);
+    const a = await createSnapshot(source, key);
     await rm(repositoryDir(a.id), { recursive: true, force: true });
     networkCalls.length = 0;
     await expect(repos.resolveTarget({ package: snapshotPkg(a.id) })).rejects.toMatchObject({
@@ -640,7 +652,7 @@ describe("snapshot repositories", () => {
   });
 
   it("sanitizes thrown errors and persisted failure text", async () => {
-    const a = await repos.createSnapshotRepository(source, key);
+    const a = await createSnapshot(source, key);
     state.fail = true;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -659,7 +671,7 @@ describe("snapshot repositories", () => {
 });
 
 it("materializes and rebuilds snapshot checkouts without any network invocation", async () => {
-  const repo = await repos.createSnapshotRepository(
+  const repo = await createSnapshot(
     { gitUrl: "ssh://git@example.com/o/r", ownerId: "user-1" },
     "KEY",
   );

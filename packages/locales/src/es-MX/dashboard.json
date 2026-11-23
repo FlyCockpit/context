@@ -526,7 +526,12 @@
       "updated": "Instantánea actualizada.",
       "failed": "No se pudo actualizar la instantánea. Inténtalo de nuevo.",
       "lastUpdated": "Última actualización",
-      "deleteWarning": "Esta instantánea no se puede restaurar sin tu llave SSH. Sus conversaciones conservan el nombre del paquete."
+      "deleteWarning": "Esta instantánea no se puede restaurar sin tu llave SSH. Sus conversaciones conservan el nombre del paquete.",
+      "cloning": "Clonando la instantánea con tu llave…",
+      "refreshing": "Actualizando la instantánea con tu llave…",
+      "syncFailed": "La última actualización de la instantánea no terminó.",
+      "started": "Se inició la actualización de la instantánea. Esta página mostrará cuando termine.",
+      "runningHint": "Esto se ejecuta en el servidor: puedes salir de esta página. Tu llave solo se guarda en memoria hasta que termine."
     }
   },
   "checkouts": {
@@ -634,7 +639,7 @@
     "valueRequired": "Escribe una versión o una ref, o elige Predeterminado.",
     "submit": "Preguntar",
     "pending": "Iniciando…",
-    "resolving": "Buscando esa versión. La primera pregunta sobre un paquete clona su repositorio, lo que puede tardar un minuto.",
+    "resolving": "Abriendo la conversación. Si primero hay que clonar el repositorio, verás su avance ahí.",
     "failed": "No se pudo iniciar la investigación. Inténtalo de nuevo.",
     "nearestTags": "Tags cercanos a esa versión. Elige uno para preguntar sobre él:",
     "confirmHost": "Confirmar la llave SSH del host",
@@ -722,12 +727,16 @@
       "streaming": "Escribiendo…"
     },
     "phase": {
+      "resolving": "Buscando esa versión…",
       "preparing": "Preparando el checkout…",
       "queued": "Esperando un espacio libre…",
       "running": "Investigando…",
-      "finishing": "Escribiendo la respuesta final…"
+      "finishing": "Escribiendo la respuesta final…",
+      "cloning": "Clonando el repositorio…",
+      "fetching": "Obteniendo los cambios más recientes…"
     },
     "phaseShort": {
+      "resolving": "Buscando la versión",
       "preparing": "Preparando el checkout",
       "queued": "Esperando un espacio",
       "running": "Investigando",
@@ -770,7 +779,8 @@
       "package-deleted": "El paquete se eliminó.",
       "model-error": "El proveedor del modelo devolvió un error. Inténtalo de nuevo en un momento.",
       "engine-error": "Algo salió mal en el servidor.",
-      "interrupted": "El servidor se reinició mientras se ejecutaba."
+      "interrupted": "El servidor se reinició mientras se ejecutaba.",
+      "resolve-failed": "No se pudo encontrar ni obtener la versión que pediste."
     },
     "composer": {
       "steerLabel": "Guiar al agente",
@@ -788,7 +798,9 @@
         "preparing": "Preparando el checkout. Podrás guiar al agente en cuanto empiece.",
         "recreating": "Volviendo a crear el checkout de esta versión. Podrás guiar al agente en cuanto empiece.",
         "finishing": "El agente está escribiendo su respuesta final, así que no puede recibir nuevas indicaciones. Haz una pregunta de seguimiento cuando termine.",
-        "packageDeleted": "Este paquete se eliminó, así que esta conversación no puede continuar."
+        "packageDeleted": "Este paquete se eliminó, así que esta conversación no puede continuar.",
+        "resolving": "Buscando la versión que pediste. Podrás guiar al agente cuando empiece.",
+        "retry": "Esta pregunta nunca llegó al agente, así que todavía no hay nada que continuar. Vuelve a intentarlo arriba."
       },
       "nothingToStop": "No había nada en ejecución.",
       "steerTooLate": "El agente ya terminó su investigación. Haz una pregunta de seguimiento; tu texto sigue en el cuadro.",
@@ -803,6 +815,13 @@
       "typePrompt": "Escribe “{{token}}” para confirmar",
       "copy": "Copiar la palabra de confirmación",
       "done": "Conversación eliminada."
+    },
+    "resolvingHint": "La primera pregunta sobre un paquete clona su repositorio, lo que puede tardar unos minutos. Puedes salir de esta página: el trabajo continúa y la respuesta estará aquí.",
+    "retry": {
+      "action": "Intentar de nuevo",
+      "pending": "Reintentando…",
+      "failed": "No se pudo volver a preguntar. Inténtalo en un momento.",
+      "nearestTags": "Etiquetas cercanas a esa versión. Elige una para preguntar sobre ella:"
     }
   },
   "conversations": {
