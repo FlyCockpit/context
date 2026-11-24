@@ -822,7 +822,7 @@
       "action": "Intentar de nuevo",
       "pending": "Reintentando…",
       "failed": "No se pudo volver a preguntar. Inténtalo en un momento.",
-      "nearestTags": "Etiquetas cercanas a esa versión. Elige una para preguntar sobre ella:"
+      "nearestTags": "Tags cercanos a esa versión. Elige uno para preguntar sobre él en su lugar:"
     }
   },
   "conversations": {
