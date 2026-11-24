@@ -21,7 +21,8 @@
  *     maintenance marker; local apply keeps data
  *   - expand and contract: a field removal (relax + contract), enum value
  *     removals (--remap, a view that keeps a label, the next diff empty),
- *     db:reset:local applying contracts; then the runner scenarios in
+ *     db:reset:local applying contracts; db:baseline inert without the
+ *     template marker; then the runner scenarios in
  *     scripts/db/test-contracts.mjs (soak, holds, admission, failures,
  *     warm sessions across enum rebuilds)
  *   - schema-only change, reordered folder, edited applied migration → checks 1/2/3 fail
@@ -40,7 +41,8 @@
  *     (Prisma's lock held) is refused and left untouched
  *   - release migrations (scripts/db/test-release.mjs): every prefix of a
  *     squashed chain reconciles to the fresh schema with its rows; contract
- *     state carried over; tampered copies, checksum mismatches and unknown
+ *     state carried over; tampered copies, checksum mismatches (of ran and
+ *     pending replaced deletions) and unknown
  *     migrations refused; followers wait; db:migrate:apply reconciles too
  */
 import assert from "node:assert/strict";
@@ -48,6 +50,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -1172,6 +1175,31 @@ async function runSteps(server) {
           `SELECT column_name FROM information_schema.columns WHERE table_name = 'project'`,
         );
         assert.ok(!columns.rows.some((c) => c.column_name === "name"), "name was deleted");
+      },
+    );
+
+    // This app's history was started (no template marker), so `db:baseline`
+    // must stay inert here; the template's create-flow scenarios need its layout.
+    await step(
+      "baseline: inert without the template marker (refuses, writes nothing)",
+      async () => {
+        const { repo: b } = makeRepo();
+        try {
+          assert.ok(!existsSync(path.join(b, "packages/db/prisma/template-history.json")));
+          const mig = path.join(b, "packages/db/prisma/migrations");
+          const before = readdirSync(mig).sort();
+          const init = readFileSync(path.join(mig, "0_init/migration.sql"), "utf8");
+          const r = sh(process.execPath, [path.join(b, "scripts/db/baseline.mjs")], {
+            cwd: b,
+            env: { ...env, CHECK_DATABASE_URL: server.url },
+          });
+          assert.equal(r.code, 1, r.out);
+          assert.match(r.out, /template-history\.json is absent/);
+          assert.deepEqual(readdirSync(mig).sort(), before);
+          assert.equal(readFileSync(path.join(mig, "0_init/migration.sql"), "utf8"), init);
+        } finally {
+          rmSync(b, { recursive: true, force: true });
+        }
       },
     );
 
