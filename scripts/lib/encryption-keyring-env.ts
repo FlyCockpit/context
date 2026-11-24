@@ -3,7 +3,7 @@
  * file's contents.
  *
  * Cockpit Context encrypts SSH private keys at rest under this keyring, and production
- * refuses to boot without it. `pnpm run setup` mints a one-entry keyring
+ * refuses to boot without it. `pnpm setup:app` mints a one-entry keyring
  * (`v1:<base64 32 bytes>`, format in packages/env/src/encryption-keyring.ts)
  * when the line is missing or empty, so a fresh clone can store keys from day
  * one. An existing value is never replaced: rotating it would make every

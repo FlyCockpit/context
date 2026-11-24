@@ -178,7 +178,7 @@ export const serverVars = {
   COCKPIT_CONTEXT_MAX_STORAGE_GB: z.coerce.number().positive().max(100_000).default(20),
   // AES-256-GCM keyring for secrets at rest (SSH private keys):
   // `v1:<base64 32 bytes>[,older:<base64>…]`. The first entry encrypts, all
-  // decrypt. Required in production (../server.ts); `pnpm run setup` mints a
+  // decrypt. Required in production (../server.ts); `pnpm setup:app` mints a
   // local one. Format: ../encryption-keyring.ts.
   COCKPIT_CONTEXT_ENCRYPTION_KEYS: z
     .string()

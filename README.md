@@ -50,7 +50,7 @@ cd cockpit-context
 node scripts/install-pnpm.mjs package.json "$HOME/.local/bin" "$HOME/.local/share/cockpit-context"
 export PATH="$HOME/.local/bin:$PATH"
 pnpm install
-pnpm run setup
+pnpm setup:app
 ```
 
 Setup prepares local env files, secrets, services and migrations and records your bootstrap admin email. Configure `OPENROUTER_API_KEY` and `COCKPIT_CONTEXT_MODEL` privately, then run `pnpm dev`. Open the configured local HTTPS origin, sign up using your bootstrap address and the `[bootstrap]` token from the server output, verify in development Mailpit when configured, and enroll administrator 2FA. Add a dependency under Packages and connect a client using [the MCP guide](./docs/mcp.md#first-question).

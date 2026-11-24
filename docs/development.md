@@ -6,7 +6,7 @@ Use Node.js 26.13.1 and repository-pinned pnpm 12. Install pnpm with the SHA-512
 node scripts/install-pnpm.mjs package.json "$HOME/.local/bin" "$HOME/.local/share/cockpit-context"
 export PATH="$HOME/.local/bin:$PATH"
 pnpm install
-pnpm run setup
+pnpm setup:app
 pnpm dev
 ```
 

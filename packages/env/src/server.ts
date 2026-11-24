@@ -198,7 +198,7 @@ if (!env.COCKPIT_CONTEXT_ENCRYPTION_KEYS) {
   const msg =
     "[env] COCKPIT_CONTEXT_ENCRYPTION_KEYS is not set. SSH private keys cannot be stored without it. " +
     "Set it to `v1:<base64 32-byte key>` (e.g. `v1:$(openssl rand -base64 32)`); " +
-    "`pnpm run setup` writes one into a local .env.";
+    "`pnpm setup:app` writes one into a local .env.";
   if (env.NODE_ENV === "production") {
     throw new Error(msg);
   }
