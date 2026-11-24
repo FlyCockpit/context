@@ -64,7 +64,14 @@ const sha256 = (value: string) => createHash("sha256").update(value).digest("hex
 export function answerModelIdentity(
   config: Pick<
     RunConfig,
-    "model" | "helperModel" | "modelApi" | "baseUrl" | "maxIterations" | "runTimeoutMs"
+    | "model"
+    | "helperModel"
+    | "modelApi"
+    | "baseUrl"
+    | "maxIterations"
+    | "runTimeoutMs"
+    | "maxParallelHelpers"
+    | "maxHelpers"
   >,
 ): string {
   return JSON.stringify([
@@ -74,6 +81,8 @@ export function answerModelIdentity(
     config.baseUrl ?? null,
     config.maxIterations,
     config.runTimeoutMs,
+    config.maxParallelHelpers,
+    config.maxHelpers,
   ]);
 }
 

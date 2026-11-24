@@ -1476,6 +1476,8 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           ...exploreModelOptions(models),
           maxIterations: budgets.maxIterations,
           timeoutMs: budgets.timeoutMs,
+          maxParallelHelpers: config.maxParallelHelpers,
+          maxHelpers: config.maxHelpers,
           abortSignal: signal,
           lsp: lspFor(checkout.id),
           ripgrep: "auto",

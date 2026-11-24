@@ -306,6 +306,36 @@ describe("pruneAgentMessages", () => {
     expect(text.indexOf(START)).toBeLessThan(text.indexOf(END));
     expect(text).toContain("[stored result id=");
   });
+  it("keeps the tool's own note before the fence in the pruned head", async () => {
+    const note = "Helpers left for this investigation: 0.";
+    const body = `${note}\n\n${wrapUntrustedContent("R".repeat(3_000), { sourceUrl: "helpers" })}`;
+    const messages: AgentMessage[] = [
+      { id: "u", role: "user", parts: [{ type: "text", content: "go" }] },
+      {
+        id: "a",
+        role: "assistant",
+        parts: [{ type: "tool-call", id: "c1", name: "delegate", arguments: "{}", state: "done" }],
+      },
+      {
+        id: "r1",
+        role: "user",
+        parts: [{ type: "tool-result", toolCallId: "c1", content: body, state: "done" }],
+      },
+      { id: "a2", role: "assistant", parts: [{ type: "text", content: "x" }] },
+      { id: "a3", role: "assistant", parts: [{ type: "text", content: "y" }] },
+    ];
+    const store = memoryStore();
+    await pruneAgentMessages(messages, store, { lastDispatchAt: 0, cacheTtlMs: 1, now: 10_000 });
+    const part = messages[2]?.parts[0];
+    const text = part && "content" in part ? String(part.content) : "";
+    expect(text.startsWith(`${note}\n\n${START}`)).toBe(true);
+    expect(text).toContain("[stored result id=");
+    // The stored body is the fenced content only, still marked untrusted.
+    const [stored] = [...store.entries.values()];
+    expect(stored?.untrusted).toBe(true);
+    expect(stored?.body.startsWith("R")).toBe(true);
+  });
+
   // A trusted and an untrusted result whose bodies are byte-identical must not
   // land on the same stored id. They used to: the id was a hash of the body
   // alone, so the second `put` overwrote the first record wholesale — and since

@@ -204,6 +204,15 @@ export const serverVars = {
   // Per-run budgets for the explore agent. Helper budgets scale from these.
   COCKPIT_CONTEXT_MAX_ITERATIONS: z.coerce.number().int().min(1).max(1000).default(100),
   COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS: z.coerce.number().int().min(10).max(86_400).default(600),
+  // `delegate_explore` helpers per investigation (one question): how many run
+  // at once, and how many it may start in total across all its calls. A
+  // parallel limit above the total is clamped to it with a startup warning
+  // (COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS in ../server.ts). The total stays far
+  // below the conversation view's run window (MAX_RUNS in
+  // packages/api/src/routers/conversations.ts), so one investigation's helpers
+  // never push its own main run out of the transcript.
+  COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: z.coerce.number().int().min(1).max(16).default(5),
+  COCKPIT_CONTEXT_MAX_HELPERS: z.coerce.number().int().min(1).max(50).default(10),
   // Longest a model request may go without sending any data. Before the first
   // token the request is retried (then failed over); mid-answer the dispatch
   // fails, instead of holding a run slot until COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS.

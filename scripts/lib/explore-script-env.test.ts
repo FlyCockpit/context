@@ -41,6 +41,8 @@ test("reads the optional settings, ignoring blanks and non-positive numbers", ()
       COCKPIT_CONTEXT_OPENROUTER_BASE_URL: "http://localhost:4010/api/v1",
       COCKPIT_CONTEXT_MAX_ITERATIONS: "12",
       COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS: "90",
+      COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: "3",
+      COCKPIT_CONTEXT_MAX_HELPERS: "6",
     }),
     {
       ok: true,
@@ -52,6 +54,8 @@ test("reads the optional settings, ignoring blanks and non-positive numbers", ()
         baseUrl: "http://localhost:4010/api/v1",
         maxIterations: 12,
         timeoutSeconds: 90,
+        maxParallelHelpers: 3,
+        maxHelpers: 6,
       },
     },
   );
@@ -60,6 +64,8 @@ test("reads the optional settings, ignoring blanks and non-positive numbers", ()
     COCKPIT_CONTEXT_HELPER_MODEL: "",
     COCKPIT_CONTEXT_MAX_ITERATIONS: "0",
     COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS: "1.5",
+    COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: "0",
+    COCKPIT_CONTEXT_MAX_HELPERS: "x",
   });
   assert.deepEqual(blank, {
     ok: true,

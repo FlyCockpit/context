@@ -26,7 +26,8 @@ const {
   FORCE_FINAL_MESSAGE_ID,
   runExploreAgent,
 } = await import("./run-explore-agent");
-const { EXAMPLES_FIRST_PROMPT, MASTER_DELEGATE_PROMPT } = await import("./prompts");
+const { EXAMPLES_FIRST_PROMPT, masterDelegatePrompt } = await import("./prompts");
+const MASTER_DELEGATE_PROMPT = masterDelegatePrompt();
 
 const ROOT = path.resolve(import.meta.dirname, "../fixtures/sample-pkg");
 
@@ -450,7 +451,7 @@ describe("delegate_explore helpers", () => {
     { focus: "types", question: "what are the types?" },
   ];
 
-  it("runs up to four helpers, at most three at once, with their own budgets and model", async () => {
+  it("runs a call's helpers in parallel with their own budgets and model", async () => {
     const script = scriptMaster(fourAgents);
     const result = await runExploreAgent({
       ...base,
@@ -463,7 +464,7 @@ describe("delegate_explore helpers", () => {
       .map((call) => call[0] as LoopOptions)
       .filter(isHelper);
     expect(helperCalls).toHaveLength(4);
-    expect(script.peak()).toBe(3);
+    expect(script.peak()).toBe(4);
     const budgets = deriveExploreBudgets();
     for (const call of helperCalls) {
       expect(call.model.model).toBe("vendor/small-model");
@@ -559,7 +560,13 @@ describe("delegate_explore helpers", () => {
     expect(result.answer).toBe("master answer");
   });
 
-  it("shares three helper slots across parallel delegate calls and caps calls per run", async () => {
+  /**
+   * The master makes the delegate calls `script` describes: each inner array is
+   * one turn whose calls run in parallel (as TanStack AI runs them). Records
+   * each call's outcome (its text, or the error message) and the peak number
+   * of helpers in flight.
+   */
+  function scriptDelegateTurns(turns: number[][]) {
     let inFlight = 0;
     let peak = 0;
     const outcomes: string[] = [];
@@ -575,28 +582,141 @@ describe("delegate_explore helpers", () => {
       const delegate = options.tools.find((tool) => tool.name === "delegate_explore");
       if (!delegate) throw new Error("no delegate tool");
       const signal = new AbortController().signal;
-      const call = () =>
+      const call = (count: number) =>
         Promise.resolve(
-          delegate.execute(delegate.inputSchema.parse({ agents: fourAgents }), signal),
+          delegate.execute(
+            delegate.inputSchema.parse({
+              agents: Array.from({ length: count }, (_, index) => ({
+                focus: `area-${index}`,
+                question: `look at area ${index}`,
+              })),
+            }),
+            signal,
+          ),
         ).then(
-          () => "ok",
-          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          (output) => String(output),
+          (error: unknown) => `error: ${error instanceof Error ? error.message : String(error)}`,
         );
-      // One turn emitting two delegate calls: TanStack AI runs them in parallel.
-      outcomes.push(...(await Promise.all([call(), call()])));
-      outcomes.push(await call());
-      outcomes.push(await call());
+      for (const turn of turns) outcomes.push(...(await Promise.all(turn.map(call))));
       return completed([assistant("m", "master answer")]);
     });
+    return { outcomes, peak: () => peak };
+  }
 
+  it("never runs more than five helpers at once, even across parallel calls in one turn", async () => {
+    const script = scriptDelegateTurns([[5, 5]]);
     const result = await runExploreAgent({ ...base, question: "q", repoMap: false });
+    expect(script.peak()).toBe(5);
+    expect(result.helperRuns).toHaveLength(10);
+    expect(result.delegateCalls).toBe(2);
+  });
 
-    expect(peak).toBe(3);
-    expect(outcomes.slice(0, 3)).toEqual(["ok", "ok", "ok"]);
-    expect(outcomes[3]).toMatch(/delegate_explore limit reached \(3 per investigation\)/);
+  it("honors a configured parallel limit", async () => {
+    const script = scriptDelegateTurns([[3, 3, 3]]);
+    const result = await runExploreAgent({
+      ...base,
+      question: "q",
+      repoMap: false,
+      maxParallelHelpers: 3,
+    });
+    expect(script.peak()).toBe(3);
+    expect(result.helperRuns).toHaveLength(9);
+  });
+
+  it("starts at most ten helpers per investigation across its calls, then refuses", async () => {
+    const script = scriptDelegateTurns([[4], [4], [2], [2]]);
+    const result = await runExploreAgent({ ...base, question: "q", repoMap: false });
+    expect(script.outcomes[0]).toMatch(/^Helpers left for this investigation: 6\./);
+    expect(script.outcomes[1]).toMatch(/^Helpers left for this investigation: 2\./);
+    expect(script.outcomes[2]).toMatch(/^Helpers left for this investigation: 0\./);
+    expect(script.outcomes[3]).toBe(
+      "error: Helper limit reached (10 per investigation, all used); continue with glob, grep and read.",
+    );
+    expect(result.helperRuns).toHaveLength(10);
+    expect(new Set(result.helperRuns.map((run) => run.index)).size).toBe(10);
     expect(result.delegateCalls).toBe(3);
-    expect(result.helperRuns).toHaveLength(12);
-    expect(new Set(result.helperRuns.map((run) => run.index)).size).toBe(12);
+  });
+
+  it("allows more than three calls while helpers remain (no call-count cap)", async () => {
+    const script = scriptDelegateTurns([[2], [2], [2], [2], [2], [2]]);
+    const result = await runExploreAgent({ ...base, question: "q", repoMap: false });
+    expect(script.outcomes.slice(0, 5).every((outcome) => !outcome.startsWith("error:"))).toBe(
+      true,
+    );
+    expect(script.outcomes[4]).toMatch(/^Helpers left for this investigation: 0\./);
+    expect(script.outcomes[5]).toMatch(/^error: Helper limit reached/);
+    expect(result.delegateCalls).toBe(5);
+    expect(result.helperRuns).toHaveLength(10);
+  });
+
+  it("fits every helper's heading and a share of its report when sixteen run", async () => {
+    let output = "";
+    runAgentLoop.mockImplementation(async (options) => {
+      if (isHelper(options)) {
+        const answer = assistant(`${options.messages[0]?.id}-a`, `${"x".repeat(5_000)}END`);
+        return completed([...options.messages, answer]);
+      }
+      if (isSynthesis(options)) return completed([assistant("s", "synth")]);
+      const delegate = options.tools.find((tool) => tool.name === "delegate_explore");
+      if (!delegate) throw new Error("no delegate tool");
+      const agents = Array.from({ length: 16 }, (_, index) => ({
+        focus: `${"f".repeat(400)}-${index}`,
+        question: "q",
+      }));
+      output = String(
+        await delegate.execute(
+          delegate.inputSchema.parse({ agents }),
+          new AbortController().signal,
+        ),
+      );
+      return completed([assistant("m", "master answer")]);
+    });
+    await runExploreAgent({
+      ...base,
+      question: "q",
+      repoMap: false,
+      maxParallelHelpers: 16,
+      maxHelpers: 16,
+    });
+    expect(output.length).toBeLessThanOrEqual(24_000);
+    for (let number = 1; number <= 16; number += 1) {
+      expect(output).toContain(`## Helper ${number} — focus: `);
+    }
+    expect(output.match(/…\[report truncated\]/g)).toHaveLength(16);
+    // The outer budget never had to cut: the last report keeps its share.
+    expect(output).not.toContain("[truncated: result exceeded");
+    expect(output).toContain("<<<UNTRUSTED_WEB_CONTENT_END>>>");
+  });
+
+  it("runs only the briefs that fit the remaining budget and names the rest", async () => {
+    const script = scriptDelegateTurns([[5], [4], [3]]);
+    const result = await runExploreAgent({ ...base, question: "q", repoMap: false });
+    const trimmed = script.outcomes[2] ?? "";
+    expect(trimmed).toContain(
+      "Helper limit reached (10 per investigation): briefs 2–3 of 3 were not run. Investigate those focuses with glob, grep and read.",
+    );
+    expect(trimmed).toContain("Helpers left for this investigation: 0.");
+    // The notes are ours, ahead of the fenced (untrusted) helper reports.
+    expect(trimmed.indexOf("Helper limit reached")).toBeLessThan(
+      trimmed.indexOf("<<<UNTRUSTED_WEB_CONTENT_START>>>"),
+    );
+    expect(trimmed).toContain("## Helper 1 — focus: area-0");
+    expect(trimmed).not.toContain("## Helper 2");
+    expect(result.helperRuns).toHaveLength(10);
+    expect(result.helperRuns.filter((run) => run.focus === "area-0")).toHaveLength(3);
+  });
+
+  it("never lets parallel calls in one turn overspend the total", async () => {
+    const script = scriptDelegateTurns([[5, 5]]);
+    const result = await runExploreAgent({
+      ...base,
+      question: "q",
+      repoMap: false,
+      maxHelpers: 6,
+    });
+    expect(result.helperRuns).toHaveLength(6);
+    expect(script.outcomes.join("\n")).toContain("briefs 2–5 of 5 were not run");
+    expect(script.peak()).toBe(5);
   });
 
   it("never starts a helper still queued for a slot when the run aborts", async () => {
@@ -617,12 +737,22 @@ describe("delegate_explore helpers", () => {
       if (!delegate) throw new Error("no delegate tool");
       const controller = new AbortController();
       const pending = Promise.resolve(
-        delegate.execute(delegate.inputSchema.parse({ agents: fourAgents }), controller.signal),
+        delegate.execute(
+          delegate.inputSchema.parse({ agents: fourAgents.slice(0, 2) }),
+          controller.signal,
+        ),
       );
-      await vi.waitFor(() => expect(helpersStarted).toBe(3));
+      // A second call in the same turn queues behind the two running helpers.
+      const queued = Promise.resolve(
+        delegate.execute(
+          delegate.inputSchema.parse({ agents: fourAgents.slice(2, 4) }),
+          controller.signal,
+        ),
+      );
+      await vi.waitFor(() => expect(helpersStarted).toBe(2));
       controller.abort();
       release();
-      delegateOutput = await pending;
+      delegateOutput = [await pending, await queued];
       return completed([assistant("m", "master answer")]);
     });
     const onHelperStart = vi.fn();
@@ -632,28 +762,69 @@ describe("delegate_explore helpers", () => {
       ...base,
       question: "q",
       repoMap: false,
+      maxParallelHelpers: 2,
       onHelperStart,
       onHelperFinish,
     });
 
-    expect(helpersStarted).toBe(3);
-    expect(onHelperStart).toHaveBeenCalledTimes(3);
-    expect(onHelperFinish).toHaveBeenCalledTimes(3);
-    expect(result.helperRuns).toHaveLength(3);
+    expect(helpersStarted).toBe(2);
+    expect(onHelperStart).toHaveBeenCalledTimes(2);
+    expect(onHelperFinish).toHaveBeenCalledTimes(2);
+    expect(result.helperRuns).toHaveLength(2);
     expect(JSON.stringify(delegateOutput)).toContain("Helper not started");
   });
 
-  it("rejects fewer than two or more than four helper briefs", async () => {
+  /** The master's `delegate_explore` tool for these options. */
+  async function delegateToolFor(options: { maxParallelHelpers?: number; maxHelpers?: number }) {
     runAgentLoop.mockResolvedValue(completed([assistant("m", "ok")]));
-    await runExploreAgent({ ...base, question: "q", repoMap: false });
-    const master = runAgentLoop.mock.calls[0]?.[0];
+    await runExploreAgent({ ...base, question: "q", repoMap: false, ...options });
+    const master = runAgentLoop.mock.calls.at(-1)?.[0];
     if (!master) throw new Error("master loop not dispatched");
     const delegate = master.tools.find((tool) => tool.name === "delegate_explore");
-    expect(delegate?.inputSchema.safeParse({ agents: fourAgents.slice(0, 1) }).success).toBe(false);
-    expect(
-      delegate?.inputSchema.safeParse({ agents: [...fourAgents, fourAgents[0]] }).success,
-    ).toBe(false);
-    expect(delegate?.untrusted).toBe(true);
+    if (!delegate) throw new Error("no delegate tool");
+    return { delegate, systemPrompt: master.systemPrompt ?? "" };
+  }
+  const briefs = (count: number) => ({
+    agents: Array.from({ length: count }, (_, index) => ({ focus: `f${index}`, question: "q" })),
+  });
+
+  it("accepts two to five helper briefs per call by default", async () => {
+    const { delegate } = await delegateToolFor({});
+    expect(delegate.inputSchema.safeParse(briefs(1)).success).toBe(false);
+    expect(delegate.inputSchema.safeParse(briefs(2)).success).toBe(true);
+    expect(delegate.inputSchema.safeParse(briefs(5)).success).toBe(true);
+    expect(delegate.inputSchema.safeParse(briefs(6)).success).toBe(false);
+    expect(delegate.untrusted).toBe(true);
+  });
+
+  it("bounds briefs per call by the parallel limit, and by a total below two", async () => {
+    const three = await delegateToolFor({ maxParallelHelpers: 3 });
+    expect(three.delegate.inputSchema.safeParse(briefs(3)).success).toBe(true);
+    expect(three.delegate.inputSchema.safeParse(briefs(4)).success).toBe(false);
+    // A parallel limit above the total is clamped to it.
+    const one = await delegateToolFor({ maxParallelHelpers: 5, maxHelpers: 1 });
+    expect(one.delegate.inputSchema.safeParse(briefs(1)).success).toBe(true);
+    expect(one.delegate.inputSchema.safeParse(briefs(2)).success).toBe(false);
+  });
+
+  it("states the real limits in the tool description and the system prompt", async () => {
+    const defaults = await delegateToolFor({});
+    expect(defaults.delegate.description).toContain("Run 2–5 read-only helper explore agents");
+    expect(defaults.delegate.description).toContain("at most 5 run at once");
+    expect(defaults.delegate.description).toContain("at most 10 helpers in total");
+    expect(defaults.systemPrompt).toContain("Pass 2–5 focused helper briefs per call");
+    expect(defaults.systemPrompt).toContain("at most 10 helpers in total");
+
+    const custom = await delegateToolFor({ maxParallelHelpers: 3, maxHelpers: 7 });
+    expect(custom.delegate.description).toContain("Run 2–3 read-only helper explore agents");
+    expect(custom.delegate.description).toContain("at most 7 helpers in total");
+    expect(custom.systemPrompt).toContain("Pass 2–3 focused helper briefs per call");
+    expect(custom.systemPrompt).toContain("at most 3 helpers run at once");
+    expect(custom.systemPrompt).toContain("at most 7 helpers in total");
+    for (const text of [custom.delegate.description, custom.systemPrompt]) {
+      expect(text).not.toContain("2–4");
+      expect(text).not.toContain("2–5");
+    }
   });
 });
 

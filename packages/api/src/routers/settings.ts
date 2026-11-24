@@ -8,6 +8,7 @@ import { backupMonitorConfigWarnings } from "@cockpit-context/env/backup-config"
 import {
   ADMIN_EMAILS,
   COCKPIT_CONTEXT_HELPER_MODEL,
+  COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS,
   env,
   SIGNUP_ENABLED,
 } from "@cockpit-context/env/server";
@@ -112,6 +113,9 @@ export const settingsRouter = {
         maxIterations: env.COCKPIT_CONTEXT_MAX_ITERATIONS,
         runTimeoutSeconds: env.COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS,
         modelStallSeconds: env.COCKPIT_CONTEXT_MODEL_STALL_SECONDS,
+        /** Effective (clamped to `maxHelpers`). */
+        maxParallelHelpers: COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS,
+        maxHelpers: env.COCKPIT_CONTEXT_MAX_HELPERS,
         maxConcurrentRuns: env.COCKPIT_CONTEXT_MAX_CONCURRENT_RUNS,
         maxConcurrentRunsPerUser: env.COCKPIT_CONTEXT_MAX_CONCURRENT_RUNS_PER_USER,
         mcpWaitSeconds: env.COCKPIT_CONTEXT_MCP_WAIT_SECONDS,

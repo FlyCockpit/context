@@ -194,6 +194,21 @@ export const COCKPIT_CONTEXT_DATA_DIR: string = resolveCockpitContextDataDir(
 export const COCKPIT_CONTEXT_HELPER_MODEL: string | undefined =
   env.COCKPIT_CONTEXT_HELPER_MODEL ?? env.COCKPIT_CONTEXT_MODEL;
 
+/**
+ * Helpers running at once per investigation: COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS,
+ * clamped to COCKPIT_CONTEXT_MAX_HELPERS (more could never run at once anyway).
+ */
+export const COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: number = Math.min(
+  env.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS,
+  env.COCKPIT_CONTEXT_MAX_HELPERS,
+);
+if (env.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS > env.COCKPIT_CONTEXT_MAX_HELPERS) {
+  console.warn(
+    `[env] COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS (${env.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS}) is above ` +
+      `COCKPIT_CONTEXT_MAX_HELPERS (${env.COCKPIT_CONTEXT_MAX_HELPERS}); using ${COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS} helpers at once.`,
+  );
+}
+
 if (!env.COCKPIT_CONTEXT_ENCRYPTION_KEYS) {
   const msg =
     "[env] COCKPIT_CONTEXT_ENCRYPTION_KEYS is not set. SSH private keys cannot be stored without it. " +

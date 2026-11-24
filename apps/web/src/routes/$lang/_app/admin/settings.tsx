@@ -605,6 +605,16 @@ function LimitsCard({ limits }: { limits: RuntimeConfig["limits"] }) {
       value: seconds(limits.modelStallSeconds),
     },
     {
+      key: "maxParallelHelpers",
+      envName: "COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS",
+      value: number(limits.maxParallelHelpers),
+    },
+    {
+      key: "maxHelpers",
+      envName: "COCKPIT_CONTEXT_MAX_HELPERS",
+      value: number(limits.maxHelpers),
+    },
+    {
       key: "maxConcurrentRuns",
       envName: "COCKPIT_CONTEXT_MAX_CONCURRENT_RUNS",
       value: number(limits.maxConcurrentRuns),

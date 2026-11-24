@@ -728,6 +728,22 @@ export const ENV_VARS: EnvVar[] = [
     hint: "Wall-clock cap per run (and the checkout-lease length). The agent writes a final summary when it runs out.",
   },
   {
+    key: "COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS",
+    group: "agent",
+    source: "default",
+    default: "5",
+    hidden: true,
+    hint: "Helper agents (delegate_explore) running at once in one investigation; also the most one delegation may start. 1 to 16; above COCKPIT_CONTEXT_MAX_HELPERS it is lowered to it, with a startup warning.",
+  },
+  {
+    key: "COCKPIT_CONTEXT_MAX_HELPERS",
+    group: "agent",
+    source: "default",
+    default: "10",
+    hidden: true,
+    hint: "Helper agents one investigation (one question) may start in total, across all its delegations. Each helper is billed model spend. 1 to 50.",
+  },
+  {
     key: "COCKPIT_CONTEXT_MODEL_STALL_SECONDS",
     group: "agent",
     source: "default",

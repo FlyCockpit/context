@@ -29,6 +29,8 @@ vi.mock("@cockpit-context/env/server", () => ({
   get COCKPIT_CONTEXT_HELPER_MODEL() {
     return helperModel.value;
   },
+  // The effective (clamped) value, here below the raw env value to show which one is reported.
+  COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: 4,
 }));
 
 const mailer = vi.hoisted(() => ({ configured: false }));
@@ -56,6 +58,8 @@ const DEFAULT_LIMITS = {
   COCKPIT_CONTEXT_MAX_ITERATIONS: 100,
   COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS: 600,
   COCKPIT_CONTEXT_MODEL_STALL_SECONDS: 90,
+  COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: 5,
+  COCKPIT_CONTEXT_MAX_HELPERS: 10,
   COCKPIT_CONTEXT_MAX_CONCURRENT_RUNS: 4,
   COCKPIT_CONTEXT_MAX_CONCURRENT_RUNS_PER_USER: 3,
   COCKPIT_CONTEXT_MCP_WAIT_SECONDS: 900,
@@ -199,6 +203,8 @@ describe("settingsRouter", () => {
           maxIterations: 42,
           runTimeoutSeconds: 600,
           modelStallSeconds: 90,
+          maxParallelHelpers: 4,
+          maxHelpers: 10,
           maxConcurrentRuns: 4,
           maxConcurrentRunsPerUser: 3,
           mcpWaitSeconds: 900,

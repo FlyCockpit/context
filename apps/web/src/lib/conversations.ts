@@ -548,16 +548,46 @@ const UNTRUSTED_END = "<<<UNTRUSTED_WEB_CONTENT_END>>>";
 const STORED_MARKER = /\n?\[stored result id=[^\]]*\]\s*$/;
 
 /**
+ * Where the fence starts: at the top, or on its own line after the tool's own
+ * (trusted) note, as `delegate_explore` puts its helper budget first. -1: no fence.
+ */
+function fenceStart(text: string): number {
+  if (text.startsWith(UNTRUSTED_START)) return 0;
+  const at = text.indexOf(`\n${UNTRUSTED_START}`);
+  return at === -1 ? -1 : at + 1;
+}
+
+/**
  * The body of a fenced tool result (`@cockpit-context/agent-runtime`'s untrusted
- * wrapper: start marker, source line, notice line, body, end marker). Text
- * without the fence comes back unchanged.
+ * wrapper: start marker, source line, notice line, body, end marker), after
+ * the tool's own note when it wrote one. Text without the fence comes back
+ * unchanged.
  */
 export function unwrapToolOutput(output: string): string {
   const trimmed = output.trim();
-  if (!trimmed.startsWith(UNTRUSTED_START)) return output;
-  const lines = trimmed.split("\n");
+  const at = fenceStart(trimmed);
+  if (at === -1) return output;
+  const lines = trimmed.slice(at).split("\n");
   const end = lines.lastIndexOf(UNTRUSTED_END);
-  return lines.slice(3, end === -1 ? undefined : end).join("\n");
+  const body = lines.slice(3, end === -1 ? undefined : end).join("\n");
+  return at === 0 ? body : `${trimmed.slice(0, at).trimEnd()}\n\n${body}`;
+}
+
+/**
+ * `delegate_explore`'s own note when the helper limit let only the first
+ * briefs run ("briefs 3–5 of 5 were not run"). Read only before the fence, so
+ * a helper's report cannot forge it.
+ */
+const DELEGATE_NOT_RUN =
+  /^Helper limit reached \(\d+ per investigation\): briefs (\d+)–\d+ of \d+ were not run\./m;
+
+/** Helpers a `delegate_explore` call started: its briefs, fewer when the helper limit trimmed it. */
+function delegatedHelpers(briefs: number, output: string | null): number {
+  if (!output) return briefs;
+  const at = fenceStart(output.trim());
+  const note = at === -1 ? "" : output.trim().slice(0, at);
+  const firstNotRun = DELEGATE_NOT_RUN.exec(note)?.[1];
+  return firstNotRun === undefined ? briefs : Math.min(briefs, Number(firstNotRun) - 1);
 }
 
 /**
@@ -691,7 +721,11 @@ export function summarizeToolCall(call: ToolCallView): ToolSummary {
       return {
         subject: null,
         scope: null,
-        outcome: errored ?? (agents === null ? null : { kind: "helpers", count: agents }),
+        outcome:
+          errored ??
+          (agents === null
+            ? null
+            : { kind: "helpers", count: delegatedHelpers(agents, call.output) }),
       };
     }
     default:
@@ -750,7 +784,9 @@ function delegateCalls(messages: ReadonlyArray<{ parts: readonly MessagePart[] }
  * Pair a run's helpers with the `delegate_explore` calls that started them.
  * Helper indexes are unique across the run's calls and handed out in call
  * order, so helpers sorted by index (else creation order) fill each call's
- * `agents` count in turn. Helpers no call claims are returned separately.
+ * `agents` count in turn. A call the helper limit trimmed claims fewer, but it
+ * spent the last of the budget, so every later call started none and the
+ * slices still line up. Helpers no call claims are returned separately.
  */
 export function assignHelpers(
   messages: ReadonlyArray<{ parts: readonly MessagePart[] }>,

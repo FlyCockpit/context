@@ -192,6 +192,8 @@
         "maxIterations": "Pasos por ejecución",
         "runTimeout": "Tiempo máximo por ejecución",
         "modelStall": "Abandonar una solicitud al modelo sin respuesta después de",
+        "maxParallelHelpers": "Ayudantes a la vez, por pregunta",
+        "maxHelpers": "Ayudantes en total, por pregunta",
         "maxConcurrentRuns": "Ejecuciones simultáneas",
         "maxConcurrentRunsPerUser": "Ejecuciones simultáneas por persona (sin contar los resúmenes generales)",
         "mcpWait": "Espera máxima de MCP por una respuesta",

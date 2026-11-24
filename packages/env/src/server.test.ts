@@ -38,6 +38,8 @@ const BASE_ENV: EnvMap = {
   COCKPIT_CONTEXT_DATA_DIR: undefined,
   COCKPIT_CONTEXT_MODEL: undefined,
   COCKPIT_CONTEXT_HELPER_MODEL: undefined,
+  COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: undefined,
+  COCKPIT_CONTEXT_MAX_HELPERS: undefined,
   COCKPIT_CONTEXT_MODEL_API: undefined,
   COCKPIT_CONTEXT_OPENROUTER_BASE_URL: undefined,
   OPENROUTER_API_KEY: undefined,
@@ -382,6 +384,66 @@ describe("server env — Cockpit Context", () => {
       COCKPIT_CONTEXT_HELPER_MODEL: "vendor/small",
     });
     expect(split.COCKPIT_CONTEXT_HELPER_MODEL).toBe("vendor/small");
+  });
+
+  it("defaults the helper limits to 5 at once and 10 per investigation", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mod = await importServerEnv();
+    expect(mod.env.COCKPIT_CONTEXT_MAX_HELPERS).toBe(10);
+    expect(mod.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS).toBe(5);
+    vi.resetModules();
+    const custom = await importServerEnv({
+      COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: "3",
+      COCKPIT_CONTEXT_MAX_HELPERS: "20",
+    });
+    expect(custom.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS).toBe(3);
+    expect(custom.env.COCKPIT_CONTEXT_MAX_HELPERS).toBe(20);
+    vi.resetModules();
+    const highest = await importServerEnv({
+      COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: "16",
+      COCKPIT_CONTEXT_MAX_HELPERS: "50",
+    });
+    expect(highest.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS).toBe(16);
+    expect(highest.env.COCKPIT_CONTEXT_MAX_HELPERS).toBe(50);
+  });
+
+  it("refuses helper limits that are not positive integers", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const [key, value] of [
+      ["COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS", "0"],
+      ["COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS", "2.5"],
+      ["COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS", "17"],
+      ["COCKPIT_CONTEXT_MAX_HELPERS", "0"],
+      ["COCKPIT_CONTEXT_MAX_HELPERS", "-1"],
+      ["COCKPIT_CONTEXT_MAX_HELPERS", "many"],
+      ["COCKPIT_CONTEXT_MAX_HELPERS", "51"],
+    ] as const) {
+      vi.resetModules();
+      await expect(importServerEnv({ [key]: value }), `${key}=${value}`).rejects.toThrow();
+    }
+  });
+
+  it("clamps the parallel helper limit to the total, with a startup warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mod = await importServerEnv({
+      COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: "8",
+      COCKPIT_CONTEXT_MAX_HELPERS: "4",
+    });
+    expect(mod.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS).toBe(4);
+    const clampWarning = (calls: unknown[][]) =>
+      calls.some((call) =>
+        call.join(" ").includes("COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS (8) is above"),
+      );
+    expect(clampWarning(warn.mock.calls)).toBe(true);
+    warn.mockClear();
+    vi.resetModules();
+    await importServerEnv({
+      COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: "4",
+      COCKPIT_CONTEXT_MAX_HELPERS: "4",
+    });
+    expect(warn.mock.calls.some((call) => call.join(" ").includes("MAX_PARALLEL_HELPERS"))).toBe(
+      false,
+    );
   });
 
   it("requires COCKPIT_CONTEXT_ENCRYPTION_KEYS in production and only warns in dev", async () => {

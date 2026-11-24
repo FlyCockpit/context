@@ -199,6 +199,8 @@
         "maxIterations": "Steps per run",
         "runTimeout": "Run time limit",
         "modelStall": "Give up on a silent model request after",
+        "maxParallelHelpers": "Helpers at once, per question",
+        "maxHelpers": "Helpers in total, per question",
         "maxConcurrentRuns": "Concurrent runs",
         "maxConcurrentRunsPerUser": "Concurrent runs per person (overview summaries not counted)",
         "mcpWait": "Longest MCP wait for an answer",

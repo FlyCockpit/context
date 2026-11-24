@@ -11,8 +11,10 @@ import {
   type ModelApi,
   type ResultStore,
   runAgentLoop,
+  wrapUntrustedContent,
 } from "@cockpit-context/agent-runtime";
 import { z } from "zod";
+import { formatPerCallRange, type HelperLimits, resolveHelperLimits } from "./helper-limits";
 import type { LspManager } from "./lsp/manager";
 import { buildLspTools } from "./lsp/tools";
 import {
@@ -38,15 +40,19 @@ import { sumUsage, UsageMeter, ZERO_USAGE } from "./usage";
 export const DEFAULT_MAX_ITERATIONS = 100;
 /** Master wall-clock budget (COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS default, in ms). */
 export const DEFAULT_RUN_TIMEOUT_MS = 600_000;
-/** Helpers running at once across the whole run (every `delegate_explore` call). */
-export const DEFAULT_MAX_PARALLEL_HELPERS = 3;
-/** `delegate_explore` calls one run may make; later calls are tool errors. */
-export const DEFAULT_MAX_DELEGATE_CALLS = 3;
-/** Helpers one `delegate_explore` call may ask for (the schema's bounds). */
-const MIN_HELPERS_PER_DELEGATION = 2;
-const MAX_HELPERS_PER_DELEGATION = 4;
 /** Inline budget for the combined helper reports the master reads. */
 const DELEGATE_MAX_RESULT_CHARS = 24_000;
+/** Room kept for the budget notes ahead of the fenced reports. */
+const DELEGATE_NOTES_CHARS = 500;
+const DELEGATE_SOURCE = "helpers:delegate_explore";
+/** The fenced reports' own budget: the result minus the notes and the fence. */
+const DELEGATE_REPORTS_CHARS =
+  DELEGATE_MAX_RESULT_CHARS -
+  DELEGATE_NOTES_CHARS -
+  wrapUntrustedContent("", { sourceUrl: DELEGATE_SOURCE }).length;
+/** Longest focus or error shown in a report heading (both can be long). */
+const MAX_HEADING_FIELD_CHARS = 160;
+const REPORT_TRUNCATED = "\n…[report truncated]";
 /** Id of the synthetic user message that opens the force-final synthesis turn. */
 export const FORCE_FINAL_MESSAGE_ID = "explore-force-final";
 
@@ -170,13 +176,19 @@ export type ExploreAgentOptions = {
   /** Register `delegate_explore` (master mode). Default true. */
   allowDelegation?: boolean;
   /**
-   * Helpers running at once across the run. Default 3. The limit is run-wide:
-   * TanStack AI executes one turn's tool calls in parallel, so a turn with two
+   * Helpers running at once across the run (COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS).
+   * Default 5, clamped to `maxHelpers`. The limit is run-wide: TanStack AI
+   * executes one turn's tool calls in parallel, so a turn with two
    * `delegate_explore` calls shares these slots rather than doubling them.
+   * One call may pass at most this many briefs.
    */
   maxParallelHelpers?: number;
-  /** `delegate_explore` calls the run may make. Default 3. */
-  maxDelegateCalls?: number;
+  /**
+   * Helpers the run may start across all its `delegate_explore` calls
+   * (COCKPIT_CONTEXT_MAX_HELPERS). Default 10. A call past it fails; a call
+   * asking for more than what is left runs the first briefs that fit.
+   */
+  maxHelpers?: number;
 
   /**
    * LSP tools for this checkout (`buildLspTools`): the master and every helper
@@ -233,6 +245,7 @@ export type ExploreAgentResult = AgentLoopResult & {
   forcedFinal: boolean;
   /** Set when the synthesis turn itself failed; the master's result stands. */
   synthesisError?: string;
+  /** `delegate_explore` calls that started helpers (a call refused by the helper limit is not counted). */
   delegateCalls: number;
   helperRuns: ExploreHelperRun[];
 };
@@ -433,6 +446,8 @@ type RunState = {
   helperRuns: ExploreHelperRun[];
   pending: Set<Promise<unknown>>;
   delegateCalls: number;
+  /** Helpers granted so far (reserved when a call starts, counted against `maxHelpers`). */
+  helpersGranted: number;
   nextHelperIndex: number;
   /** Run-wide helper slots, shared by every `delegate_explore` call. */
   helperSlots: <T>(fn: () => Promise<T>) => Promise<T>;
@@ -452,6 +467,7 @@ export async function runExploreAgent(options: ExploreAgentOptions): Promise<Exp
   const helperTimeoutMs = options.helperTimeoutMs ?? budgets.helperTimeoutMs;
   const synthesisTimeoutMs = options.synthesisTimeoutMs ?? budgets.synthesisTimeoutMs;
   const deadlineAt = Date.now() + budgets.timeoutMs;
+  const helperLimits = resolveHelperLimits(options);
 
   const map = await resolveMap(options);
   const baseTools: AgentTool[] = [
@@ -469,10 +485,9 @@ export async function runExploreAgent(options: ExploreAgentOptions): Promise<Exp
     helperRuns: [],
     pending: new Set(),
     delegateCalls: 0,
+    helpersGranted: 0,
     nextHelperIndex: 0,
-    helperSlots: createLimiter(
-      Math.max(1, options.maxParallelHelpers ?? DEFAULT_MAX_PARALLEL_HELPERS),
-    ),
+    helperSlots: createLimiter(helperLimits.maxParallel),
   };
 
   const promptContext = {
@@ -585,11 +600,17 @@ export async function runExploreAgent(options: ExploreAgentOptions): Promise<Exp
   if (allowDelegation) {
     tools.push(
       buildDelegateExploreTool({
-        maxDelegateCalls: options.maxDelegateCalls ?? DEFAULT_MAX_DELEGATE_CALLS,
-        delegateCalls: () => state.delegateCalls,
-        onDelegate: () => {
+        limits: helperLimits,
+        // Synchronous, before any await: two calls in one turn never both
+        // take the same remaining helpers.
+        grant: (requested) => {
+          const granted = Math.min(requested, helperLimits.maxHelpers - state.helpersGranted);
+          if (granted <= 0) return 0;
+          state.helpersGranted += granted;
           state.delegateCalls += 1;
+          return granted;
         },
+        remaining: () => helperLimits.maxHelpers - state.helpersGranted,
         runHelper: (brief, signal) => {
           const promise = state.helperSlots(() => runHelper(brief, signal));
           state.pending.add(promise);
@@ -600,7 +621,12 @@ export async function runExploreAgent(options: ExploreAgentOptions): Promise<Exp
     );
   }
 
-  const systemPrompt = buildExploreSystemPrompt({ ...promptContext, tools, examplesFirst });
+  const systemPrompt = buildExploreSystemPrompt({
+    ...promptContext,
+    tools,
+    examplesFirst,
+    helperLimits,
+  });
   const synthesisPrompt = buildExploreSystemPrompt({
     ...promptContext,
     // The transcript holds output from every tool, so keep the untrusted rules.
@@ -720,39 +746,61 @@ function createLimiter(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
   };
 }
 
-function formatHelperReports(runs: readonly ExploreHelperRun[]): string {
-  const share = Math.floor((DELEGATE_MAX_RESULT_CHARS - 1_000) / Math.max(1, runs.length));
+const clipField = (text: string) =>
+  text.length > MAX_HEADING_FIELD_CHARS ? `${text.slice(0, MAX_HEADING_FIELD_CHARS)}…` : text;
+
+/**
+ * Every helper's heading and report within `maxChars`: the headings and
+ * separators are counted first, and the reports share what is left equally,
+ * so no helper's report is cut off by the ones before it.
+ */
+function formatHelperReports(runs: readonly ExploreHelperRun[], maxChars: number): string {
+  const separator = "\n\n";
+  const headings = runs.map((run, position) => {
+    const status = run.error ? `failed: ${clipField(run.error)}` : (run.stopReason ?? "unknown");
+    return `## Helper ${position + 1} — focus: ${clipField(run.focus)} (${status})\n`;
+  });
+  const fixed =
+    headings.reduce((sum, heading) => sum + heading.length, 0) +
+    separator.length * Math.max(0, runs.length - 1);
+  const share = Math.max(0, Math.floor((maxChars - fixed) / Math.max(1, runs.length)));
   return runs
     .map((run, position) => {
-      const status = run.error ? `failed: ${run.error}` : (run.stopReason ?? "unknown");
       const report = run.answer || "(empty)";
       const clipped =
-        report.length > share ? `${report.slice(0, share)}\n…[report truncated]` : report;
-      return `## Helper ${position + 1} — focus: ${run.focus} (${status})\n${clipped}`;
+        report.length > share
+          ? `${report.slice(0, Math.max(0, share - REPORT_TRUNCATED.length))}${REPORT_TRUNCATED}`
+          : report;
+      return `${headings[position]}${clipped}`;
     })
-    .join("\n\n");
+    .join(separator);
 }
 
 /**
- * `delegate_explore`: run 2–4 read-only helper agents (at most
- * `maxParallelHelpers` at once across the run — `runHelper` takes a run-wide
+ * `delegate_explore`: run `minPerCall`–`maxPerCall` read-only helper agents
+ * (at most `maxParallel` at once across the run — `runHelper` takes a run-wide
  * slot), each with the confined tools and no further delegation, and return
- * their reports. A run may delegate `maxDelegateCalls` times. The reports are model-written from untrusted checkout
- * content, so they are fenced as untrusted too.
+ * their reports. The run may start `maxHelpers` helpers in total: a call
+ * asking for more than what is left runs the first briefs that fit and names
+ * the rest as not run; a call with nothing left fails. The reports are
+ * model-written from untrusted checkout content, so they are fenced as
+ * untrusted too; the budget note before them is ours.
  */
 function buildDelegateExploreTool(options: {
-  maxDelegateCalls: number;
-  delegateCalls: () => number;
+  limits: HelperLimits;
+  /** Reserve up to `requested` helpers; returns how many were granted (0 = none left). */
+  grant: (requested: number) => number;
+  remaining: () => number;
   runHelper: (
     brief: { focus: string; question: string },
     signal: AbortSignal,
   ) => Promise<ExploreHelperRun>;
-  onDelegate?: () => void;
 }): AgentTool {
+  const { limits } = options;
+  const total = `${limits.maxHelpers} per investigation`;
   return defineTool({
     name: DELEGATE_EXPLORE_TOOL_NAME,
-    description:
-      "Run 2–4 read-only helper explore agents in parallel on different focuses, then return their reports. Use only when fan-out across distant subtrees would help. Helpers cannot delegate.",
+    description: `Run ${formatPerCallRange(limits)} read-only helper explore agents in parallel on different focuses (at most ${limits.maxParallel} run at once), then return their reports. The investigation may start at most ${limits.maxHelpers} helpers in total across all calls. Use only when fan-out across distant subtrees would help. Helpers cannot delegate.`,
     inputSchema: z.object({
       agents: z
         .array(
@@ -764,24 +812,33 @@ function buildDelegateExploreTool(options: {
             question: z.string().min(1).describe("Self-contained brief for that helper"),
           }),
         )
-        .min(MIN_HELPERS_PER_DELEGATION)
-        .max(MAX_HELPERS_PER_DELEGATION),
+        .min(limits.minPerCall)
+        .max(limits.maxPerCall),
     }),
     maxResultChars: DELEGATE_MAX_RESULT_CHARS,
     untrusted: true,
     execute: async ({ agents }, signal) => {
-      if (options.delegateCalls() >= options.maxDelegateCalls) {
+      const granted = options.grant(agents.length);
+      if (granted === 0) {
         throw new Error(
-          `delegate_explore limit reached (${options.maxDelegateCalls} per investigation); continue with glob, grep and read.`,
+          `Helper limit reached (${total}, all used); continue with glob, grep and read.`,
         );
       }
-      options.onDelegate?.();
-      const runs = await Promise.all(agents.map((agent) => options.runHelper(agent, signal)));
-      return wrapUntrustedToolResult(
-        formatHelperReports(runs),
-        "helpers:delegate_explore",
-        DELEGATE_MAX_RESULT_CHARS,
+      const skipped = agents.slice(granted);
+      const runs = await Promise.all(
+        agents.slice(0, granted).map((agent) => options.runHelper(agent, signal)),
       );
+      const notes = [
+        skipped.length > 0
+          ? `Helper limit reached (${total}): briefs ${granted + 1}–${agents.length} of ${agents.length} were not run. Investigate those focuses with glob, grep and read.`
+          : undefined,
+        `Helpers left for this investigation: ${options.remaining()}.`,
+      ].filter(Boolean);
+      return `${notes.join("\n")}\n\n${wrapUntrustedToolResult(
+        formatHelperReports(runs, DELEGATE_REPORTS_CHARS),
+        DELEGATE_SOURCE,
+        DELEGATE_MAX_RESULT_CHARS - DELEGATE_NOTES_CHARS,
+      )}`;
     },
   });
 }

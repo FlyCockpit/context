@@ -4,6 +4,7 @@ import {
   wrapUntrustedContent,
 } from "@cockpit-context/agent-runtime";
 
+import { formatPerCallRange, type HelperLimits, resolveHelperLimits } from "./helper-limits";
 import { formatRepoMapForPrompt, type RepoMap } from "./repo-map";
 
 /**
@@ -34,11 +35,14 @@ export const EXAMPLES_FIRST_PROMPT = `Workflow priority for usage questions:
 2. Only then search package source for the public API.
 3. Stop as soon as you can cite a real example or export — do not explore beyond the brief.`;
 
-export const MASTER_DELEGATE_PROMPT = `You are the master investigator for this query. Explore with glob/grep/read yourself first.
+/** The master-delegate section, stating the run's real helper limits. */
+export function masterDelegatePrompt(limits: HelperLimits = resolveHelperLimits()): string {
+  return `You are the master investigator for this query. Explore with glob/grep/read yourself first.
 
-Use \`delegate_explore\` ONLY when parallel investigation of *different* subtrees would clearly help — e.g. a large monorepo question that spans docs + multiple packages, or after you discover the answer is split across distant areas. Pass 2–4 focused helper briefs (different paths/concerns). Do NOT delegate a question you can finish with a few local tool calls.
+Use \`delegate_explore\` ONLY when parallel investigation of *different* subtrees would clearly help — e.g. a large monorepo question that spans docs + multiple packages, or after you discover the answer is split across distant areas. Pass ${formatPerCallRange(limits)} focused helper briefs per call (different paths/concerns); at most ${limits.maxParallel} helpers run at once. This investigation may start at most ${limits.maxHelpers} helpers in total across all calls, so spend them deliberately. Do NOT delegate a question you can finish with a few local tool calls.
 
 Helper agents are read-only and cannot delegate further. You synthesize their reports into the final answer and may verify with your own tools.`;
+}
 
 /** Appended to the prompt of the no-tool synthesis turn that follows budget exhaustion. */
 export const FORCE_FINAL_SYSTEM_NOTE = `You must now produce the best final answer possible from the investigation transcript. You have no tools in this turn — do not claim or attempt tool calls. If evidence is incomplete, say what you found and what is still unknown. Cite file:line when possible.`;
@@ -82,6 +86,8 @@ export type ExplorePromptInput = {
   examplesFirst?: boolean;
   /** Extra trailing instruction (the force-final synthesis note). */
   trailer?: string;
+  /** The run's helper limits, stated in the master-delegate section. Default: the env defaults. */
+  helperLimits?: HelperLimits;
 };
 
 /** `model`: the shared generated summary. `owner`: the run owner's own edit. */
@@ -158,7 +164,7 @@ export function buildExploreSystemPrompt(input: ExplorePromptInput): string {
     sections.push(EXAMPLES_FIRST_PROMPT);
   }
   if (input.tools.some((tool) => tool.name === DELEGATE_EXPLORE_TOOL_NAME)) {
-    sections.push(MASTER_DELEGATE_PROMPT);
+    sections.push(masterDelegatePrompt(input.helperLimits));
   }
   if (input.trailer) {
     sections.push(input.trailer);

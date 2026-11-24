@@ -1,5 +1,9 @@
 import type { ModelApi } from "@cockpit-context/agent-runtime";
-import { COCKPIT_CONTEXT_HELPER_MODEL, env } from "@cockpit-context/env/server";
+import {
+  COCKPIT_CONTEXT_HELPER_MODEL,
+  COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS,
+  env,
+} from "@cockpit-context/env/server";
 
 /**
  * Everything the run engine reads from the environment, read once per engine
@@ -16,6 +20,10 @@ export interface RunConfig {
   modelApi: ModelApi;
   /** COCKPIT_CONTEXT_OPENROUTER_BASE_URL: API root override (the fake OpenRouter server, a gateway). */
   baseUrl: string | undefined;
+  /** COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS (clamped to `maxHelpers`): helpers running at once per investigation. */
+  maxParallelHelpers: number;
+  /** COCKPIT_CONTEXT_MAX_HELPERS: helpers one investigation may start across all its `delegate_explore` calls. */
+  maxHelpers: number;
   /** COCKPIT_CONTEXT_MAX_ITERATIONS. */
   maxIterations: number;
   /** COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS in ms; also the checkout lease length. */
@@ -54,6 +62,8 @@ export function loadRunConfig(): RunConfig {
     helperModel: COCKPIT_CONTEXT_HELPER_MODEL,
     modelApi: env.COCKPIT_CONTEXT_MODEL_API,
     baseUrl: env.COCKPIT_CONTEXT_OPENROUTER_BASE_URL,
+    maxParallelHelpers: COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS,
+    maxHelpers: env.COCKPIT_CONTEXT_MAX_HELPERS,
     maxIterations: env.COCKPIT_CONTEXT_MAX_ITERATIONS,
     runTimeoutMs: env.COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS * 1_000,
     modelStallTimeoutMs: env.COCKPIT_CONTEXT_MODEL_STALL_SECONDS * 1_000,

@@ -28,7 +28,17 @@ if (!settings.ok) {
   console.error(`[smoke-explore] ${settings.error}`);
   process.exit(1);
 }
-const { apiKey, model, api, helperModel, baseUrl, maxIterations, timeoutSeconds } = settings.value;
+const {
+  apiKey,
+  model,
+  api,
+  helperModel,
+  baseUrl,
+  maxIterations,
+  timeoutSeconds,
+  maxParallelHelpers,
+  maxHelpers,
+} = settings.value;
 
 const root = path.resolve(import.meta.dirname, "../packages/explore/fixtures/sample-pkg");
 const question =
@@ -51,6 +61,8 @@ const result = await runExploreAgent({
   baseUrl,
   maxIterations: maxIterations ?? 8,
   timeoutMs: (timeoutSeconds ?? 120) * 1000,
+  maxParallelHelpers,
+  maxHelpers,
   onTurn: ({ seq, role }) => console.log(`[smoke-explore] turn ${seq} ${role}`),
 });
 

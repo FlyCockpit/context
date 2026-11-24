@@ -48,7 +48,17 @@ if (!settings.ok) {
   console.error(`[eval] ${settings.error}`);
   process.exit(1);
 }
-const { apiKey, model, api, helperModel, baseUrl, maxIterations, timeoutSeconds } = settings.value;
+const {
+  apiKey,
+  model,
+  api,
+  helperModel,
+  baseUrl,
+  maxIterations,
+  timeoutSeconds,
+  maxParallelHelpers,
+  maxHelpers,
+} = settings.value;
 
 const outDir = path.resolve(
   values.out ?? path.join(os.tmpdir(), `cockpit-context-explore-eval-${Date.now()}`),
@@ -91,6 +101,8 @@ for (const evalCase of cases) {
       baseUrl,
       maxIterations,
       timeoutMs: timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000,
+      maxParallelHelpers,
+      maxHelpers,
     });
     const answer = result.answer;
     const elapsedMs = Date.now() - started;

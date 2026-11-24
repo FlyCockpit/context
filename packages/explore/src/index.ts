@@ -8,6 +8,12 @@ export {
   type ReadResult,
 } from "./fs-ops";
 export { GrepTimeoutError } from "./grep-worker";
+export {
+  DEFAULT_MAX_HELPERS,
+  DEFAULT_MAX_PARALLEL_HELPERS,
+  type HelperLimits,
+  resolveHelperLimits,
+} from "./helper-limits";
 export { LspClient, LspError, type LspFailureKind } from "./lsp/client";
 export { type DetectedLanguages, detectLspLanguages, lspWorkspaceDir } from "./lsp/detect";
 export {
@@ -34,15 +40,13 @@ export {
   EXAMPLES_FIRST_PROMPT,
   EXPLORE_SYSTEM_PROMPT,
   type ExplorePackageInfo,
-  MASTER_DELEGATE_PROMPT,
+  masterDelegatePrompt,
   type OverviewSource,
 } from "./prompts";
 export { formatRepoMapForPrompt, generateRepoMap, type RepoMap } from "./repo-map";
 export { exploreGrep, findRipgrepOnPath, type RipgrepSetting } from "./ripgrep";
 export {
-  DEFAULT_MAX_DELEGATE_CALLS,
   DEFAULT_MAX_ITERATIONS,
-  DEFAULT_MAX_PARALLEL_HELPERS,
   DEFAULT_RUN_TIMEOUT_MS,
   deriveExploreBudgets,
   ExploreAgentError,

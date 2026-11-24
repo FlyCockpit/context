@@ -9,6 +9,8 @@
  *   COCKPIT_CONTEXT_OPENROUTER_BASE_URL               API root ending in /v1 (the fake server, a gateway)
  *   COCKPIT_CONTEXT_MAX_ITERATIONS                    positive integer
  *   COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS               positive integer
+ *   COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS              positive integer
+ *   COCKPIT_CONTEXT_MAX_HELPERS                       positive integer
  */
 
 import type { ModelApi } from "../../packages/agent-runtime/src/index.ts";
@@ -27,6 +29,8 @@ export type ExploreScriptEnv = {
   baseUrl?: string;
   maxIterations?: number;
   timeoutSeconds?: number;
+  maxParallelHelpers?: number;
+  maxHelpers?: number;
 };
 
 const positiveInt = (raw: string | undefined): number | undefined => {
@@ -57,6 +61,8 @@ export function readExploreScriptEnv(
   const baseUrl = env.COCKPIT_CONTEXT_OPENROUTER_BASE_URL?.trim() || undefined;
   const maxIterations = positiveInt(env.COCKPIT_CONTEXT_MAX_ITERATIONS);
   const timeoutSeconds = positiveInt(env.COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS);
+  const maxParallelHelpers = positiveInt(env.COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS);
+  const maxHelpers = positiveInt(env.COCKPIT_CONTEXT_MAX_HELPERS);
   return {
     ok: true,
     value: {
@@ -67,6 +73,8 @@ export function readExploreScriptEnv(
       ...(baseUrl ? { baseUrl } : {}),
       ...(maxIterations !== undefined ? { maxIterations } : {}),
       ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+      ...(maxParallelHelpers !== undefined ? { maxParallelHelpers } : {}),
+      ...(maxHelpers !== undefined ? { maxHelpers } : {}),
     },
   };
 }

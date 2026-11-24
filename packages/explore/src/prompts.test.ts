@@ -1,15 +1,18 @@
 import { defineTool, UNTRUSTED_CONTENT_SYSTEM_RULES } from "@cockpit-context/agent-runtime";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-
+import { resolveHelperLimits } from "./helper-limits";
 import {
   buildExploreSystemPrompt,
   EXAMPLES_FIRST_PROMPT,
   EXPLORE_SYSTEM_PROMPT,
   FORCE_FINAL_SYSTEM_NOTE,
   formatPackageSection,
-  MASTER_DELEGATE_PROMPT,
+  masterDelegatePrompt,
 } from "./prompts";
+
+const MASTER_DELEGATE_PROMPT = masterDelegatePrompt();
+
 import type { RepoMap } from "./repo-map";
 
 const untrustedTool = defineTool({
@@ -45,6 +48,24 @@ const repoMap: RepoMap = {
   notablePackages: [],
   hints: [],
 };
+
+describe("masterDelegatePrompt", () => {
+  it("states the default helper limits", () => {
+    expect(MASTER_DELEGATE_PROMPT).toContain("Pass 2–5 focused helper briefs per call");
+    expect(MASTER_DELEGATE_PROMPT).toContain("at most 5 helpers run at once");
+    expect(MASTER_DELEGATE_PROMPT).toContain("at most 10 helpers in total");
+  });
+
+  it("states configured limits, and a single count when the bounds meet", () => {
+    const prompt = buildExploreSystemPrompt({
+      tools: [delegateTool],
+      helperLimits: resolveHelperLimits({ maxParallelHelpers: 2, maxHelpers: 4 }),
+    });
+    expect(prompt).toContain("Pass 2 focused helper briefs per call");
+    expect(prompt).toContain("at most 2 helpers run at once");
+    expect(prompt).toContain("at most 4 helpers in total");
+  });
+});
 
 describe("buildExploreSystemPrompt", () => {
   it("assembles every section in the documented order", () => {

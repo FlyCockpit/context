@@ -73,6 +73,12 @@ function stripUntrusted(body: string): {
   inner: string;
   untrusted: boolean;
   sourceUrl: string;
+  /**
+   * The tool's own text on the lines before the fence (e.g. `delegate_explore`'s
+   * helper budget). Outside the fence, so the tool wrote it, not the source;
+   * kept in the pruned head.
+   */
+  note?: string;
 } {
   const start = "<<<UNTRUSTED_WEB_CONTENT_START>>>";
   const end = "<<<UNTRUSTED_WEB_CONTENT_END>>>";
@@ -100,7 +106,13 @@ function stripUntrusted(body: string): {
   const dataAt = block.indexOf(dataMarker);
   const inner =
     dataAt >= 0 ? block.slice(dataAt + dataMarker.length).replace(/^\n/, "") : block.trim();
-  return { inner, untrusted: true, sourceUrl };
+  const note = startAt > 0 && body[startAt - 1] === "\n" ? body.slice(0, startAt).trim() : "";
+  return {
+    inner,
+    untrusted: true,
+    sourceUrl,
+    ...(note ? { note: note.slice(0, PRUNE_HEAD_CHARS) } : {}),
+  };
 }
 
 /** `stripped` is the caller's `stripUntrusted(body)`, so the body is parsed once. */
@@ -116,7 +128,8 @@ function formatStoredHead(
   const head = inner.slice(0, PRUNE_HEAD_CHARS);
   const marker = `\n[stored result id=${id} total=${inner.length} untrusted=${flag}; retrieve with retrieve_tool_result]`;
   if (flag) {
-    return `${wrapUntrustedContent(head, { sourceUrl: url })}${marker}`;
+    const note = stripped.note ? `${stripped.note}\n\n` : "";
+    return `${note}${wrapUntrustedContent(head, { sourceUrl: url })}${marker}`;
   }
   return `${head}${marker}`;
 }

@@ -41,6 +41,8 @@ const config: RunConfig = {
   baseUrl: "http://localhost:4010/api/v1",
   maxIterations: 100,
   runTimeoutMs: 600_000,
+  maxParallelHelpers: 4,
+  maxHelpers: 7,
   modelStallTimeoutMs: 90_000,
   maxConcurrentRuns: 4,
   maxConcurrentRunsPerUser: 3,
@@ -311,6 +313,8 @@ describe("createRunEngine", () => {
         stallTimeoutMs: 90_000,
         maxIterations: 100,
         timeoutMs: 600_000,
+        maxParallelHelpers: 4,
+        maxHelpers: 7,
         userNotes: "We pin v1.",
         question: "How do I pad?",
         package: {

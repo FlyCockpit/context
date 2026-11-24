@@ -238,6 +238,7 @@ Landlock ABI 4+ provides the required network restrictions. Leave `COCKPIT_CONTE
 | `COCKPIT_CONTEXT_MAX_CONCURRENT_RUNS_PER_USER` | 3 main runs per user |
 | `COCKPIT_CONTEXT_MAX_QUEUED_RUNS_PER_USER` | 20 waiting main runs per user, then `BUSY` (0 = unlimited) |
 | `COCKPIT_CONTEXT_MAX_ITERATIONS` / `COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS` | 100 iterations / 600 seconds |
+| `COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS` / `COCKPIT_CONTEXT_MAX_HELPERS` | 5 helper agents at once / 10 in total per investigation, across all its `delegate_explore` calls; one call starts 2 up to the parallel limit, a call past the total runs only what is left. Each helper is billed model spend. A parallel limit above the total is lowered to it with a startup warning |
 | `COCKPIT_CONTEXT_MCP_QUERIES_PER_HOUR` | 30 per credential |
 | `COCKPIT_CONTEXT_MCP_TOOL_CALLS_PER_MINUTE` | 120 per credential |
 | `COCKPIT_CONTEXT_MCP_QUERIES_PER_USER_PER_HOUR` | 120 per user across all credentials (0 = unlimited) |

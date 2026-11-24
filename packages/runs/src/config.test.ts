@@ -6,6 +6,7 @@ vi.mock("@cockpit-context/env/server", () => ({
     COCKPIT_CONTEXT_MODEL: "vendor/main",
     COCKPIT_CONTEXT_MODEL_API: "messages",
     COCKPIT_CONTEXT_OPENROUTER_BASE_URL: "http://localhost:4010/api/v1",
+    COCKPIT_CONTEXT_MAX_HELPERS: 12,
     COCKPIT_CONTEXT_MAX_ITERATIONS: 100,
     COCKPIT_CONTEXT_RUN_TIMEOUT_SECONDS: 600,
     COCKPIT_CONTEXT_MODEL_STALL_SECONDS: 90,
@@ -18,6 +19,7 @@ vi.mock("@cockpit-context/env/server", () => ({
     COCKPIT_CONTEXT_LSP_SANDBOX: "required",
   },
   COCKPIT_CONTEXT_HELPER_MODEL: "vendor/main",
+  COCKPIT_CONTEXT_MAX_PARALLEL_HELPERS: 4,
 }));
 
 const { loadRunConfig } = await import("./config");
@@ -30,6 +32,8 @@ describe("loadRunConfig", () => {
       helperModel: "vendor/main",
       modelApi: "messages",
       baseUrl: "http://localhost:4010/api/v1",
+      maxParallelHelpers: 4,
+      maxHelpers: 12,
       maxIterations: 100,
       runTimeoutMs: 600_000,
       modelStallTimeoutMs: 90_000,

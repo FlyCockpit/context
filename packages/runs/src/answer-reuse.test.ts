@@ -59,6 +59,8 @@ const keyInput = {
     baseUrl: undefined,
     maxIterations: 100,
     runTimeoutMs: 600_000,
+    maxParallelHelpers: 5,
+    maxHelpers: 10,
   }),
 };
 const scope = { ownerId: "user-a", packageId: "pkg1", repositoryId: "repo1", commitSha: SHA };
@@ -133,6 +135,25 @@ describe("answerReuseKey", () => {
     ["model", { modelIdentity: "other" }],
   ])("changes with the %s", (_name, change) => {
     expect(answerReuseKey({ ...keyInput, ...change })).not.toBe(answerReuseKey(keyInput));
+  });
+});
+
+describe("answerModelIdentity", () => {
+  it("changes with either helper limit", () => {
+    const config = {
+      model: "vendor/main",
+      helperModel: "vendor/helper",
+      modelApi: "responses" as const,
+      baseUrl: undefined,
+      maxIterations: 100,
+      runTimeoutMs: 600_000,
+      maxParallelHelpers: 5,
+      maxHelpers: 10,
+    };
+    const identity = answerModelIdentity(config);
+    expect(answerModelIdentity({ ...config })).toBe(identity);
+    expect(answerModelIdentity({ ...config, maxParallelHelpers: 3 })).not.toBe(identity);
+    expect(answerModelIdentity({ ...config, maxHelpers: 20 })).not.toBe(identity);
   });
 });
 
