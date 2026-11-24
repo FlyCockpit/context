@@ -6,11 +6,21 @@ import {
   getBootstrapTokenCandidate,
 } from "./user-creation-policy.js";
 
+/** The endpoint context Better-Auth hands a database hook (absent for internal writes). */
+export type UserCreateHookContext =
+  | { headers?: Headers | null; context?: object }
+  | null
+  | undefined;
+
 export type UserCreateHookDeps = {
   emailConfigured: boolean;
   adminEmails: ReadonlySet<string>;
-  /** Effective open signup (cached read is fine: `settings.update` invalidates it). */
-  isSignupOpen: () => Promise<boolean>;
+  /**
+   * Effective open signup (cached read is fine: `settings.update` invalidates it).
+   * Gets the hook's context so a sign-up decides on the same request-start
+   * snapshot its response is normalized with (./signup-response.ts).
+   */
+  isSignupOpen: (context: UserCreateHookContext) => Promise<boolean>;
   /** MUST be a fresh read: this hook is the authorization boundary for the bootstrap. */
   hasAnyUser: () => Promise<boolean>;
   /** Constant-time check against the active one-time bootstrap token. */
@@ -27,15 +37,15 @@ export type UserCreateHookDeps = {
  * exercised in tests against an in-memory adapter.
  */
 export function createUserCreateBeforeHook(deps: UserCreateHookDeps) {
-  return async <U extends { email?: string | null }>(
-    user: U,
-    context: { headers?: Headers | null } | null | undefined,
-  ) => {
+  return async <U extends { email?: string | null }>(user: U, context: UserCreateHookContext) => {
     const email = user.email?.toLowerCase();
     // The account-existence read runs for EVERY creation (not only for
     // allowlisted addresses), so its latency cannot tell a listed address from
     // an unlisted one.
-    const [signupOpen, usersExist] = await Promise.all([deps.isSignupOpen(), deps.hasAnyUser()]);
+    const [signupOpen, usersExist] = await Promise.all([
+      deps.isSignupOpen(context),
+      deps.hasAnyUser(),
+    ]);
     const creationMode = getAllowedUserCreationMode();
     // Re-verified here (the server marker checked it too): the token must still
     // be the active one. Signups are serialized and the token is revoked once

@@ -10,6 +10,7 @@ import {
 } from "@cockpit-context/mailer";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { createAuthMiddleware } from "better-auth/api";
 import { admin, genericOAuth, twoFactor } from "better-auth/plugins";
 import { adminPluginAccess } from "./admin-access.js";
 import { announceIfUserBanned } from "./ban.js";
@@ -22,6 +23,13 @@ import {
   invalidateSignupAvailabilityCache,
   isSignupOpen,
 } from "./signup-availability.js";
+import {
+  markSignUpCreatedUser,
+  neutralizeSignUpResponse,
+  SIGN_UP_EMAIL_PATH,
+  signupOpenForRequest,
+  snapshotSignUpRequest,
+} from "./signup-response.js";
 import { TWO_FACTOR_ALLOW_PASSWORDLESS_ENROLLMENT } from "./two-factor-policy.js";
 import { createUserCreateBeforeHook } from "./user-create-hook.js";
 import { cleanupBeforeUserDeletion } from "./user-deletion-hooks.js";
@@ -220,6 +228,23 @@ export const auth = betterAuth({
   // If you re-enable this, configure `advanced.ipAddress.trustedProxies` AND
   // a `secondaryStorage` first — the defaults are not safe behind a proxy.
   rateLimit: { enabled: false },
+  hooks: {
+    // Sign-up answers byte-identically for a free and a registered address,
+    // so it is no account-existence oracle (./signup-response.ts).
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === SIGN_UP_EMAIL_PATH) {
+        await snapshotSignUpRequest(ctx, {
+          emailVerificationRequired: emailConfigured,
+          isSignupOpen,
+        });
+      }
+    }),
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === SIGN_UP_EMAIL_PATH) {
+        return neutralizeSignUpResponse(ctx, { emailVerificationRequired: emailConfigured });
+      }
+    }),
+  },
   plugins: [
     // First, so a banned user's surviving session is refused on every
     // `/api/auth/*` route (sign-out excepted) before any other plugin's
@@ -325,10 +350,13 @@ export const auth = betterAuth({
         before: createUserCreateBeforeHook({
           emailConfigured,
           adminEmails: ADMIN_EMAILS,
-          isSignupOpen,
+          isSignupOpen: (ctx) => signupOpenForRequest(ctx, isSignupOpen),
           hasAnyUser: () => hasAnyUser({ fresh: true }),
         }),
-        after: async () => {
+        after: async (_user, ctx) => {
+          // While sign-up is closed, the sign-up after-hook lets a 200 stand
+          // only when this fired (./signup-response.ts).
+          markSignUpCreatedUser(ctx);
           // An account exists now: the first-admin bootstrap is closed for
           // good, so the one-time token is spent (./bootstrap-token.ts).
           revokeBootstrapToken();
