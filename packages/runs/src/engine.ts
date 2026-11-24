@@ -1033,30 +1033,36 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
    * write in `finishHelper` failed) end with it, as an aborted helper would:
    * interrupted on shutdown, stopped on a user stop, failed otherwise. A
    * helper still executing here (`liveHelpers`) is left alone: it writes its
-   * own terminal status when it ends. Best effort: a failure is logged, and
-   * boot recovery catches what is left.
+   * own terminal status when it ends. Each one closed is announced. Best
+   * effort: a failure is logged, and boot recovery catches what is left.
    */
   async function closeHelpers(run: LiveRun, mainStatus: RunStatus): Promise<void> {
     // No helper row was ever created for this run, or every one is still live.
     if (run.helpers.size === 0 || run.liveHelpers.size === run.helpers.size) return;
     const status: RunStatus =
       mainStatus === "interrupted" || mainStatus === "stopped" ? mainStatus : "failed";
+    const stopReason =
+      status === "interrupted" ? "interrupted" : status === "stopped" ? "aborted" : "engine-error";
+    const helperError = status === "failed" ? "The helper's result could not be saved." : null;
     try {
-      await store.closeActiveHelpers(
+      const closed = await store.closeActiveHelpers(
         run.runId,
-        {
-          status,
-          stopReason:
-            status === "interrupted"
-              ? "interrupted"
-              : status === "stopped"
-                ? "aborted"
-                : "engine-error",
-          error: status === "failed" ? "The helper's result could not be saved." : null,
-          finishedAt: now(),
-        },
+        { status, stopReason, error: helperError, finishedAt: now() },
         [...run.liveHelpers],
       );
+      // Announced like a helper's own end: an open live view would otherwise
+      // show it (and its unfinished tool calls) running until a reload.
+      for (const helperRunId of closed) {
+        publish(run.conversationId, {
+          type: "run.finished",
+          runId: helperRunId,
+          parentRunId: run.runId,
+          status,
+          stopReason,
+          answer: null,
+          error: helperError,
+        });
+      }
     } catch (error) {
       console.warn(`[runs] could not close the helpers of run ${run.runId}`, error);
     }
@@ -1669,10 +1675,37 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
     }
     try {
       await writeHelperOutcome(run, helperRunId, helper);
+    } catch (error) {
+      await announceStoredHelperEnd(run, helperRunId);
+      throw error;
     } finally {
       // Its terminal write was attempted: landed or not, the helper is no
       // longer live, so a main run finishing after this closes a row left active.
       run.liveHelpers.delete(helperRunId);
+    }
+  }
+
+  /**
+   * A helper's terminal write reported a failure but may have landed: then
+   * nothing else announces it (`closeHelpers` only closes rows still
+   * active), so announce what was saved. A row still active is left to
+   * `closeHelpers`.
+   */
+  async function announceStoredHelperEnd(run: LiveRun, helperRunId: string): Promise<void> {
+    try {
+      const stored = await snapshotFromStore(run.ownerId, helperRunId);
+      if (stored.status === "queued" || stored.status === "running") return;
+      publish(run.conversationId, {
+        type: "run.finished",
+        runId: helperRunId,
+        parentRunId: run.runId,
+        status: stored.status,
+        stopReason: stored.stopReason,
+        answer: stored.answer,
+        error: stored.error,
+      });
+    } catch (error) {
+      console.warn(`[runs] could not read back helper run ${helperRunId}`, error);
     }
   }
 

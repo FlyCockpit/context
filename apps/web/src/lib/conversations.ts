@@ -283,6 +283,8 @@ export function applyWatchEvent(
         partial: event.turn.role === "assistant" ? null : run.partial,
       }));
     case "delta":
+      // A throttled delta can land after its run's `run.finished`: an ended run streams nothing.
+      if (state.runs.some((run) => run.id === event.runId && !isActive(run.status))) return state;
       return updateRun(state, event.runId, event.parentRunId ?? null, (run) => ({
         ...run,
         partial: event.message,
@@ -311,8 +313,10 @@ export function applyWatchEvent(
         failure: event.failure ?? null,
         phase: null,
         phaseDetail: null,
-        // A stopped run keeps what was streaming; a finished one saved it as a turn.
-        partial: event.status === "completed" ? null : run.partial,
+        // A completed run saved the streaming message as a turn. One that
+        // ended otherwise never saves it (nor can a crashed process), so it
+        // goes: the live view shows what a reload shows.
+        partial: null,
       }));
     default:
       return state;
@@ -439,7 +443,7 @@ export interface ToolCallView {
   /** The tool's result text, once it has one. */
   output: string | null;
   error: boolean;
-  /** Still being written or executed. */
+  /** Still being written or executed: no result yet, and its run is still active. */
   pending: boolean;
 }
 
@@ -485,6 +489,8 @@ export function toolResultsOf(messages: ReadonlyArray<{ parts: readonly MessageP
 export function toolCallOf(
   part: MessagePart,
   results: ReadonlyMap<string, { content: string | null; error: boolean }>,
+  /** Its run is still active. A call left without a result by a run that ended never ran to the end. */
+  live: boolean,
 ): ToolCallView | null {
   if (part.type !== "tool-call") return null;
   const id = stringField(part, "id") ?? "";
@@ -501,7 +507,7 @@ export function toolCallOf(
     argsText,
     output,
     error: result?.error === true || state === "error",
-    pending: output === null && !result,
+    pending: live && output === null && !result,
   };
 }
 
@@ -713,6 +719,8 @@ export type TranscriptBlock =
       results: Map<string, { content: string | null; error: boolean }>;
       /** Helper runs started by each `delegate_explore` call, by call id. */
       helpers: Map<string, RunView[]>;
+      /** Its run is still active: a tool call without a result is still running. */
+      live: boolean;
       streaming: boolean;
       /** The completed run's closing message: its answer. */
       final: boolean;
@@ -848,6 +856,7 @@ export function buildTranscript(state: ConversationViewState): TranscriptBlock[]
         parts: turn.parts,
         results,
         helpers: byCall,
+        live: isActive(run.status),
         streaming: false,
         final: turn.seq === finalSeq,
       });
@@ -861,6 +870,7 @@ export function buildTranscript(state: ConversationViewState): TranscriptBlock[]
         parts: run.partial.parts,
         results,
         helpers: byCall,
+        live: isActive(run.status),
         streaming: isActive(run.status),
         final: false,
       });

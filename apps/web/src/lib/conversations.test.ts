@@ -235,25 +235,82 @@ describe("applyWatchEvent", () => {
     expect(state.runs[2]).toMatchObject({ parentRunId: "run-2", focus: "src", helperIndex: 0 });
   });
 
-  it("keeps a stopped run's streamed text and drops a completed one's", () => {
+  it("drops the streaming message whenever a run ends, as a reload does", () => {
     const delta: WatchEvent = {
       type: "delta",
       runId: "run-1",
-      message: { id: "m1", role: "assistant", parts: [text("Half")] },
+      message: {
+        id: "m1",
+        role: "assistant",
+        parts: [text("I'll look at the router"), call("c1", "glob", { pattern: "lib/**" })],
+      },
     };
-    const finished = (status: "stopped" | "completed"): WatchEvent => ({
+    const finished = (status: "stopped" | "failed" | "interrupted" | "completed"): WatchEvent => ({
       type: "run.finished",
       runId: "run-1",
       status,
-      stopReason: status === "stopped" ? "aborted" : "completed",
+      stopReason: status === "completed" ? "completed" : "aborted",
       answer: null,
     });
-    expect(
-      fold([snapshot(detail([liveRun])), delta, finished("stopped")]).runs[0]?.partial,
-    ).not.toBeNull();
-    expect(
-      fold([snapshot(detail([liveRun])), delta, finished("completed")]).runs[0]?.partial,
-    ).toBeNull();
+    // Nothing saves the in-flight message of a run that did not complete, so
+    // the snapshot a reload folds has none: the live view must match it.
+    const reloaded = fold([
+      snapshot(detail([detailRun({ ...liveRun, status: "stopped", answer: null })])),
+    ]);
+    for (const status of ["stopped", "failed", "interrupted", "completed"] as const) {
+      const live = fold([snapshot(detail([liveRun])), delta, finished(status)]);
+      expect(live.runs[0]?.partial).toBeNull();
+    }
+    const live = fold([snapshot(detail([liveRun])), delta, finished("stopped")]);
+    expect(buildTranscript(live).map((block) => block.kind)).toEqual(
+      buildTranscript(reloaded).map((block) => block.kind),
+    );
+  });
+
+  describe("helpers of a run that ends", () => {
+    const helperStarted: WatchEvent = {
+      type: "helper.started",
+      runId: "h-1",
+      parentRunId: "run-1",
+      index: 0,
+      focus: "lib",
+    };
+    const helperDelta: WatchEvent = {
+      type: "delta",
+      runId: "h-1",
+      parentRunId: "run-1",
+      message: { id: "hm", role: "assistant", parts: [call("hc", "grep", { pattern: "x" })] },
+    };
+    const helperFinished: WatchEvent = {
+      type: "run.finished",
+      runId: "h-1",
+      parentRunId: "run-1",
+      status: "stopped",
+      stopReason: "aborted",
+      answer: null,
+    };
+    const mainFinished: WatchEvent = {
+      type: "run.finished",
+      runId: "run-1",
+      status: "stopped",
+      stopReason: "aborted",
+      answer: null,
+    };
+    const helper = (state: ConversationViewState) => state.runs.find((run) => run.id === "h-1");
+
+    it("ignores a delta that lands after its run finished", () => {
+      const state = fold([
+        snapshot(detail([liveRun])),
+        helperStarted,
+        helperDelta,
+        helperFinished,
+        helperDelta,
+        mainFinished,
+        { type: "delta", runId: "run-1", message: { id: "m9", role: "assistant", parts: [] } },
+      ]);
+      expect(helper(state)).toMatchObject({ status: "stopped", partial: null });
+      expect(state.runs[0]?.partial).toBeNull();
+    });
   });
 
   it("marks the checkout available once a run is past preparing", () => {
@@ -314,7 +371,7 @@ describe("composerMode", () => {
 
 describe("tool calls", () => {
   const view = (part: MessagePart, results = new Map()): ToolCallView => {
-    const result = toolCallOf(part, results);
+    const result = toolCallOf(part, results, true);
     if (!result) throw new Error("not a tool call");
     return result;
   };
@@ -364,6 +421,12 @@ describe("tool calls", () => {
     const pending = view(call("c4", "read", { path: "index.js" }));
     expect(summarizeToolCall(pending).subject).toBe("index.js");
     expect(pending.pending).toBe(true);
+  });
+
+  it("never shows a call without a result as running once its run has ended", () => {
+    const glob = call("c9", "glob", { pattern: "**/*.ts" });
+    expect(toolCallOf(glob, new Map(), true)?.pending).toBe(true);
+    expect(toolCallOf(glob, new Map(), false)).toMatchObject({ pending: false, output: null });
   });
 
   it("takes results from tool-result parts and flags errors", () => {
@@ -888,6 +951,35 @@ describe("web conversations that resolve inside their first run", () => {
         question("run-2"),
       ]),
     ).toEqual([false, false]);
+  });
+
+  it("marks a saved message's tool calls live only while its run is active", () => {
+    const turns = [
+      {
+        seq: 0,
+        role: "user" as const,
+        parts: [text("How do I pad?")],
+        steering: false,
+        createdAt: NOW,
+      },
+      {
+        seq: 1,
+        role: "assistant" as const,
+        parts: [text("Looking"), call("c1", "glob", { pattern: "lib/**" })],
+        steering: false,
+        createdAt: NOW,
+      },
+    ];
+    const liveOf = (run: DetailRun) =>
+      buildTranscript(fold([snapshot(detail([run]))]))
+        .filter((block) => block.kind === "assistant")
+        .map((block) => block.kind === "assistant" && block.live);
+    expect(liveOf(detailRun({ ...liveRun, turns }))).toEqual([true]);
+    for (const status of ["stopped", "failed", "interrupted"] as const) {
+      expect(liveOf(detailRun({ status, answer: null, stopReason: "aborted", turns }))).toEqual([
+        false,
+      ]);
+    }
   });
 
   it("labels a different question after a run that never started as a follow-up, not a retry", () => {

@@ -150,7 +150,7 @@ export class MemoryRunStore implements RunStore {
     data: { status: RunStatus; stopReason: string | null; error: string | null; finishedAt: Date },
     excludeIds: readonly string[] = [],
   ) {
-    let count = 0;
+    const closed: string[] = [];
     for (const run of this.runs.values()) {
       if (
         run.parentRunId === parentRunId &&
@@ -159,10 +159,10 @@ export class MemoryRunStore implements RunStore {
         (run.status === "queued" || run.status === "running")
       ) {
         Object.assign(run, data);
-        count += 1;
+        closed.push(run.id);
       }
     }
-    return count;
+    return closed;
   }
 
   async getRun(ownerId: string, runId: string): Promise<RunRecord | null> {

@@ -2076,6 +2076,69 @@ describe("createRunEngine", () => {
         error: "The helper's result could not be saved.",
       });
       expect(store.runs.get(helperRunId ?? "")?.finishedAt).toBeInstanceOf(Date);
+      // Announced, so an open live view stops showing it running.
+      const finished = events.filter(
+        (entry) => entry.event.type === "run.finished" && entry.event.runId === helperRunId,
+      );
+      expect(finished.map((entry) => entry.event)).toEqual([
+        {
+          type: "run.finished",
+          runId: helperRunId,
+          parentRunId: started.runId,
+          status: "failed",
+          stopReason: "engine-error",
+          answer: null,
+          error: "The helper's result could not be saved.",
+        },
+      ]);
+    });
+
+    it("announces a helper whose terminal write landed but reported a failure", async () => {
+      let helperRunId: string | undefined;
+      exploreRun.mockImplementation(async (options) => {
+        const hooks = await options.onHelperStart?.({ index: 0, focus: "src", question: "?" });
+        helperRunId = hooks?.helperRunId;
+        try {
+          await options.onHelperFinish?.({
+            index: 0,
+            focus: "src",
+            question: "?",
+            helperRunId,
+            model: "vendor/helper",
+            stopReason: "completed",
+            forcedFinal: false,
+            answer: "- src/a.ts:1",
+            usage: { inputTokens: 1, outputTokens: 1 },
+            iterations: 1,
+          });
+        } catch {
+          // runExploreAgent logs a failing onHelperFinish and goes on.
+        }
+        await announce(options, [[text("a1", "assistant", "It pads."), "assistant"]]);
+        return result(options, "It pads.");
+      });
+      const updateRun = store.updateRun.bind(store);
+      vi.spyOn(store, "updateRun").mockImplementation(async (runId, data) => {
+        await updateRun(runId, data);
+        if (runId === helperRunId && isTerminal(data))
+          throw new Error("connection reset after commit");
+      });
+      const { started } = await startAndFinish();
+      expect(store.runs.get(helperRunId ?? "")).toMatchObject({ status: "completed" });
+      const finished = events.filter(
+        (entry) => entry.event.type === "run.finished" && entry.event.runId === helperRunId,
+      );
+      expect(finished.map((entry) => entry.event)).toEqual([
+        {
+          type: "run.finished",
+          runId: helperRunId,
+          parentRunId: started.runId,
+          status: "completed",
+          stopReason: "completed",
+          answer: "- src/a.ts:1",
+          error: null,
+        },
+      ]);
     });
 
     it("leaves a helper still executing when its main run finishes to write its own outcome", async () => {
@@ -2123,6 +2186,11 @@ describe("createRunEngine", () => {
         helperRunId,
       ]);
       expect(store.runs.get(helperRunId ?? "")).toMatchObject({ status: "running" });
+      expect(
+        events.some(
+          (entry) => entry.event.type === "run.finished" && entry.event.runId === helperRunId,
+        ),
+      ).toBe(false);
       await finishLate?.();
       expect(store.runs.get(helperRunId ?? "")).toMatchObject({
         status: "completed",

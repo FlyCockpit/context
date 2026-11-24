@@ -187,7 +187,7 @@ export interface RunStore {
    * Close the still queued/running HELPER runs of `parentRunId` (their own
    * terminal write failed) as their main run ends. `excludeIds` are helpers
    * still executing in this process: they write their own terminal status.
-   * Returns how many moved.
+   * Returns the ids it closed.
    */
   closeActiveHelpers(
     parentRunId: string,
@@ -198,7 +198,7 @@ export interface RunStore {
       finishedAt: Date;
     },
     excludeIds?: readonly string[],
-  ): Promise<number>;
+  ): Promise<string[]>;
   getRun(ownerId: string, runId: string): Promise<RunRecord | null>;
   insertTurn(turn: NewTurn): Promise<void>;
   /**
@@ -538,7 +538,7 @@ export const prismaRunStore: RunStore = {
   },
 
   async closeActiveHelpers(parentRunId, data, excludeIds = []) {
-    const { count } = await prisma.agentRun.updateMany({
+    const closed = await prisma.agentRun.updateManyAndReturn({
       where: {
         parentRunId,
         kind: "HELPER",
@@ -551,8 +551,9 @@ export const prismaRunStore: RunStore = {
         error: data.error,
         finishedAt: data.finishedAt,
       },
+      select: { id: true } satisfies Prisma.AgentRunSelect,
     });
-    return count;
+    return closed.map((run) => run.id);
   },
 
   async getRun(ownerId, runId) {

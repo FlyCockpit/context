@@ -151,6 +151,7 @@ function Block({
           parts={block.parts}
           results={block.results}
           helpers={block.helpers}
+          live={block.live}
           streaming={block.streaming}
           final={block.final}
         />
@@ -189,12 +190,14 @@ function AssistantMessage({
   parts,
   results,
   helpers,
+  live,
   streaming,
   final,
 }: {
   parts: readonly MessagePart[];
   results: ToolResults;
   helpers: ReadonlyMap<string, RunView[]>;
+  live: boolean;
   streaming: boolean;
   final: boolean;
 }) {
@@ -203,7 +206,7 @@ function AssistantMessage({
   if (final && text) return <AnswerCard text={text} />;
   return (
     <div className="min-w-0 space-y-2">
-      <MessageParts parts={parts} results={results} helpers={helpers} />
+      <MessageParts parts={parts} results={results} helpers={helpers} live={live} />
       {streaming ? (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <PulseDot className="text-primary-text" />
@@ -218,10 +221,13 @@ function MessageParts({
   parts,
   results,
   helpers,
+  live,
 }: {
   parts: readonly MessagePart[];
   results: ToolResults;
   helpers: ReadonlyMap<string, RunView[]>;
+  /** The run is still active: a call without a result is still running. */
+  live: boolean;
 }) {
   return (
     <>
@@ -232,7 +238,7 @@ function MessageParts({
           const content = partText([part]);
           return content ? <Markdown key={key} content={content} /> : null;
         }
-        const call = toolCallOf(part, results);
+        const call = toolCallOf(part, results, live);
         if (call) {
           return (
             <ToolCallRow key={`${key}-${call.id}`} call={call} helpers={helpers.get(call.id)} />
@@ -436,7 +442,12 @@ function HelperPanelView({ run, position }: { run: RunView; position?: number })
         <div className="min-w-0 space-y-2 border-t px-3 py-3">
           {messages.map((message, index) => (
             <div key={`a${index}`} className="min-w-0 space-y-2">
-              <MessageParts parts={message.parts} results={results} helpers={NO_HELPERS} />
+              <MessageParts
+                parts={message.parts}
+                results={results}
+                helpers={NO_HELPERS}
+                live={live}
+              />
             </div>
           ))}
           {live ? (

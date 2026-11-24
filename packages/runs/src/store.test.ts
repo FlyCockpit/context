@@ -16,7 +16,14 @@ type Fn = ReturnType<typeof vi.fn>;
 const db = prisma as unknown as {
   package: { findFirst: Fn };
   conversation: { findFirst: Fn; create: Fn };
-  agentRun: { create: Fn; update: Fn; findFirst: Fn; updateMany: Fn; findMany: Fn };
+  agentRun: {
+    create: Fn;
+    update: Fn;
+    findFirst: Fn;
+    updateMany: Fn;
+    updateManyAndReturn: Fn;
+    findMany: Fn;
+  };
   runTurn: { create: Fn; findMany: Fn; findFirst: Fn };
   checkoutLease: { upsert: Fn; deleteMany: Fn; updateMany: Fn };
   checkout: { updateMany: Fn; findFirst: Fn; findUnique: Fn };
@@ -211,7 +218,7 @@ describe("prismaRunStore", () => {
   });
 
   it("closes only the run's still-active helpers", async () => {
-    db.agentRun.updateMany.mockResolvedValueOnce({ count: 2 });
+    db.agentRun.updateManyAndReturn.mockResolvedValueOnce([{ id: "h1" }, { id: "h2" }]);
     const finishedAt = new Date();
     await expect(
       prismaRunStore.closeActiveHelpers("r1", {
@@ -220,22 +227,23 @@ describe("prismaRunStore", () => {
         error: null,
         finishedAt,
       }),
-    ).resolves.toBe(2);
-    expect(db.agentRun.updateMany.mock.calls[0]?.[0]).toEqual({
+    ).resolves.toEqual(["h1", "h2"]);
+    expect(db.agentRun.updateManyAndReturn.mock.calls[0]?.[0]).toEqual({
       where: { parentRunId: "r1", kind: "HELPER", status: { in: ["QUEUED", "RUNNING"] } },
       data: { status: "INTERRUPTED", stopReason: "interrupted", error: null, finishedAt },
+      select: { id: true },
     });
   });
 
   it("leaves the helpers still executing in this process alone", async () => {
-    db.agentRun.updateMany.mockResolvedValueOnce({ count: 0 });
+    db.agentRun.updateManyAndReturn.mockResolvedValueOnce([]);
     const finishedAt = new Date();
     await prismaRunStore.closeActiveHelpers(
       "r1",
       { status: "failed", stopReason: "engine-error", error: "x", finishedAt },
       ["h1", "h2"],
     );
-    expect(db.agentRun.updateMany.mock.calls[0]?.[0]).toMatchObject({
+    expect(db.agentRun.updateManyAndReturn.mock.calls[0]?.[0]).toMatchObject({
       where: {
         parentRunId: "r1",
         kind: "HELPER",
