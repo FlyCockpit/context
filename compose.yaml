@@ -57,7 +57,7 @@ services:
         aliases:
           - cockpit-context-postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cockpit_context -d cockpit_context"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U cockpit_context -d cockpit_context"]
       interval: 10s
       timeout: 5s
       retries: 5

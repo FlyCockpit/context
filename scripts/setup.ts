@@ -13,7 +13,7 @@
  *      verification link). A real provider configured in .env is left alone.
  *   7. Start the local Docker services — Postgres + mailpit
  *      (`pnpm dev:services`, the canonical root docker-compose.dev.yml).
- *   8. Wait for Postgres and the sink to accept connections.
+ *   8. Wait for Postgres to answer a query and the sink to accept connections.
  *   9. Apply the schema (`pnpm db:migrate:apply`).
  *  10. Check whether the global portless CLI is available for `pnpm dev`.
  *  11. Install the Claude Code safety hooks into .claude/settings.json (see
@@ -28,6 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { connect } from "node:net";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -35,6 +36,7 @@ import { createInterface } from "node:readline/promises";
 import { installClaudeHooks } from "./install-claude-hooks.js";
 import { looksLikeEmail, readAdminEmailsValue, withAdminEmail } from "./lib/admin-email-env.js";
 import { readEncryptionKeyringValue, withEncryptionKeyring } from "./lib/encryption-keyring-env.js";
+import { waitForPostgres } from "./lib/postgres-ready.js";
 import { readSmtpHostValue, withDevSmtpSink } from "./lib/smtp-env.js";
 
 const ROOT = resolve(import.meta.dirname!, "..");
@@ -320,25 +322,16 @@ function startDocker() {
 // ---------------------------------------------------------------------------
 // 8. Wait for Postgres (+ the mail sink when we pointed .env at it)
 // ---------------------------------------------------------------------------
-function parseEnvUrl(varName: string, defaultPort: number): { host: string; port: number } | null {
-  const contents = readFileSync(ENV_PATH, "utf-8");
-  for (const raw of contents.split("\n")) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const match = line.match(new RegExp(`^${varName}\\s*=\\s*(.*)$`));
-    if (!match) continue;
-    const value = (match[1] ?? "").trim().replace(/^["']|["']$/g, "");
-    if (!value) return null;
-    try {
-      const url = new URL(value);
-      const host = url.hostname || "localhost";
-      const port = url.port ? Number(url.port) : defaultPort;
-      return { host, port };
-    } catch {
-      return null;
-    }
-  }
-  return null;
+/**
+ * DATABASE_URL exactly as the migration step will see it: the process env
+ * first, else .env parsed by dotenv (as scripts/db/lib/local.mjs does).
+ */
+function databaseUrl(): string | undefined {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const dotenv = createRequire(import.meta.url)("dotenv") as {
+    parse(src: string): Record<string, string>;
+  };
+  return dotenv.parse(readFileSync(ENV_PATH, "utf-8")).DATABASE_URL || undefined;
 }
 
 function tcpProbe(host: string, port: number, timeoutMs: number): Promise<boolean> {
@@ -358,18 +351,30 @@ function tcpProbe(host: string, port: number, timeoutMs: number): Promise<boolea
   });
 }
 
-async function waitForService(
-  label: string,
-  envVar: string,
-  defaultPort: number,
-  containerHint: string,
-) {
-  const target = parseEnvUrl(envVar, defaultPort);
-  if (!target) {
-    log(`could not parse ${envVar} — skipping ${label} readiness wait`);
+// A TCP probe is not enough for Postgres: on a fresh volume Docker's port
+// proxy accepts connections while the container is still in initdb.
+async function waitForDatabase() {
+  const url = databaseUrl();
+  if (!url) {
+    log("DATABASE_URL is not set — skipping the Postgres readiness wait");
     return;
   }
-  await waitForHostPort(label, target.host, target.port, containerHint);
+  log("waiting for Postgres to answer a query (up to 120s; a fresh volume runs initdb first)");
+  try {
+    const attempts = await waitForPostgres(url, { timeoutMs: 120_000 });
+    log(`Postgres is ready (after ${attempts} attempt(s))`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    let local = false;
+    try {
+      local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
+    } catch {}
+    fail(
+      local
+        ? `${message}. Check Docker is running, \`docker ps\` shows the postgres container, and DATABASE_URL matches docker-compose.dev.yml.`
+        : `${message}. Check that the database in DATABASE_URL is reachable and its credentials are right.`,
+    );
+  }
 }
 
 async function waitForHostPort(label: string, host: string, port: number, containerHint: string) {
@@ -442,7 +447,7 @@ async function main() {
   await ensureAdminEmail();
   ensureDevSmtp();
   startDocker();
-  await waitForService("Postgres", "DATABASE_URL", 5432, "postgres");
+  await waitForDatabase();
   // Wait for the mail sink only when .env actually points at one — a real
   // provider configured by the developer is not ours to probe.
   const smtpTarget = readSmtpTarget();

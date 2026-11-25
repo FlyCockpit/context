@@ -93,7 +93,7 @@ Allowed: `prisma migrate deploy` and `prisma migrate diff` through the wrappers 
 - Schema changes → edit `packages/db/prisma/schema/`, `pnpm db:migrate <name>`, review SQL, `pnpm db:migrate:apply`, commit both ([schema-changes-recipe](./docs/schema-changes-recipe.md))
 - Destructive production changes → a reviewed migration; the drop waits in `contract.sql` ([schema-migrations § Expand and contract](./docs/schema-migrations.md#expand-and-contract))
 - Seed data → `pnpm db:seed` (local Postgres only; guarded)
-- Reset this checkout's local DB → `pnpm db:reset:local` (refuses an unmarked database; agents never run `--adopt` or write the mark). Wiping the whole dev stack → `bash scripts/compose.sh -f docker-compose.dev.yml down -v && pnpm dev:services && pnpm db:migrate:apply`; `dev:services:stop` does **not** destroy the volume. If the DB is unreachable, see `pnpm doctor:app`.
+- Reset this checkout's local DB → `pnpm db:reset:local` (refuses an unmarked database; agents never run `--adopt` or write the mark). Wiping the whole dev stack → `bash scripts/compose.sh -f docker-compose.dev.yml down -v && pnpm setup:app` (it waits for the fresh Postgres before migrating; in a linked worktree it stops with "database does not exist", then run `pnpm db:worktree && pnpm setup:app`); `dev:services:stop` does **not** destroy the volume. If the DB is unreachable, see `pnpm doctor:app`.
 
 ### Agent Safety Rules
 

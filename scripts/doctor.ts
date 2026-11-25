@@ -230,7 +230,7 @@ function checkDatabase() {
       status: "fail",
       detail: output || "connection failed",
       hint:
-        "Is the Postgres container running? Try `pnpm dev:services`, then `pnpm db:migrate:apply`. " +
+        "Is the Postgres container running? Try `pnpm setup:app` (starts it, waits for it, applies migrations). " +
         "Verify DATABASE_URL host/port/credentials.",
       required: true,
     });
