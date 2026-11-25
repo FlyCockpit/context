@@ -40,6 +40,9 @@ CREATE TYPE "PackageProposalStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 CREATE TYPE "RepositoryVisibility" AS ENUM ('PUBLIC', 'PRIVATE');
 
 -- CreateEnum
+CREATE TYPE "SnapshotSyncStatus" AS ENUM ('NONE', 'RUNNING', 'FAILED');
+
+-- CreateEnum
 CREATE TYPE "RepositoryStatus" AS ENUM ('PENDING', 'CLONING', 'READY', 'FAILED');
 
 -- CreateEnum
@@ -372,6 +375,7 @@ CREATE TABLE "agent_run" (
     "focus" TEXT,
     "stopReason" TEXT,
     "error" TEXT,
+    "failure" JSONB,
     "inputTokens" INTEGER NOT NULL DEFAULT 0,
     "outputTokens" INTEGER NOT NULL DEFAULT 0,
     "cachedInputTokens" INTEGER NOT NULL DEFAULT 0,
@@ -486,6 +490,9 @@ CREATE TABLE "repository" (
     "diskBytes" BIGINT NOT NULL DEFAULT 0,
     "lastFetchedAt" TIMESTAMP(3),
     "lastUsedAt" TIMESTAMP(3),
+    "snapshotSyncStatus" "SnapshotSyncStatus" NOT NULL DEFAULT 'NONE',
+    "snapshotSyncError" TEXT,
+    "snapshotSyncStartedAt" TIMESTAMP(3),
 
     CONSTRAINT "repository_pkey" PRIMARY KEY ("id")
 );
