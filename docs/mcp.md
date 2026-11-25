@@ -173,7 +173,7 @@ The dashboard's conversation costs read the same run rows. When any call was unp
 
 ## Local development
 
-`pnpm dev:raw` serves the web app on `http://localhost:3001` and proxies `/mcp` and the discovery documents to the API server. Start it with `BETTER_AUTH_URL=http://localhost:3001` so the OAuth issuer and the MCP resource match that origin, and use the local fake model for isolated development:
+`pnpm dev:raw` serves the web app on `http://localhost:3001` and proxies `/mcp` and the discovery documents to the API server. Start it with `BETTER_AUTH_URL=http://localhost:3001` so the OAuth issuer and the MCP resource match that origin, and use the local fake model for isolated development. Run the fake model in one terminal and the app in another; both stay in the foreground:
 
 ```bash
 pnpm run fake-openrouter

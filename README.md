@@ -42,18 +42,18 @@ Repository reuse does not share users' conversations or imply a cross-user answe
 
 ## Quick start
 
-Install Node.js 26.13.1, Docker or Podman and user-managed `portless` (`npm install -g portless`). Install repository-pinned pnpm 12 with its verified installer:
+Prerequisites: git, Node.js 26.13.1 (`nvm use` reads `.nvmrc`), Docker or Podman with Compose, free local ports 5432 (PostgreSQL), 1025 and 8025 (Mailpit), and optionally user-managed `portless` (`npm install -g portless`) for local HTTPS; without it use `pnpm dev:raw`. pnpm 12 is installed by the repository's verified installer below. Real answers need an [OpenRouter](https://openrouter.ai) API key; to try the app without one, use the local fake model in [local MCP development](./docs/mcp.md#local-development).
 
 ```sh
 git clone https://github.com/FlyCockpit/context.git
-cd cockpit-context
+cd context
 node scripts/install-pnpm.mjs package.json "$HOME/.local/bin" "$HOME/.local/share/cockpit-context"
 export PATH="$HOME/.local/bin:$PATH"
 pnpm install
 pnpm setup:app
 ```
 
-Setup prepares local env files, secrets, services and migrations and records your bootstrap admin email. Configure `OPENROUTER_API_KEY` and `COCKPIT_CONTEXT_MODEL` privately, then run `pnpm dev`. Open the configured local HTTPS origin, sign up using your bootstrap address and the `[bootstrap]` token from the server output, verify in development Mailpit when configured, and enroll administrator 2FA. Add a dependency under Packages and connect a client using [the MCP guide](./docs/mcp.md#first-question).
+`pnpm install` may warn that Prisma does not list Node.js 26 as supported; that is expected. Setup prepares local env files, secrets, services and migrations, records your bootstrap admin email (pass `--admin-email you@example.com` when not in an interactive terminal) and installs Claude Code safety hooks into `.claude/settings.json`. On the very first run it can stop at `pnpm db:migrate:apply` with "cannot reach your local database" while the new Postgres container is still initializing; wait about 15 seconds and run `pnpm setup:app` again. Configure `OPENROUTER_API_KEY` and `COCKPIT_CONTEXT_MODEL` privately, then run `pnpm dev` (without portless: `BETTER_AUTH_URL=http://localhost:3001 pnpm dev:raw`, served on `http://localhost:3001`). Open that local origin, sign up using your bootstrap address and the `[bootstrap]` token from the server output, verify in development Mailpit when configured, and enroll administrator 2FA. Add a dependency under Packages and connect a client using [the MCP guide](./docs/mcp.md#first-question).
 
 ## Installation
 

@@ -10,7 +10,7 @@ Clone the public repository and use a unique project name such as `cockpit-conte
 
 ```sh
 git clone https://github.com/FlyCockpit/context.git
-cd cockpit-context
+cd context
 cp .env.example .env
 ```
 
