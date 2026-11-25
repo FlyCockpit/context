@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@cockpit-context/db", async () => {
   const { mockDeep } = await import("vitest-mock-extended");
@@ -45,7 +45,7 @@ const { installFakeRows } = await import("./test-support/fake-git-db");
 const { createFixtureRepo, fixtureGit } = await import("./test-support/fixture-repo");
 const repos = await import("./repositories");
 const { onRepositoryChange } = await import("./repository-change-hooks");
-const { repositoryDir } = await import("./paths");
+const { repositoryDir, sweepTrash } = await import("./paths");
 const { GitCommandError } = await import("./git-exec");
 const { RepoError } = await import("./errors");
 
@@ -79,6 +79,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
+
+// A delete renames into trash/ and sweeps it in the background (./paths.ts).
+// Finish that sweep before the next test swaps dataDir, or it runs against
+// the new roots and warns into that test.
+afterEach(() => sweepTrash());
 
 beforeEach(async () => {
   vi.clearAllMocks();

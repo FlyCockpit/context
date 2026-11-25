@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FakeCheckoutRow } from "./test-support/fake-git-db";
 
@@ -49,7 +49,7 @@ const { ensureRepository } = await import("./repositories");
 const { deleteCheckout, ensureCheckout, materializeCheckout } = await import("./checkouts");
 const { onCheckoutRemoval } = await import("./removal-hooks");
 const { deleteRepository } = await import("./repositories");
-const { repositoryDir } = await import("./paths");
+const { repositoryDir, sweepTrash } = await import("./paths");
 
 const { GitCommandError } = await import("./git-exec");
 
@@ -69,6 +69,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
+
+// A delete renames into trash/ and sweeps it in the background (./paths.ts).
+// Finish that sweep before the next test swaps dataDir, or it runs against
+// the new roots and warns into that test.
+afterEach(() => sweepTrash());
 
 beforeEach(async () => {
   vi.clearAllMocks();
