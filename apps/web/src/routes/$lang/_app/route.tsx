@@ -58,10 +58,13 @@ function AppShellLayout() {
         {/* The page scroller. `[container-type:size]` lets the AppFrame sidebar
             stick at the scroller's height (`100cqh`); it also makes `main` the
             containing block of fixed descendants, so overlays portal out (Base
-            UI does) and fixed chrome (BottomNav) stays outside. */}
+            UI does) and fixed chrome (BottomNav) stays outside. No
+            `scrollbar-gutter: stable`: the banners and sticky sub-navs inside
+            the scroller are full-bleed. This shell has no footer: phones get
+            the BottomNav. See docs/ui.md § Shell rules */}
         <main
           data-scroll-restoration-id={MAIN_SCROLLER_ID}
-          className="relative min-h-0 min-w-0 overflow-y-auto overflow-x-clip overscroll-contain [container-type:size] [scrollbar-gutter:stable]"
+          className="relative min-h-0 min-w-0 overflow-y-auto overflow-x-clip overscroll-contain [container-type:size]"
         >
           <PullToRefresh onRefresh={handleRefresh}>
             <Outlet />

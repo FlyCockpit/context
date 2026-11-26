@@ -109,6 +109,8 @@ export function getRouter() {
     // next page renders. Pending UI replaces the outlet instead.
     defaultPendingComponent: () => <Loader />,
     defaultErrorComponent: ErrorState,
+    // The page body, for a not-found boundary inside a shell. An unknown URL
+    // gets the public shell around it from `$lang`'s notFoundComponent.
     defaultNotFoundComponent: () => <NotFoundState />,
     context: {
       orpc,

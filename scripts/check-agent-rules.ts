@@ -44,13 +44,21 @@
  *   sitemap.md's Public Routes table intentionally lists router-public pages
  *   that are excluded from SEO discovery, so extra rows there are not
  *   violations. A PUBLIC_PATHS array this cannot parse fails closed.
+ *
+ * GATE 4 — SHELL AND THEME RULES, docs/ui.md § Shell rules
+ *   Rules G8 and G9 in scripts/check-web-conventions.ts (no scrollbar gutter on a `<main>`
+ *   page scroller, no site `<footer>` in a route file, no literal colour or
+ *   prefers-color-scheme query outside the token file). Its fixtures,
+ *   scripts/check-web-conventions.test.ts, run in the self-test.
  */
 
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import process from "node:process";
+import { checkWebConventions } from "./check-web-conventions.ts";
 
 const { parse } = createRequire(import.meta.url)("@babel/parser") as typeof import("@babel/parser");
 
@@ -522,6 +530,9 @@ function main(): void {
     );
   }
 
+  // Gate 4: shell and theme rules (G8, G9).
+  failures.push(...checkWebConventions(ROOT));
+
   if (failures.length > 0) {
     for (const failure of failures) {
       console.error(`POLICY VIOLATION: ${failure}`);
@@ -529,7 +540,7 @@ function main(): void {
     process.exit(1);
   }
   console.log(
-    "agent rules passed: route exports clean, JSX literal gate clean, sitemap.md in sync with PUBLIC_PATHS.",
+    "agent rules passed: route exports clean, JSX literal gate clean, sitemap.md in sync with PUBLIC_PATHS, shell and theme rules (G8/G9) clean.",
   );
 }
 
@@ -758,6 +769,18 @@ function runSelfTest(): void {
   check(
     "an unreadable PUBLIC_PATHS array fails closed",
     checkSitemapSync("export const PUBLIC_PATHS = [];", "").length === 1,
+  );
+
+  console.log("-- gate 4: shell and theme rules (scripts/check-web-conventions.test.ts) --");
+  const webConventions = spawnSync(
+    process.execPath,
+    ["--test", "scripts/check-web-conventions.test.ts"],
+    { cwd: ROOT, encoding: "utf8" },
+  );
+  check(
+    "the G8/G9 fixtures pass",
+    webConventions.status === 0,
+    `${webConventions.stdout ?? ""}${webConventions.stderr ?? ""}`.trim().slice(-4000),
   );
 
   if (failures > 0) {

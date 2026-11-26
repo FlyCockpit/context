@@ -24,6 +24,9 @@
       "ignoreBinaries": [
         // Global local-dev CLI. Intentionally not listed in package.json.
         "portless",
+        // Browser CLI driven by scripts/check-layout.ts (`pnpm check:layout`),
+        // a local-only check: installed globally, not a dependency.
+        "agent-browser",
         // OS binary from Debian's openssh-client, apt-installed in the image
         // and spawned by scripts/check-runtime-tools.mjs. knip 6.42 started
         // reading direct spawnSync("<bin>") calls as package binaries.

@@ -1436,6 +1436,10 @@ report "Hand-rolled htmlFor={field.name} on a form field — use TextField/Texta
 #      heuristic with a reviewed allowlist that only shrinks
 #      (scripts/lib/agent-rules-allowlist.json).
 #   3. sitemap.md must list every PUBLIC_PATHS entry from apps/server/src/seo.ts.
+#   4. docs/ui.md § Shell rules: G8 (no scrollbar gutter on a <main> page
+#      scroller, no site <footer> in a route file) and G9 (no literal colour or
+#      prefers-color-scheme query outside the token file), from
+#      scripts/check-web-conventions.ts.
 AGENT_RULES_ALLOWLIST="scripts/lib/agent-rules-allowlist.json"
 require_file "$AGENT_RULES_ALLOWLIST"
 require_file "sitemap.md"
@@ -1444,7 +1448,7 @@ agent_rules_status=0
 agent_rules_output="$(node scripts/check-agent-rules.ts)" || agent_rules_status=1
 if ((agent_rules_status != 0)); then
   printf '%s\n' "$agent_rules_output"
-  echo "POLICY VIOLATION: agent-rules gate failed (route exports / t() coverage / sitemap sync)."
+  echo "POLICY VIOLATION: agent-rules gate failed (route exports / t() coverage / sitemap sync / shell and theme rules)."
   fail=1
 fi
 

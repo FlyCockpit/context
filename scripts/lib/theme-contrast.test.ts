@@ -73,3 +73,58 @@ test("every text token in globals.css reaches 4.5:1 on its surfaces, light and d
     "raise the text token (or darken/lighten the surface) in the :root / .dark preset tokens",
   );
 });
+
+/** The declarations of the one unlayered rule whose selector is exactly `selector`. */
+function ruleDeclarations(css: string, selector: string): Map<string, string> {
+  const unlayered = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`(^|\\n)${escaped}\\s*\\{([^}]*)\\}`).exec(unlayered);
+  if (!match) throw new Error(`globals.css has no toast rule \`${selector}\``);
+  const declarations = new Map<string, string>();
+  for (const decl of match[2]!.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)) {
+    declarations.set(decl[1]!, decl[2]!.replace(/\s+/g, " ").trim());
+  }
+  return declarations;
+}
+
+test("toasts are a popover surface whose inks reach 4.5:1 on it, light and dark", () => {
+  // sileo's own palette inverts the theme; globals.css repaints it from the
+  // tokens. Every state ink it maps, and its text colour, must hold up on the
+  // fill it maps. See docs/ui.md § Shell rules
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  const alias = (value: string | undefined) => /^var\(--([\w-]+)\)$/.exec(value ?? "")?.[1];
+  const fill = ruleDeclarations(
+    css,
+    ":root [data-sileo-viewport] :is([data-sileo-pill], [data-sileo-body])",
+  ).get("fill");
+  assert.equal(alias(fill), "popover");
+  const viewport = ruleDeclarations(css, ":root [data-sileo-viewport]");
+  const pairs = ["success", "loading", "error", "warning", "info", "action"].map((state) => {
+    const ink = alias(viewport.get(`--sileo-state-${state}`));
+    assert.ok(ink, `--sileo-state-${state} maps to a token`);
+    return { text: ink, surface: "popover", themes: ["light", "dark"] as const };
+  });
+  for (const selector of [
+    ":root [data-sileo-viewport] [data-sileo-title][data-state]",
+    ":root [data-sileo-viewport] [data-sileo-description]",
+  ]) {
+    assert.equal(
+      alias(ruleDeclarations(css, selector).get("color")),
+      "popover-foreground",
+      selector,
+    );
+  }
+  pairs.push({ text: "popover-foreground", surface: "popover", themes: ["light", "dark"] });
+  // The badge ink sits on the pill itself (measured above), not on sileo's 20% tint.
+  assert.equal(
+    ruleDeclarations(css, ":root [data-sileo-viewport] [data-sileo-badge][data-state]").get(
+      "--sileo-tone-bg",
+    ),
+    "transparent",
+  );
+  const failing = measurePairs(css, pairs).filter((r) => r.ratio < AA_TEXT);
+  assert.deepEqual(
+    failing.map((r) => `${r.theme}: toast ${r.label} = ${r.ratio.toFixed(2)}:1`),
+    [],
+  );
+});

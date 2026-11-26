@@ -13,7 +13,9 @@
  * the browser does: the token at that alpha over the opaque surface, in sRGB.
  * The destructive tints listed are every rest, hover and focus tint the
  * destructive button, menu item, error alerts and status pill ship with; a tint not in the
- * list is not measured.
+ * list is not measured. The `--state-*` inks are measured on background, card
+ * and popover; the toast rules that map sileo onto the tokens are checked by
+ * theme-contrast.test.ts.
  */
 
 type Rgb = readonly [number, number, number];
@@ -53,6 +55,15 @@ const CONTRAST_PAIRS: readonly ContrastPair[] = [
     surface,
     themes: BOTH,
   })),
+  // State inks: badges, alerts and toasts write in these colours, on every
+  // opaque surface they sit on (toasts are a popover surface, globals.css).
+  ...(["state-success", "state-warning", "state-info", "state-loading"] as const).flatMap((text) =>
+    (["background", "card", "popover"] as const).map((surface) => ({
+      text,
+      surface,
+      themes: BOTH,
+    })),
+  ),
   // Destructive text on its own tint, at every alpha that ships (rest, hover
   // and focus), over each surface it sits on:
   //   both   /5: inline errors and failed Ask alerts;
