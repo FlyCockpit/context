@@ -17,6 +17,7 @@ const fixture = vi.hoisted(() => ({
   items: [] as { text: string; onClick?: () => unknown }[],
   signOut: vi.fn(),
   undo: vi.fn(),
+  leave: vi.fn(),
   toastError: vi.fn(),
 }));
 
@@ -66,8 +67,9 @@ vi.mock("@/hooks/use-auth-session", () => ({
     },
   }),
 }));
-vi.mock("@/hooks/use-reload-on-identity-change", () => ({
+vi.mock("@/lib/document-identity", () => ({
   markExplicitSignOut: () => fixture.undo,
+  leaveDocument: fixture.leave,
 }));
 vi.mock("@/lib/auth-client", () => ({ authClient: { signOut: fixture.signOut } }));
 vi.mock("@cockpit-context/ui/components/sileo", () => ({ toast: { error: fixture.toastError } }));
@@ -91,6 +93,7 @@ beforeEach(() => {
   fixture.items = [];
   fixture.signOut.mockReset();
   fixture.undo.mockReset();
+  fixture.leave.mockReset();
   fixture.toastError.mockReset();
 });
 
@@ -150,11 +153,18 @@ describe("account menu", () => {
     expect(fixture.toastError).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the mark when sign-out succeeds (the page reloads)", async () => {
-    fixture.signOut.mockResolvedValue({ data: { success: true }, error: null });
+  it("keeps the mark when sign-out succeeds, and leaves for the sign-in page", async () => {
+    fixture.signOut.mockImplementation(
+      async (options: { fetchOptions: { onSuccess: () => void } }) => {
+        options.fetchOptions.onSuccess();
+        return { data: { success: true }, error: null };
+      },
+    );
     render();
     await fixture.items.at(-1)?.onClick?.();
     expect(fixture.undo).not.toHaveBeenCalled();
     expect(fixture.toastError).not.toHaveBeenCalled();
+    // A quarantined full load (lib/document-identity.ts), not a client navigate.
+    expect(fixture.leave).toHaveBeenCalledWith("/en-US/login");
   });
 });

@@ -9,6 +9,7 @@
  * Stops for good when `signal` aborts or `isFatal(error)` says retrying is
  * pointless (the conversation is gone, the session ended).
  */
+import { reportIfSessionRejected } from "@/lib/document-identity";
 
 export type StreamStatus = "connecting" | "live" | "reconnecting" | "failed";
 
@@ -56,6 +57,10 @@ export async function consumeWithReconnect<T>(options: {
       }
     } catch (error) {
       if (signal.aborted) return;
+      // A session that ended elsewhere (expiry, revocation): the same one
+      // session check as a 401 query, so the document is replaced instead of
+      // the retained view staying on screen (lib/document-identity.ts).
+      reportIfSessionRejected(error);
       if (options.isFatal?.(error)) {
         options.onStatus("failed", error);
         return;

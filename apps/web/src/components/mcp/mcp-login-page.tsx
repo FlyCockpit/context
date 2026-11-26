@@ -13,6 +13,7 @@ import { ONE_TIME_CODE_LENGTH, OneTimeCodeField } from "@/components/auth/plain-
 import { ClientTile } from "@/components/mcp/client-tile";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { authClient } from "@/lib/auth-client";
+import { signOutAndLeave } from "@/lib/explicit-sign-out";
 import { clearServerFieldError, setServerFieldError } from "@/lib/form-server-error";
 import {
   mcpPageHref,
@@ -33,13 +34,21 @@ import { friendly, isCodeRejection, isCredentialRejection } from "@/utils/friend
  *   sign-in answers with the next step of the authorization — usually the
  *   consent page — and the page follows it.
  * - Signed in: Continue (to consent, with the raw signed query), or sign
- *   out and sign in again. A revoked connection lands here: a fresh session
+ *   out and sign in again (`signOutAndLeave`: a fresh load of this page). A revoked connection lands here: a fresh session
  *   is a new grant.
  */
 export function McpLoginPage({ lang, rawSearch }: { lang: string; rawSearch: string }) {
-  const { t } = useTranslation(["auth"]);
+  const { t } = useTranslation(["auth", "nav"]);
   const info = parseMcpOAuthSearch(rawSearch);
   const { state } = useAuthSession();
+
+  // An explicit sign-out like the account menu's: a fresh, quarantined load of
+  // this page (the signed query kept byte for byte) with an empty cache, where
+  // the next account signs in. Still signed in after a failure: say so.
+  const switchAccount = async () => {
+    const result = await signOutAndLeave(mcpPageHref(lang, "mcp-login", rawSearch));
+    if (!result.ok) toast.error(friendly(result.error, t("nav:userMenu.signOutFailed")));
+  };
 
   if (!info.usable) return <InvalidRequestCard />;
   if (state.status === "pending" || state.status === "error") return <PageSkeleton />;
@@ -58,7 +67,7 @@ export function McpLoginPage({ lang, rawSearch }: { lang: string; rawSearch: str
         <Button
           variant="outline"
           className="min-h-[44px] w-full"
-          onClick={() => void authClient.signOut()}
+          onClick={() => void switchAccount()}
         >
           {t("auth:mcpLogin.switchAccount")}
         </Button>

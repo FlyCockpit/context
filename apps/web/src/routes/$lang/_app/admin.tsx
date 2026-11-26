@@ -9,15 +9,15 @@ import { AppFrame } from "@/components/app-frame";
 import { InlineRetry } from "@/components/inline-retry";
 import { RouteContentSkeleton } from "@/components/route-content-skeleton";
 import { TwoFactorSetupRequired } from "@/components/two-factor-enrollment";
+import { resolveRouteSession } from "@/lib/route-session";
 import { decideAdminRouteAccess } from "@/lib/route-session-access";
-import { getRouteSession } from "@/server/auth-session";
 import { orpc } from "@/utils/orpc";
 import { twoFactorEnrollmentState } from "@/utils/two-factor-policy";
 
 export const Route = createFileRoute("/$lang/_app/admin")({
   staticData: { pendingFrame: "admin" },
   beforeLoad: async () => {
-    const decision = decideAdminRouteAccess(await getRouteSession());
+    const decision = decideAdminRouteAccess(await resolveRouteSession());
     if (decision.kind === "error") throw new Error("Route session unavailable");
     // 404-hide the entire admin tree from confirmed non-admins. Throwing
     // notFound() (instead of redirect) means an unauthorized visitor can't

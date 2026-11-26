@@ -15,8 +15,8 @@ import { authClient } from "@/lib/auth-client";
 import { newPasswordSchema, PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { parseResetPasswordSearch } from "@/lib/reset-password-search";
 import { ensureRouteQuery } from "@/lib/route-query";
+import { resolveRouteSession } from "@/lib/route-session";
 import { decideAnonymousOnlyRouteAccess } from "@/lib/route-session-access";
-import { getRouteSession } from "@/server/auth-session";
 import { friendly, isRateLimit } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/$lang/_app/reset-password")({
   staticData: { pendingShape: "form", pendingWidth: "narrow" },
   validateSearch: parseResetPasswordSearch,
   beforeLoad: async ({ context, params }) => {
-    const decision = decideAnonymousOnlyRouteAccess(await getRouteSession());
+    const decision = decideAnonymousOnlyRouteAccess(await resolveRouteSession());
     if (decision.kind === "error") throw new Error("Route session unavailable");
     if (decision.kind === "redirect-authenticated") {
       throw redirect({ to: "/$lang/settings/security", params: { lang: params.lang } });

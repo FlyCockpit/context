@@ -537,6 +537,52 @@ FIND_MANY_AWK='
   }
 '
 
+# docs/development.md § Query cache follows identity: route files reach the
+# session only through resolveRouteSession() (it checks the document's
+# identity). A bypass is any code reference to the getRouteSession identifier
+# (a call, an import, an alias) or to the @/server/auth-session module (which
+# also covers a namespace or dynamic import). Comments are stripped lexically
+# first (`//` to the end of the line and `/* … */` spans, across lines, outside
+# string literals); the identifier is matched with string contents blanked, the
+# module path with them kept. A lint guardrail, not a parser: regex literals
+# containing `//` are not modelled. Shared with --self-test.
+ROUTE_SESSION_BYPASS_RE='(^|[^A-Za-z0-9_$])getRouteSession([^A-Za-z0-9_$]|$)'
+ROUTE_SESSION_MODULE_RE='["\047`]@/server/auth-session["\047`]'
+ROUTE_SESSION_CODE_AWK='
+  FNR == 1 { inblock = 0 }
+  {
+    line = $0; code = ""; raw = ""; q = ""; n = length(line); i = 1
+    while (i <= n) {
+      if (inblock) {
+        e = index(substr(line, i), "*/")
+        if (e == 0) { i = n + 1; break }
+        i += e + 1; inblock = 0; continue
+      }
+      c = substr(line, i, 1); d = substr(line, i, 2)
+      if (q != "") {
+        raw = raw c
+        if (c == "\\") { raw = raw substr(line, i + 1, 1); i += 2; continue }
+        if (c == q) { q = ""; code = code c }
+        i++; continue
+      }
+      if (d == "/*") { inblock = 1; i += 2; continue }
+      if (d == "//") break
+      if (c == "\"" || c == "\047" || c == "`") q = c
+      code = code c; raw = raw c; i++
+    }
+    if (code ~ re || raw ~ modre) print FILENAME ":" FNR ":" $0
+  }
+'
+route_session_bypass_scan() {
+  local file
+  run_grep -rlE --include='*.ts' --include='*.tsx' "${GREP_EXCLUDES[@]}" \
+    -e 'getRouteSession' -e '@/server/auth-session' "$@" |
+    while IFS= read -r file; do
+      awk -v re="$ROUTE_SESSION_BYPASS_RE" -v modre="$ROUTE_SESSION_MODULE_RE" \
+        "$ROUTE_SESSION_CODE_AWK" "$file"
+    done
+}
+
 # -- self-test --------------------------------------------------------------
 
 if [[ "${1:-}" == "--self-test" ]]; then
@@ -1142,6 +1188,51 @@ if [[ "${1:-}" == "--self-test" ]]; then
   fi
   echo "ok: agent-rules scanner catches route value exports, hardcoded JSX copy, and sitemap drift"
 
+  route_fixture="$(mktemp -d)"
+  route_bad=(
+    'const decision = decideProtectedRouteAccess(await getRouteSession());'
+    'import { getRouteSession } from "@/server/auth-session";'
+    '  getRouteSession as probe,'
+    'const [s, c] = await Promise.all([getRouteSession(), load()]);'
+    '/* guard */ const decision = await getRouteSession();'
+    'import * as session from "@/server/auth-session";'
+    "const m = await import('@/server/auth-session');"
+    'const a = 1; /* x */ import("@/server/auth-session").then((m) => m.getRouteSession());'
+  )
+  route_good=(
+    'const decision = decideProtectedRouteAccess(await resolveRouteSession());'
+    '// resolveRouteSession() wraps getRouteSession() with the identity check.'
+    'const myGetRouteSessionLike = 1;'
+    'const session = await resolveRouteSession(); // replaces getRouteSession()'
+    '/**'
+    ' * getRouteSession() alone would skip it.'
+    ' getRouteSession() inside a block comment without a leading star'
+    ' */'
+    'const done = await resolveRouteSession(); /* not getRouteSession() */'
+    'const label = "getRouteSession()";'
+    '// import { getRouteSession } from "@/server/auth-session";'
+  )
+  for line in "${route_bad[@]}"; do printf '%s\n' "$line" >> "$route_fixture/bad.tsx"; done
+  for line in "${route_good[@]}"; do printf '%s\n' "$line" >> "$route_fixture/good.tsx"; done
+  route_hits="$(route_session_bypass_scan "$route_fixture")"
+  route_line=0
+  for line in "${route_bad[@]}"; do
+    route_line=$((route_line + 1))
+    if ! printf '%s\n' "$route_hits" | grep -qE "^$route_fixture/bad\.tsx:$route_line:"; then
+      echo "self-test FAILED: route-session bypass '$line' was not caught" >&2
+      rm -rf "$route_fixture"
+      exit 1
+    fi
+  done
+  if printf '%s\n' "$route_hits" | grep -qE "/good\.tsx:"; then
+    echo "self-test FAILED: a route-session line that is not a bypass was flagged:" >&2
+    printf '%s\n' "$route_hits" | grep -E "/good\.tsx:" >&2
+    rm -rf "$route_fixture"
+    exit 1
+  fi
+  rm -rf "$route_fixture"
+  echo "ok: route files that reach getRouteSession directly are caught; resolveRouteSession and comments pass"
+
   echo "policy-checks self-test passed."
   exit 0
 fi
@@ -1270,15 +1361,23 @@ hits="$(
 )"
 report "Use isPending instead of isLoading from TanStack Query hooks." "$hits"
 
-# AGENTS.md / auth-and-routing: route access uses getRouteSession() so
-# navigation is backed by auth.api.getSession() on the server.
+# AGENTS.md / docs/development.md: route access uses resolveRouteSession() (over
+# the getRouteSession() server function) so navigation is backed by
+# auth.api.getSession() on the server.
 hits="$(
   run_grep -rInE --include='*.ts' --include='*.tsx' \
     "${GREP_EXCLUDES[@]}" \
     -E 'authClient\.getSession[[:space:]]*\(' \
     apps/web/src/routes
 )"
-report "Route files must use getRouteSession() from apps/web/src/server/auth-session.ts instead of authClient.getSession()." "$hits"
+report "Route files must use resolveRouteSession() from apps/web/src/lib/route-session.ts instead of authClient.getSession()." "$hits"
+
+# docs/development.md § Query cache follows identity: every session guard checks
+# the document's identity before anything under it renders, so route files
+# call resolveRouteSession() (lib/route-session.ts), never getRouteSession()
+# (under any name), which would skip that check.
+hits="$(route_session_bypass_scan apps/web/src/routes)"
+report "Route guards must call resolveRouteSession() from apps/web/src/lib/route-session.ts (it checks the document's identity), never getRouteSession() or @/server/auth-session directly." "$hits"
 
 # AGENTS.md: Better Auth is the only reactive client session store. The
 # useAuthSession adapter is the only production code allowed to call any

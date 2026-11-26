@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const identity = vi.hoisted(() => ({ reportIfSessionRejected: vi.fn() }));
+vi.mock("@/lib/document-identity", () => identity);
+
 import { consumeWithReconnect, reconnectDelay, type StreamStatus } from "./stream-reconnect";
 
 async function* events<T>(items: T[], fail?: Error): AsyncGenerator<T> {
@@ -69,6 +72,27 @@ describe("consumeWithReconnect", () => {
     });
     expect(connect).toHaveBeenCalledTimes(1);
     expect(statuses).toEqual(["connecting", "failed"]);
+  });
+
+  it("reports a session rejection after a snapshot to the shared session check", async () => {
+    const unauthorized = Object.assign(new Error("ended"), { code: "UNAUTHORIZED" });
+    const events: string[] = [];
+    identity.reportIfSessionRejected.mockReset();
+    await consumeWithReconnect<string>({
+      signal: new AbortController().signal,
+      connect: async () =>
+        (async function* () {
+          yield "snapshot";
+          throw unauthorized;
+        })(),
+      onEvent: (event) => events.push(event),
+      onStatus: () => {},
+      isFatal: (error) => error === unauthorized,
+    });
+    expect(events).toEqual(["snapshot"]);
+    // The session ended elsewhere: one session check (lib/document-identity.ts)
+    // replaces the document instead of leaving the retained view on screen.
+    expect(identity.reportIfSessionRejected).toHaveBeenCalledExactlyOnceWith(unauthorized);
   });
 
   it("stops quietly once aborted", async () => {

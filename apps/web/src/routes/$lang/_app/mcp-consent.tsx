@@ -2,8 +2,8 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { McpConsentPage } from "@/components/mcp/mcp-consent-page";
 import { mcpPageHref } from "@/lib/mcp-oauth-search";
+import { resolveRouteSession } from "@/lib/route-session";
 import { decideProtectedRouteAccess } from "@/lib/route-session-access";
-import { getRouteSession } from "@/server/auth-session";
 
 /**
  * MCP OAuth consent (docs/mcp.md). Requires a session: an anonymous
@@ -15,7 +15,7 @@ export const Route = createFileRoute("/$lang/_app/mcp-consent")({
   staticData: { pendingShape: "form", pendingWidth: "narrow" },
   validateSearch: (search: Record<string, unknown>) => search,
   beforeLoad: async ({ params }) => {
-    const decision = decideProtectedRouteAccess(await getRouteSession());
+    const decision = decideProtectedRouteAccess(await resolveRouteSession());
     if (decision.kind === "error") throw new Error("Route session unavailable");
     if (decision.kind === "redirect-to-login") {
       throw redirect({

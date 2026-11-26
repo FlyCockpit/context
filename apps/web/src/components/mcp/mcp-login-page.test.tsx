@@ -9,6 +9,8 @@ const harness = vi.hoisted(() => ({
   toastError: vi.fn(),
   setFieldMeta: vi.fn(),
   assign: vi.fn(),
+  session: { status: "anonymous" } as unknown,
+  signOutAndLeave: vi.fn(),
 }));
 
 vi.mock("react", async (importOriginal) => ({
@@ -49,12 +51,13 @@ vi.mock("@/lib/auth-client", () => ({
   },
 }));
 vi.mock("@/hooks/use-auth-session", () => ({
-  useAuthSession: () => ({ state: { status: "anonymous" } }),
+  useAuthSession: () => ({ state: harness.session }),
 }));
+vi.mock("@/lib/explicit-sign-out", () => ({ signOutAndLeave: harness.signOutAndLeave }));
 vi.mock("@/components/auth/auth-screen", () => ({ AuthCard: () => null, AuthScreen: () => null }));
 vi.mock("@/lib/mcp-oauth-search", () => ({
   parseMcpOAuthSearch: () => ({ usable: true, clientId: "c1" }),
-  mcpPageHref: () => "/en-US/mcp-consent",
+  mcpPageHref: (lang: string, page: string, raw: string) => `/${lang}/${page}?${raw}`,
   resolveOauthRedirectUrl: () => null,
   toMcpPublicClientInfo: (data: unknown) => data,
 }));
@@ -120,6 +123,7 @@ function passwordServerError() {
 beforeEach(() => {
   vi.clearAllMocks();
   harness.state = [];
+  harness.session = { status: "anonymous" };
   vi.stubGlobal("window", { location: { assign: harness.assign } });
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -197,5 +201,32 @@ describe("McpLoginPage 2FA cancel", () => {
     const tree = renderSignIn();
     expect(button(tree, "auth:twoFactor.verify")).toBeUndefined();
     expect(walk(tree).some((el) => el.type === "form")).toBe(true);
+  });
+});
+
+describe("McpLoginPage switch account", () => {
+  const signedIn = () => {
+    harness.session = {
+      status: "authenticated",
+      session: { user: { id: "u1", email: "a@b.co" } },
+    };
+    harness.cursor = 0;
+    return McpLoginPage({ lang: "en-US", rawSearch: SIGNED_QUERY });
+  };
+
+  it("signs out through the explicit sign-out and reloads this page with its signed query", async () => {
+    harness.signOutAndLeave.mockResolvedValueOnce({ ok: true });
+    button(signedIn(), "auth:mcpLogin.switchAccount")?.props?.onClick?.();
+    await vi.waitFor(() => expect(harness.signOutAndLeave).toHaveBeenCalledTimes(1));
+    // A quarantined full load (lib/document-identity.ts) of this same page, so
+    // the next account signs in with an empty cache and the authorization resumes.
+    expect(harness.signOutAndLeave).toHaveBeenCalledWith(`/en-US/mcp-login?${SIGNED_QUERY}`);
+    expect(harness.toastError).not.toHaveBeenCalled();
+  });
+
+  it("says so when the sign-out fails (still signed in)", async () => {
+    harness.signOutAndLeave.mockResolvedValueOnce({ ok: false, error: new Error("offline") });
+    button(signedIn(), "auth:mcpLogin.switchAccount")?.props?.onClick?.();
+    await vi.waitFor(() => expect(harness.toastError).toHaveBeenCalledTimes(1));
   });
 });

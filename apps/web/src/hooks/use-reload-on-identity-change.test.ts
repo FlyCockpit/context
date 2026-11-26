@@ -1,45 +1,84 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
-  ref: { current: undefined as unknown },
-  lastDeps: undefined as unknown[] | undefined,
+  /** Last deps of each layout effect, by call order within one render. */
+  deps: [] as (unknown[] | undefined)[],
+  cleanups: [] as ((() => void) | undefined)[],
+  call: 0,
   state: { status: "pending" } as
     | { status: "pending" }
     | { status: "error" }
     | { status: "anonymous" }
     | { status: "authenticated"; session: { user: { id: string } } },
+  refetch: vi.fn(),
   reload: vi.fn(),
 }));
 
-// Run the hook without a DOM: one persistent ref, and an effect that fires
-// whenever its deps change — the same contract React gives it.
+// Run the hook without a DOM: layout effects that fire, in order, whenever
+// their deps change (cleaning up the previous run first), as React does.
 vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
-  useRef: () => boundary.ref,
-  useEffect: (effect: () => void, deps: unknown[]) => {
-    const changed =
-      boundary.lastDeps === undefined || deps.some((dep, i) => dep !== boundary.lastDeps?.[i]);
-    boundary.lastDeps = deps;
-    if (changed) effect();
+  useLayoutEffect: (effect: () => (() => void) | undefined, deps: unknown[]) => {
+    const i = boundary.call++;
+    const last = boundary.deps[i];
+    if (last !== undefined && deps.every((dep, j) => dep === last[j])) return;
+    boundary.deps[i] = deps;
+    boundary.cleanups[i]?.();
+    boundary.cleanups[i] = effect() ?? undefined;
   },
 }));
 vi.mock("@/hooks/use-auth-session", () => ({
-  useAuthSession: () => ({ state: boundary.state }),
+  useAuthSession: () => ({ state: boundary.state, actions: { refetch: boundary.refetch } }),
 }));
 
-import {
-  markExplicitSignOut,
-  sessionIdentity,
-  shouldReloadForIdentity,
-  useReloadOnIdentityChange,
-} from "./use-reload-on-identity-change";
+import { markExplicitSignOut, resetDocumentIdentityForTests } from "@/lib/document-identity";
+
+import { sessionIdentity, useReloadOnIdentityChange } from "./use-reload-on-identity-change";
 
 const user = (id: string) => ({ status: "authenticated", session: { user: { id } } }) as const;
 
 function useRenderWith(state: typeof boundary.state) {
   boundary.state = state;
+  boundary.call = 0;
   useReloadOnIdentityChange();
 }
+
+/** The `_app` shell unmounts (a public page): its effects clean up. */
+function unmount() {
+  for (const cleanup of boundary.cleanups) cleanup?.();
+  boundary.deps = [];
+  boundary.cleanups = [];
+}
+
+class FakeChannel {
+  static open: FakeChannel[] = [];
+  posted = 0;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  constructor() {
+    FakeChannel.open.push(this);
+  }
+  postMessage() {
+    this.posted++;
+  }
+  close() {
+    FakeChannel.open = FakeChannel.open.filter((c) => c !== this);
+  }
+}
+
+beforeEach(() => {
+  resetDocumentIdentityForTests();
+  boundary.deps = [];
+  boundary.cleanups = [];
+  boundary.reload.mockReset();
+  boundary.refetch.mockReset();
+  FakeChannel.open = [];
+  vi.stubGlobal("window", { location: { reload: boundary.reload } });
+  vi.stubGlobal("BroadcastChannel", FakeChannel);
+});
+afterEach(() => {
+  unmount();
+  vi.unstubAllGlobals();
+});
 
 describe("sessionIdentity", () => {
   it("maps session states to identities", () => {
@@ -50,30 +89,7 @@ describe("sessionIdentity", () => {
   });
 });
 
-describe("shouldReloadForIdentity", () => {
-  it("only reloads when a signed-in user goes away", () => {
-    expect(shouldReloadForIdentity(undefined, "u1")).toBe(false);
-    expect(shouldReloadForIdentity("u1", undefined)).toBe(false);
-    expect(shouldReloadForIdentity("u1", "u1")).toBe(false);
-    expect(shouldReloadForIdentity(null, null)).toBe(false);
-    // Anonymous → signed in carries only public data; no reload.
-    expect(shouldReloadForIdentity(null, "u1")).toBe(false);
-    expect(shouldReloadForIdentity("u1", null)).toBe(true);
-    expect(shouldReloadForIdentity("u1", "u2")).toBe(true);
-  });
-});
-
 describe("useReloadOnIdentityChange", () => {
-  beforeEach(() => {
-    boundary.ref.current = undefined;
-    boundary.lastDeps = undefined;
-    boundary.reload.mockReset();
-    vi.stubGlobal("window", { location: { reload: boundary.reload } });
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("does not reload on the first known identity or on sign-in", () => {
     useRenderWith({ status: "pending" });
     useRenderWith({ status: "anonymous" });
@@ -89,27 +105,54 @@ describe("useReloadOnIdentityChange", () => {
     expect(boundary.reload).not.toHaveBeenCalled();
   });
 
-  it("leaves an explicit sign-out's own page load alone, until it is undone", () => {
-    const undo = markExplicitSignOut();
-    useRenderWith(user("u1"));
+  it("A → sign-out elsewhere → B: replaces the document at the sign-out", () => {
+    useRenderWith(user("a"));
     useRenderWith({ status: "anonymous" });
+    expect(boundary.reload).toHaveBeenCalledTimes(1);
+    useRenderWith(user("b"));
+    expect(boundary.reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("A → B directly: replaces the document", () => {
+    useRenderWith(user("a"));
+    useRenderWith({ status: "pending" });
+    useRenderWith(user("b"));
+    expect(boundary.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("remembers whose data is cached across an `_app` unmount", () => {
+    useRenderWith(user("a"));
+    unmount();
+    // Another account signed in while a public page was open.
+    useRenderWith(user("b"));
+    expect(boundary.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves an explicit sign-out's own page load alone, until it is undone", () => {
+    useRenderWith(user("u1"));
+    const undo = markExplicitSignOut();
+    useRenderWith({ status: "error" });
+    useRenderWith(user("u1"));
     expect(boundary.reload).not.toHaveBeenCalled();
     undo();
-    useRenderWith(user("u1"));
     useRenderWith({ status: "anonymous" });
     expect(boundary.reload).toHaveBeenCalledTimes(1);
   });
 
-  it("reloads when the user signs out elsewhere or the account switches", () => {
-    useRenderWith(user("u1"));
+  it("tells the other tabs about a sign-in, and checks the session on theirs", () => {
     useRenderWith({ status: "anonymous" });
-    expect(boundary.reload).toHaveBeenCalledTimes(1);
-
-    boundary.ref.current = undefined;
-    boundary.lastDeps = undefined;
-    useRenderWith(user("u1"));
-    useRenderWith({ status: "pending" });
-    useRenderWith(user("u2"));
-    expect(boundary.reload).toHaveBeenCalledTimes(2);
+    const [channel] = FakeChannel.open;
+    expect(channel?.posted).toBe(1);
+    useRenderWith(user("a"));
+    expect(channel?.posted).toBe(2);
+    useRenderWith(user("a"));
+    expect(channel?.posted).toBe(2);
+    channel?.onmessage?.({} as MessageEvent);
+    expect(boundary.refetch).toHaveBeenCalledTimes(1);
+    // The channel is the document's, not the shell's: it stays open.
+    unmount();
+    channel?.onmessage?.({} as MessageEvent);
+    expect(boundary.refetch).toHaveBeenCalledTimes(1);
+    expect(FakeChannel.open).toHaveLength(1);
   });
 });

@@ -47,3 +47,25 @@ Never paste secrets, private source, prompts, conversations or filled env files 
 ## Forced two-factor authentication
 
 Administrator access requires a second factor by default. Preserve FORCE_2FA_DEFAULTS, the 24-hour enrollment grace and createdAt in session projections/call sites. Do not lengthen the grace, change the absent-setting default or apply the grace to other authorization checks. MCP tokens/grants remain independently revocable credentials; their requests do not perform interactive second-factor enrollment.
+
+## Query cache follows identity
+
+The TanStack Query cache, Zustand stores, module state and every in-flight request callback belong to one identity: the one the document was used by. `apps/web/src/lib/document-identity.ts` keeps it at module scope for the document's whole life (never in a component, which a public page or an error reset would unmount and make forget). When a confirmed identity differs from it, the document is replaced with a full load. Every replacement first quarantines the document synchronously: the page is hidden and the QueryClient sealed (emptied, and anything a late callback adds is removed again), so nothing of the previous identity stays on screen while the new page loads.
+
+| Transition | What happens |
+|---|---|
+| Explicit sign-out (account menu, the MCP login page's "use another account") | `signOutAndLeave()` (`apps/web/src/lib/explicit-sign-out.ts`): marks the sign-out, then on success `leaveDocument()` to a fresh document with an empty cache (login, or the MCP login page with its signed query). A failure, returned or thrown, undoes the mark and is shown. Add any new sign-out button through it. |
+| Signed out elsewhere (another tab, expiry, revocation, ban) | The document reloads in place; the guards send the visitor to login. |
+| Another account (same tab or another tab) | The document reloads in place; the guards admit the new account and its queries load fresh. |
+| Anonymous → signed in | Nothing: an anonymous cache holds only public data, so sign-in keeps its navigation. |
+| `pending` / `error` | Never acted on: a flaky session check must not reload a signed-in page. |
+
+Three observers feed it, and none can be skipped:
+
+- **Every session guard** (`_auth`, `admin`, `login`, `signup`, `forgot-password`, `reset-password`, `mcp-consent`) calls `resolveRouteSession()` (`apps/web/src/lib/route-session.ts`): `getRouteSession()`, then the identity check. A different identity replaces the document and the guard never settles, so no page renders the previous identity's cached data, even for a switch made while no `_app` page was open. `pnpm policy:checks` rejects any route-file reference to `getRouteSession` or `@/server/auth-session`.
+- **The `_app` shell's watcher**, `useReloadOnIdentityChange()`, for a change while a page is open (a layout effect, before a frame pairs the new chrome with the old data). It also connects the open tabs: Better Auth tells other tabs about a sign-out but not a sign-in, so every session change made in a tab (Better Auth's session signal, in `lib/auth-client.ts`) and every newly confirmed identity is announced on the document's `BroadcastChannel`, and every other tab with a watcher re-checks its session. SSO returns through the login guard, which confirms the new identity before forwarding.
+- **The global error toasts and the live subscriptions**: before any opt-out, a query rejected with 401 asks Better Auth to check the session (one check in flight at a time) instead of toasting; a mutation still toasts. A live subscription (`lib/stream-reconnect.ts`: `conversations.watch`, `conversations.activity`) rejected with 401 queues the same check. Nothing toasts once the document is being replaced.
+
+The router also covers the back/forward cache: a document that ever held a signed-in user's state is hidden as it enters the cache and reloaded when restored, so Back never shows a frozen page nobody re-checked. Anonymous pages are cached as usual.
+
+Why a full load, not `queryClient.clear()` or a fresh `QueryClient`: clearing the cache under mounted observers can leave a page stuck on a skeleton, `resetQueries()` refetches active queries as the wrong identity, and neither stops an in-flight mutation whose late `onSuccess` writes the old identity's data back; a swapped client still leaves Zustand stores and module state behind. A full load drops all of it. Persisted browser storage survives a load, so it holds no private data: the sidebar state and the device locale are not personal, and the getting-started "hidden" flag is keyed by user id (`lib/getting-started.ts`). Keep it that way, or scope new persisted state to the user.
