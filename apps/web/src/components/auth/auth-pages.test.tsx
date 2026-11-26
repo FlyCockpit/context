@@ -65,7 +65,11 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: fixture.config, isPending: false, isError: false, refetch: vi.fn() }),
 }));
-vi.mock("@/utils/orpc", () => ({ orpc: { appConfig: { queryOptions: () => ({}) } } }));
+vi.mock("@/utils/orpc", () => ({
+  orpc: {
+    appConfig: { queryOptions: () => ({}), queryKey: () => ["appConfig"], call: async () => ({}) },
+  },
+}));
 vi.mock("@/hooks/use-auth-session", () => ({
   useAuthSession: () => ({ state: { status: "anonymous" } }),
 }));
