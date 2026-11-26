@@ -384,6 +384,7 @@ CREATE TABLE "agent_run" (
     "trigger" "AgentRunTrigger" NOT NULL,
     "model" TEXT,
     "focus" TEXT,
+    "helperIndex" INTEGER,
     "stopReason" TEXT,
     "error" TEXT,
     "failure" JSONB,

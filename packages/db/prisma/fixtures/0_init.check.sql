@@ -26,6 +26,12 @@ SELECT expected.name AS missing_index FROM (VALUES
  (SELECT FROM pg_indexes i WHERE i.schemaname = current_schema() AND i.indexname = expected.name);
 SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()
  AND indexname IN ('user_email_idx', 'user_name_idx') AND indexdef NOT LIKE '%USING gin%gin_trgm_ops%';
+SELECT 'helper index' AS violation WHERE NOT EXISTS
+ (SELECT FROM agent_run WHERE id = 'fx_run_helper' AND kind = 'HELPER' AND "parentRunId" = 'fx_run_done' AND "helperIndex" = 0)
+ OR EXISTS (SELECT FROM agent_run WHERE id IN ('fx_run_done', 'fx_run_live') AND "helperIndex" IS NOT NULL);
+SELECT 'helperIndex column' AS violation WHERE NOT EXISTS
+ (SELECT FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'agent_run'
+   AND column_name = 'helperIndex' AND data_type = 'integer' AND is_nullable = 'YES' AND column_default IS NULL);
 SELECT p.id FROM conversation_pin p JOIN conversation c ON c.id = p."conversationId"
  WHERE p.id LIKE 'fx_%' AND p."userId" <> c."ownerId";
 SELECT expected.name AS pin_fk_not_cascading FROM (VALUES

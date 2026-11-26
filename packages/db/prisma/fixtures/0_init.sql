@@ -63,6 +63,10 @@ INSERT INTO agent_run (id, "ownerId", "conversationId", "checkoutId", kind, stat
   ('fx_run_done', 'fx_owner', 'fx_conversation_owner', 'fx_checkout_public', 'MAIN', 'COMPLETED', 'MCP_QUERY',
    'Synthetic answer from the fixture checkout.', '2026-01-01'),
   ('fx_run_live', 'fx_reader', 'fx_conversation_reader', 'fx_checkout_public', 'MAIN', 'RUNNING', 'MCP_QUERY', NULL, NULL);
+INSERT INTO agent_run (id, "ownerId", "conversationId", "parentRunId", "checkoutId", kind, status, trigger, focus, "helperIndex",
+                       answer, "finishedAt") VALUES
+  ('fx_run_helper', 'fx_owner', 'fx_conversation_owner', 'fx_run_done', 'fx_checkout_public', 'HELPER', 'COMPLETED',
+   'MCP_QUERY', 'Read the fixture export.', 0, 'Synthetic helper report.', '2026-01-01');
 INSERT INTO conversation_pin (id, "userId", "conversationId", position) VALUES
   ('fx_pin_owner', 'fx_owner', 'fx_conversation_owner', 0),
   ('fx_pin_reader', 'fx_reader', 'fx_conversation_reader', 0);
