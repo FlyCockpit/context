@@ -217,3 +217,13 @@ test("dropdown menus draw on an opaque popover surface", () => {
   assert.ok(menu.includes(" bg-popover "));
   assert.doesNotMatch(menu, /bg-popover\/\d+|backdrop-blur/);
 });
+
+test("an Off switch fills its track with the opaque --input, which the 3:1 checks cover", () => {
+  // A translucent track (dark:bg-input/80) composites below 3:1 on a card.
+  const source = readFileSync(
+    resolve(import.meta.dirname, "../../packages/ui/src/components/switch.tsx"),
+    "utf-8",
+  );
+  assert.ok(source.includes("data-unchecked:bg-input "));
+  assert.doesNotMatch(source, /data-unchecked:bg-input\/\d+/);
+});
