@@ -92,7 +92,7 @@ export function Composer({
               ? t("dashboard:conversation.composer.steerPlaceholder")
               : t("dashboard:conversation.composer.followUpPlaceholder")
           }
-          className="max-h-48 min-h-[52px] min-w-0 resize-none overflow-x-hidden overflow-y-auto rounded-md text-base md:text-sm"
+          className="max-h-48 min-h-13 min-w-0 resize-none overflow-x-hidden overflow-y-auto rounded-md text-base md:text-sm"
         />
         <div className="flex shrink-0 gap-2">
           {live ? (

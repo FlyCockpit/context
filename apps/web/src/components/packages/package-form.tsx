@@ -640,7 +640,7 @@ function SshKeyPicker({ field, lang }: { field: FieldLike; lang: string }) {
         <SelectItem key={key.id} value={key.id} className="min-h-[44px]">
           <span className="flex min-w-0 flex-col">
             <span className="truncate">{key.name}</span>
-            <span className="truncate font-mono text-[11px] text-muted-foreground">
+            <span className="truncate font-mono text-xs text-muted-foreground">
               {key.fingerprint}
             </span>
           </span>

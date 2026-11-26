@@ -1,5 +1,5 @@
 /**
- * Fixtures for scripts/check-web-conventions.ts (G8 shell, G9 theme). Run by
+ * Fixtures for scripts/check-web-conventions.ts (G8 shell, G9 theme, G10 text size). Run by
  * the check-agent-rules self-test (`pnpm policy:checks:self-test`), or alone:
  * node --test scripts/check-web-conventions.test.ts
  */
@@ -70,6 +70,55 @@ describe("scanWebSource G8: the shells own the scroller and the footer", () => {
       "apps/web/src/components/inbox-pane.tsx",
     );
     accepts('<footer className="border-t" />', "apps/web/src/components/public-footer.tsx");
+  });
+});
+
+describe("scanWebSource G10: text scales and stays at least 12px", () => {
+  it("rejects px font sizes and rem/em sizes below 0.75", () => {
+    for (const token of [
+      "text-[10px]",
+      "text-[13px]",
+      "md:text-[18px]",
+      "text-[10px]/4",
+      "text-[length:11px]",
+      "text-[0.625rem]",
+      "text-[.7em]",
+      "text-[0.9em]",
+      "[&_code]:text-[0.9em]",
+      "text-[length:calc(0.9em)]",
+      "text-[max(0.9em,0.5rem)]",
+      "text-[min(1rem,2vw)]",
+      "text-[clamp(10px,1vw,2rem)]",
+      "text-[clamp(0.625rem,1vw,2rem)]",
+    ])
+      rejects("G10", `<span className="${token} font-medium" />`);
+    rejects("G10", '<span className={cn("uppercase", compact && "text-[11px]")} />');
+    // Class lists outside a className attribute: cva() variants, constants, other props.
+    rejects(
+      "G10",
+      'const badge = cva("inline-flex", { variants: { size: { sm: "text-[10px]" } } });',
+    );
+    rejects("G10", "const LABEL = `truncate text-[11px]`;");
+    rejects("G10", '<Code preClassName="text-[10px]" />');
+  });
+  it("accepts the type scale, rem sizes from 0.75 and non-size text utilities", () => {
+    for (const token of [
+      "text-xs",
+      "text-sm/relaxed",
+      "text-[0.75rem]",
+      "text-[1.1em]",
+      "text-[max(0.9em,0.75rem)]",
+      "[&_:not(pre)>code]:text-[length:max(0.9em,0.75rem)]",
+      "text-[max(0.9em,_0.75rem)]",
+      "text-[clamp(0.75rem,1vw,2rem)]",
+      "text-[1.125rem]",
+      "text-[var(--step)]",
+      "text-[length:var(--step)]",
+      "text-(--step)",
+      "min-h-[44px]",
+    ])
+      accepts(`<span className="${token}" />`);
+    accepts('<span className="text-[10px]" />', "apps/web/src/components/example.test.tsx");
   });
 });
 

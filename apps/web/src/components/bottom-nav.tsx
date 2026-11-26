@@ -27,7 +27,15 @@ import {
 const NAV_CLASS =
   "fixed bottom-0 left-0 right-0 z-50 border-t bg-background/80 backdrop-blur-lg md:hidden";
 const TAB_CLASS =
-  "relative flex min-h-[44px] min-w-[64px] flex-col items-center justify-center gap-0.5 rounded-md px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "relative flex min-h-[44px] min-w-[44px] shrink flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+/**
+ * Labels are at least 12px. Tabs size to their label and shrink together down
+ * to the 44px touch floor (px, so a large browser font size doesn't raise it
+ * past the screen: 5 × 44px fits 320px); a label that still doesn't fit
+ * truncates instead of pushing the bar past the screen edge (the link's
+ * accessible name stays whole). See docs/ui.md § Viewport scale
+ */
+const TAB_LABEL_CLASS = "max-w-full truncate text-xs font-medium leading-tight";
 
 /**
  * The one mobile nav bar: Ongoing · Conversations · Packages · Access · More
@@ -102,7 +110,7 @@ export default function BottomNav({ hidden }: { hidden?: boolean }) {
                 <item.icon aria-hidden="true" className="size-5" />
                 <NavBadge count={badge} className="absolute -end-3 -top-2" />
               </span>
-              <span className="text-[10px] font-medium leading-tight">{label}</span>
+              <span className={TAB_LABEL_CLASS}>{label}</span>
             </Link>
           );
         })}
@@ -120,7 +128,7 @@ export default function BottomNav({ hidden }: { hidden?: boolean }) {
                 <MoreIcon aria-hidden="true" className="size-5" />
                 <NavBadge count={moreBadge} className="absolute -end-3 -top-2" />
               </span>
-              <span className="text-[10px] font-medium leading-tight">{t("items.more")}</span>
+              <span className={TAB_LABEL_CLASS}>{t("items.more")}</span>
             </button>
             <SheetContent
               closeLabel={t("common:actions.close")}
@@ -144,7 +152,7 @@ export default function BottomNav({ hidden }: { hidden?: boolean }) {
                     onClick={() => setMoreOpen(false)}
                     className={cn(
                       buttonVariants({ variant: "ghost", size: "touch" }),
-                      "h-auto min-h-[52px] justify-start gap-3 py-2 not-data-[status=active]:text-muted-foreground",
+                      "h-auto min-h-13 justify-start gap-3 py-2 not-data-[status=active]:text-muted-foreground",
                     )}
                     activeProps={{ className: "bg-muted text-foreground" }}
                   >

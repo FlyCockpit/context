@@ -8,6 +8,13 @@ const WIDTH_CLASS = {
   wide: "max-w-7xl",
 } as const;
 
+const PAGE_FRAME = "container mx-auto px-4";
+
+/** The widest page column, for content inside a full-bleed band (a banner):
+ * the band's background spans the window, its content lines up with the
+ * widest page below it. docs/ui.md § Viewport scale */
+export const PAGE_COLUMN_CLASS = `${PAGE_FRAME} ${WIDTH_CLASS.wide}`;
+
 type PageShellProps = {
   width?: keyof typeof WIDTH_CLASS;
   className?: string;
@@ -16,7 +23,7 @@ type PageShellProps = {
 
 export function PageShell({ width = "default", className, children }: PageShellProps) {
   return (
-    <div className={cn("container mx-auto space-y-6 px-4 py-8", WIDTH_CLASS[width], className)}>
+    <div className={cn(PAGE_FRAME, "space-y-6 py-8", WIDTH_CLASS[width], className)}>
       {children}
     </div>
   );
@@ -47,7 +54,9 @@ export function PageHeader({ title, description, actions, className }: PageHeade
     >
       <header className="min-w-0">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">{title}</h1>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+        {description ? (
+          <p className="max-w-prose text-sm text-muted-foreground">{description}</p>
+        ) : null}
       </header>
       {actions}
     </div>

@@ -117,7 +117,7 @@ function PolicyRow({
         <p id={titleId} className="font-medium">
           {policy.title}
         </p>
-        <p id={descriptionId} className="text-sm text-muted-foreground">
+        <p id={descriptionId} className="max-w-prose text-sm text-muted-foreground">
           {policy.description}
         </p>
       </div>

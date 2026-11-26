@@ -6,6 +6,7 @@ import { ChevronDown, ShieldAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { PAGE_COLUMN_CLASS } from "@/components/page-shell";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/i18n/config";
 import { orpc } from "@/utils/orpc";
@@ -70,9 +71,11 @@ export function TwoFactorNudge() {
   return (
     <div
       role="alert"
-      className="shrink-0 border-b border-yellow-300 bg-yellow-100 px-4 py-1 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
+      className="shrink-0 border-b border-yellow-300 bg-yellow-100 py-1 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
     >
-      <div className="flex min-w-0 items-center gap-2">
+      {/* The band spans the window; its content sits in the widest page
+          column (docs/ui.md § Viewport scale). */}
+      <div className={cn(PAGE_COLUMN_CLASS, "flex min-w-0 items-center gap-2")}>
         <ShieldAlert className="size-5 shrink-0" aria-hidden="true" />
         <button
           type="button"
@@ -99,9 +102,13 @@ export function TwoFactorNudge() {
           {t("twoFactorNudge.cta")}
         </Link>
       </div>
-      <div id={detailsId} hidden={!expanded} className="space-y-1 ps-7 pb-2">
-        <p className="text-yellow-900/90 dark:text-yellow-100/90">{message}</p>
-        <p className="text-yellow-900/80 dark:text-yellow-100/80">
+      <div
+        id={detailsId}
+        hidden={!expanded}
+        className={cn(PAGE_COLUMN_CLASS, "space-y-1 ps-11 pb-2")}
+      >
+        <p className="max-w-prose text-yellow-900/90 dark:text-yellow-100/90">{message}</p>
+        <p className="max-w-prose text-yellow-900/80 dark:text-yellow-100/80">
           {t("twoFactorNudge.configurable")}
         </p>
       </div>

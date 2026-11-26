@@ -12,7 +12,7 @@ export function NavBadge({ count, className }: { count: number; className?: stri
       aria-hidden="true"
       data-nav-badge=""
       className={cn(
-        "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold leading-none text-amber-950 tabular-nums",
+        "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-semibold leading-none text-amber-950 tabular-nums",
         className,
       )}
     >

@@ -32,7 +32,7 @@ export const Route = createFileRoute("/$lang/_public/privacy")({
 function PrivacyPage() {
   const { t } = useTranslation(["privacy"]);
   return (
-    <PageShell width="narrow" className="max-w-3xl py-10">
+    <PageShell width="narrow" className="max-w-prose py-10">
       <header className="space-y-3">
         <h1 className="text-3xl font-semibold tracking-tight text-balance">{t("privacy:title")}</h1>
         <p className="text-sm text-muted-foreground">{t("privacy:updated")}</p>

@@ -1,8 +1,10 @@
 import { Button } from "@cockpit-context/ui/components/button";
+import { cn } from "@cockpit-context/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 
+import { PAGE_COLUMN_CLASS } from "@/components/page-shell";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { orpc } from "@/utils/orpc";
 
@@ -40,13 +42,13 @@ export function AdminSetupBanner() {
     return (
       <div
         role="alert"
-        className="border-b border-yellow-300 bg-yellow-100 px-4 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
+        className="border-b border-yellow-300 bg-yellow-100 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className={cn(PAGE_COLUMN_CLASS, "flex flex-col gap-3 sm:flex-row sm:items-start")}>
           <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
           <div className="flex-1 space-y-1">
             <p className="font-medium">{t("setupBanner.errorTitle")}</p>
-            <p className="text-yellow-900/90 dark:text-yellow-100/90">
+            <p className="max-w-prose text-yellow-900/90 dark:text-yellow-100/90">
               {t("setupBanner.errorMessage")}
             </p>
           </div>
@@ -62,13 +64,13 @@ export function AdminSetupBanner() {
   return (
     <div
       role="alert"
-      className="border-b border-yellow-300 bg-yellow-100 px-4 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
+      className="border-b border-yellow-300 bg-yellow-100 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
     >
-      <div className="flex items-start gap-3">
+      <div className={cn(PAGE_COLUMN_CLASS, "flex items-start gap-3")}>
         <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
         <div className="flex-1 space-y-1">
           <p className="font-medium">{t("setupBanner.title")}</p>
-          <p className="text-yellow-900/90 dark:text-yellow-100/90">
+          <p className="max-w-prose text-yellow-900/90 dark:text-yellow-100/90">
             <Trans
               i18nKey="setupBanner.message"
               t={t}

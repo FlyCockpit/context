@@ -264,7 +264,7 @@ function ConversationSkeleton() {
         <Skeleton className="h-28 w-4/5 rounded-lg" />
       </div>
       <div className="border-t px-4 py-3">
-        <Skeleton className="h-[52px] w-full rounded-md" />
+        <Skeleton className="h-13 w-full rounded-md" />
       </div>
     </div>
   );

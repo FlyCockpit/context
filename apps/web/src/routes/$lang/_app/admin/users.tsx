@@ -273,9 +273,12 @@ function AdminUsers() {
                     return (
                       <li
                         key={user.id}
-                        className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                        className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 sm:items-center"
                       >
-                        <div className="min-w-0 flex-1">
+                        {/* The actions stay beside the name; they drop below it only
+                            when the name column would go under 12rem (a large
+                            browser font size on a phone). */}
+                        <div className="min-w-0 grow basis-48">
                           <p className="flex flex-wrap items-center gap-2 font-medium">
                             <span className="truncate">{user.name || user.email}</span>
                             {isSelf && (
@@ -425,7 +428,7 @@ function UserActions({
           <Button
             variant="outline"
             size="icon-touch"
-            className="self-end sm:self-auto"
+            className="shrink-0"
             aria-label={t("users.actionsAriaLabel", { name: user.name || user.email })}
           />
         }

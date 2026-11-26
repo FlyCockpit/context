@@ -249,7 +249,7 @@ function McpSignIn({
       {clientName ? (
         <ClientTile name={clientName} caption={t("auth:mcpLogin.clientCaption")} />
       ) : prelogin.isPending ? (
-        <Skeleton className="h-[66px] w-full rounded-lg" />
+        <Skeleton className="h-[4.125rem] w-full rounded-lg" />
       ) : null}
       <form
         onSubmit={(event) => {

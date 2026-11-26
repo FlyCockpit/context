@@ -68,8 +68,12 @@ function AdminSeed() {
           <Database className="size-6" aria-hidden />
           {t("admin:seedPage.title")}
         </h1>
-        <p className="text-sm text-muted-foreground">{t("admin:seedPage.description")}</p>
-        <p className="text-xs text-muted-foreground">{t("admin:seedPage.inlineNote")}</p>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          {t("admin:seedPage.description")}
+        </p>
+        <p className="max-w-prose text-xs text-muted-foreground">
+          {t("admin:seedPage.inlineNote")}
+        </p>
       </header>
 
       {infoPending ? (

@@ -171,7 +171,7 @@ function SignupCard({
         <CardDescription>{t("settings.signupDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
+        <p className="max-w-prose text-sm text-muted-foreground">
           {envEnabled ? t("settings.signupEnvEnabled") : t("settings.signupEnvDisabled")}
         </p>
         <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
@@ -182,7 +182,9 @@ function SignupCard({
                 {open ? t("settings.signupStatusOpen") : t("settings.signupStatusClosed")}
               </span>
             </p>
-            <p className="text-sm text-muted-foreground">{t("settings.signupOpenDescription")}</p>
+            <p className="max-w-prose text-sm text-muted-foreground">
+              {t("settings.signupOpenDescription")}
+            </p>
           </div>
           <Button
             variant={open ? "destructive" : "default"}

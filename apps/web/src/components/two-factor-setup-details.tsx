@@ -32,7 +32,11 @@ export function TwoFactorSetupDetails({
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{qrPrompt}</p>
           <div className="flex justify-center rounded bg-white p-4">
-            <LazyQRCode value={totpURI} size={180} />
+            <LazyQRCode
+              value={totpURI}
+              size={180}
+              className="aspect-square h-auto w-45 max-w-full"
+            />
           </div>
         </div>
       ) : null}

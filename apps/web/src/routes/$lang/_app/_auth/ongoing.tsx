@@ -207,7 +207,10 @@ function Step({
   return (
     <li className="relative flex min-w-0 gap-4 pb-6 last:pb-0">
       {last ? null : (
-        <span aria-hidden="true" className="absolute top-9 bottom-1 left-[15px] w-px bg-border" />
+        <span
+          aria-hidden="true"
+          className="absolute top-9 bottom-1 left-[calc(1rem_-_1px)] w-px bg-border"
+        />
       )}
       <span
         aria-hidden="true"
