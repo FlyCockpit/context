@@ -52,7 +52,10 @@
   --state-loading-foreground: var(--foreground);
   --state-loading-bg: color-mix(in oklch, var(--muted-foreground) 12%, transparent);
   --border: oklch(0.925 0.005 214.3);
-  --input: oklch(0.925 0.005 214.3);
+  /* Field outlines (input, textarea, select, checkbox, switch track) are
+     non-text UI: >= 3:1 on background, card, popover and muted (WCAG 1.4.11,
+     lib/theme-contrast.test.ts). --border stays decorative and light. */
+  --input: oklch(0.62 0.012 214.3);
   /* Focus indicators. A focus ring is non-text UI, so it needs 3:1 against
      what it sits on (WCAG 1.4.11); the old neutral grey read at about 2:1.
      The brand blue clears 5:1 on white, and dark mode uses --primary-text. */
@@ -135,7 +138,7 @@
   --state-loading-foreground: var(--foreground);
   --state-loading-bg: color-mix(in oklch, var(--muted-foreground) 15%, transparent);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --input: oklch(0.56 0.012 220);
   --ring: var(--primary-text);
   --grey-50: oklch(0.25 0.004 228);
   --grey-100: oklch(0.3 0.006 228);
@@ -338,6 +341,39 @@
     display: none;
   }
 
+  /* Edge fade for a horizontal scroller (SelectorRow, CopyField, CodeSnippet).
+     `useScrollEdges` sets data-overflow-start / data-overflow-end while more
+     content lies past that edge; the content fades out there and the surface
+     behind shows through, so it matches any theme. A mask, so no layout shift
+     and no animation (nothing for reduced motion to stop). */
+  .scroll-fade-x:is([data-overflow-start], [data-overflow-end]) {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--scroll-fade-start, 0px),
+      #000 calc(100% - var(--scroll-fade-end, 0px)),
+      transparent
+    );
+  }
+
+  .scroll-fade-x:dir(rtl):is([data-overflow-start], [data-overflow-end]) {
+    mask-image: linear-gradient(
+      to left,
+      transparent,
+      #000 var(--scroll-fade-start, 0px),
+      #000 calc(100% - var(--scroll-fade-end, 0px)),
+      transparent
+    );
+  }
+
+  .scroll-fade-x[data-overflow-start] {
+    --scroll-fade-start: 1.5rem;
+  }
+
+  .scroll-fade-x[data-overflow-end] {
+    --scroll-fade-end: 1.5rem;
+  }
+
   .skeleton-shimmer {
     position: relative;
     overflow: hidden;
@@ -402,6 +438,20 @@
 }
 :root [data-sileo-viewport] [data-sileo-description] {
   color: var(--popover-foreground);
+}
+/* sileo sizes the pill from the header's measured width but draws it inside a
+   fixed 350px SVG whose filter region clips anything wider: a long title used
+   to push the badge icon half outside a square-cut pill. Cap the header row to
+   the pill's maximum (350px - the header's 1rem padding - sileo's 10px pill
+   padding) and end the title with an ellipsis; the facade (sileo.tsx) also
+   puts long messages in the description, so the full text is still shown. */
+:root [data-sileo-viewport] [data-sileo-header-inner] {
+  max-width: calc(var(--sileo-width) - 1rem - 10px);
+}
+:root [data-sileo-viewport] [data-sileo-header-inner] [data-sileo-title] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 :root [data-sileo-viewport] [data-sileo-button][data-state] {
   --sileo-btn-color: var(--popover-foreground);

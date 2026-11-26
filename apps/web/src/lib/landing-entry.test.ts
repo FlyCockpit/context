@@ -5,9 +5,12 @@ import { landingEntry } from "./landing-entry";
 const closed = { forceSso: false, signupOpen: false, adminBootstrapSignupEnabled: false };
 
 describe("landingEntry", () => {
-  it("offers sign-in only while the config is loading or sign-up is closed", () => {
+  it("offers sign-in only while the config is loading", () => {
     expect(landingEntry(undefined)).toBeNull();
-    expect(landingEntry(closed)).toBeNull();
+  });
+
+  it("says the server is invite-only while sign-up is closed", () => {
+    expect(landingEntry(closed)).toBe("invite-only");
   });
 
   it("offers server setup while the first-admin bootstrap is open", () => {

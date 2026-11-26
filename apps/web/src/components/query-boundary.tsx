@@ -1,12 +1,16 @@
 import { cn } from "@cockpit-context/ui/lib/utils";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import { InlineRetry } from "@/components/inline-retry";
+import { useNetworkStatus } from "@/hooks/use-network-status";
 
 type QueryLike<T> = {
   data: T | undefined;
   isPending: boolean;
   isError: boolean;
+  /** TanStack's `fetchStatus`; `"paused"` means it is waiting for the network. */
+  fetchStatus?: "fetching" | "paused" | "idle";
   refetch: () => unknown;
 };
 
@@ -38,6 +42,11 @@ type QueryBoundaryProps<T> = {
  * nor `isError`, which is indistinguishable here from a query that resolved to
  * nothing — so it renders `empty` (or InlineRetry) rather than nothing. Render
  * disabled queries yourself instead of wrapping them.
+ *
+ * **Offline it says so.** A first load that TanStack paused for the network
+ * (`fetchStatus: "paused"`) shows "You're offline. This will load when you
+ * reconnect." instead of a skeleton forever, and an error while offline uses
+ * that copy instead of `errorMessage`. TanStack refetches on reconnect.
  */
 export function QueryBoundary<T>({
   query,
@@ -48,19 +57,28 @@ export function QueryBoundary<T>({
   isEmpty,
   children,
 }: QueryBoundaryProps<T>) {
-  const { data, isPending, isError, refetch } = query;
+  const { data, isPending, isError, fetchStatus, refetch } = query;
+  const online = useNetworkStatus();
+  const { t } = useTranslation("errors");
+  const offlineMessage = t("offlineContent");
 
-  if (isPending) return skeleton;
+  if (isPending) {
+    if (fetchStatus !== "paused") return skeleton;
+    return (
+      <InlineRetry
+        className={errorClassName}
+        message={offlineMessage}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+  const message = online ? errorMessage : offlineMessage;
 
   if (data === undefined) {
     // Nothing to keep on screen: the error card takes the content's slot.
     if (isError || empty === undefined) {
       return (
-        <InlineRetry
-          className={errorClassName}
-          message={errorMessage}
-          onRetry={() => void refetch()}
-        />
+        <InlineRetry className={errorClassName} message={message} onRetry={() => void refetch()} />
       );
     }
     return empty;
@@ -75,7 +93,7 @@ export function QueryBoundary<T>({
       <InlineRetry
         variant="destructive"
         className={cn("mb-3", errorClassName)}
-        message={errorMessage}
+        message={message}
         onRetry={() => void refetch()}
       />
       {content}

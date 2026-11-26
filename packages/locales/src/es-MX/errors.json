@@ -74,5 +74,16 @@
     "title": "No encontramos esa página",
     "description": "La página que buscas no existe o ya no está disponible.",
     "home": "Ir al inicio"
+  },
+  "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+  "unreachable": "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
+  "offlineContent": "No tienes conexión. Esto se cargará cuando te vuelvas a conectar.",
+  "offlinePage": {
+    "title": "No tienes conexión",
+    "description": "Esta página se cargará cuando te vuelvas a conectar."
+  },
+  "unreachablePage": {
+    "title": "No se pudo conectar con el servidor",
+    "description": "Revisa tu conexión e inténtalo de nuevo."
   }
 }

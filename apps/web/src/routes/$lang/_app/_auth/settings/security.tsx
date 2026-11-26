@@ -21,6 +21,8 @@ import z from "zod";
 
 import { TwoFactorEnrollment } from "@/components/two-factor-enrollment";
 import { authClient } from "@/lib/auth-client";
+import { setServerFieldError } from "@/lib/form-server-error";
+import { newPasswordSchema, PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { friendly, isRateLimit } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 
@@ -113,7 +115,7 @@ function PasswordCardSkeleton() {
 }
 
 function ChangePasswordCard() {
-  const { t } = useTranslation(["settings", "validation"]);
+  const { t } = useTranslation(["settings", "validation", "auth"]);
 
   const form = useForm({
     defaultValues: {
@@ -125,7 +127,7 @@ function ChangePasswordCard() {
       onSubmit: z
         .object({
           currentPassword: z.string().min(1),
-          newPassword: z.string().min(12).max(128),
+          newPassword: newPasswordSchema(),
           confirmPassword: z.string().min(1),
         })
         .refine((values) => values.newPassword === values.confirmPassword, {
@@ -142,13 +144,20 @@ function ChangePasswordCard() {
         });
 
         if (result.error) {
-          const message =
-            result.error.code === "INVALID_PASSWORD"
-              ? t("settings:security.currentPasswordMismatch")
-              : isRateLimit(result.error)
-                ? friendly(result.error, t("settings:security.passwordChangeError"))
-                : t("settings:security.passwordChangeError");
-          toast.error(message);
+          if (result.error.code === "INVALID_PASSWORD") {
+            // About the current password, so it goes under that field.
+            setServerFieldError(
+              form,
+              "currentPassword",
+              t("settings:security.currentPasswordMismatch"),
+            );
+            return;
+          }
+          toast.error(
+            isRateLimit(result.error)
+              ? friendly(result.error, t("settings:security.passwordChangeError"))
+              : t("settings:security.passwordChangeError"),
+          );
           return;
         }
 
@@ -199,6 +208,7 @@ function ChangePasswordCard() {
               <TextField
                 field={field}
                 label={t("settings:security.newPasswordLabel")}
+                description={t("auth:fields.passwordRule", { min: PASSWORD_MIN_LENGTH })}
                 type="password"
                 autoComplete="new-password"
                 inputClassName="autofill:shadow-[inset_0_0_0px_1000px_var(--color-background)]"

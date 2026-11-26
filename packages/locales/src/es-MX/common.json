@@ -4,7 +4,8 @@
     "description": "Deja que tus agentes de programación con IA pregunten cómo usar tus dependencias. Cockpit Context responde leyendo el código fuente real en la versión exacta que usas.",
     "signIn": "Iniciar sesión",
     "setUp": "Configura este servidor",
-    "createAccount": "Crear cuenta"
+    "createAccount": "Crear cuenta",
+    "inviteOnly": "Este servidor funciona solo por invitación. Pide una invitación a un administrador."
   },
   "actions": {
     "back": "Atrás",
@@ -31,5 +32,11 @@
   "somethingWentWrong": "Algo salió mal",
   "fileDrop": {
     "ignored": "No puedes soltar ese archivo aquí."
+  },
+  "offline": {
+    "band": "No tienes conexión. Los cambios que hagas no se guardarán hasta que te vuelvas a conectar.",
+    "backOnline": "Conexión restablecida.",
+    "queued": "No tienes conexión. Este cambio se enviará cuando te vuelvas a conectar. Mantén esta pestaña abierta.",
+    "queuedSent": "Conexión restablecida. Se envió tu cambio pendiente."
   }
 }

@@ -4,7 +4,8 @@
     "description": "Let your AI coding agents ask how to use your dependencies. Cockpit Context answers by reading the real source code at the exact version you use.",
     "signIn": "Sign in",
     "setUp": "Set up this server",
-    "createAccount": "Create account"
+    "createAccount": "Create account",
+    "inviteOnly": "This server is invite-only. Ask an administrator for an invitation."
   },
   "actions": {
     "back": "Back",
@@ -31,5 +32,11 @@
   "somethingWentWrong": "Something went wrong",
   "fileDrop": {
     "ignored": "That file can't be dropped here."
+  },
+  "offline": {
+    "band": "You're offline. Changes you make won't be saved until you reconnect.",
+    "backOnline": "Back online.",
+    "queued": "You're offline. This change will be sent when you reconnect. Keep this tab open.",
+    "queuedSent": "Back online. Your offline change was sent."
   }
 }

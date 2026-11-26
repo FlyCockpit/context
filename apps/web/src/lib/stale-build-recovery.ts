@@ -30,6 +30,13 @@ export type StaleBuildRecoveryEnv = {
   /** Captured at navigation start, never from unrelated input during a load. */
   activatedNavigationHref?: string;
   assign: (href: string) => void;
+  /**
+   * The browser reports no network. The chunk is then missing because the
+   * network is, not because a deploy replaced it, and a full navigation would
+   * only land on the browser's offline page; ErrorState shows the offline
+   * state and retries on reconnect instead.
+   */
+  offline?: boolean;
 };
 
 /** The URL the router is navigating to, or undefined when no navigation is in flight. */
@@ -61,8 +68,41 @@ export function claimReloadSlot(storage: StaleBuildRecoveryEnv["storage"], now: 
   }
 }
 
+/** Messages of a failed dynamic import, as lazyRouteComponent's isModuleNotFoundError matches them. */
+const MODULE_LOAD_FAILURE_PREFIXES = [
+  "Failed to fetch dynamically imported module",
+  "error loading dynamically imported module",
+  "Importing a module script failed",
+];
+
+/**
+ * Keep TanStack's lazyRouteComponent from reloading the document for this
+ * failed import. On its first module-load failure it reloads, whatever the
+ * connectivity, once per error message, and marks that in
+ * `sessionStorage["tanstack_router_reload:" + message]`. Setting the mark
+ * first makes it rethrow instead, so the route's ErrorState (offline state,
+ * retry on reconnect) shows rather than the browser's offline page. The key
+ * mirrors the installed lazyRouteComponent implementation. Unavailable storage
+ * leaves it alone.
+ */
+export function suppressRouterReload(
+  storage: Pick<Storage, "setItem"> | undefined,
+  error: unknown,
+): void {
+  if (!error || typeof error !== "object" || !("message" in error)) return;
+  const message = error.message;
+  if (typeof message !== "string") return;
+  if (!MODULE_LOAD_FAILURE_PREFIXES.some((prefix) => message.startsWith(prefix))) return;
+  try {
+    storage?.setItem(`tanstack_router_reload:${message}`, "1");
+  } catch {
+    /* Unavailable storage must never initiate recovery. */
+  }
+}
+
 /** Recover only the pending navigation that began with the user's activation. */
 export function recoverFromStaleChunk(env: StaleBuildRecoveryEnv): boolean {
+  if (env.offline) return false;
   const target = pendingNavigationHref(env.router);
   if (!target || target !== env.activatedNavigationHref) return false;
   if (!claimReloadSlot(env.storage, env.now)) return false;

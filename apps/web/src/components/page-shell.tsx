@@ -69,15 +69,16 @@ const SECTION_TAB_ACTIVE_CLASS = "bg-muted text-foreground";
  * Brings the active tab into the row's view when the row mounts: on a phone a
  * later tab (Access → Known hosts) otherwise starts off-screen, so nothing
  * shows where you are. Later changes come from tapping a tab already in view.
- * A ref callback, not an effect, and it only moves the row's own scroll.
+ * A ref callback, not an effect, and it only moves the row's own scroll; the
+ * 24px margin clears the row's edge fade (`scroll-fade-x`).
  */
 function revealActiveTab(row: HTMLDivElement | null) {
   const active = row?.querySelector<HTMLElement>('[aria-current="page"]');
   if (!row || !active) return;
   const rowBox = row.getBoundingClientRect();
   const tabBox = active.getBoundingClientRect();
-  if (tabBox.right > rowBox.right) row.scrollLeft += tabBox.right - rowBox.right + 16;
-  else if (tabBox.left < rowBox.left) row.scrollLeft -= rowBox.left - tabBox.left + 16;
+  if (tabBox.right > rowBox.right) row.scrollLeft += tabBox.right - rowBox.right + 24;
+  else if (tabBox.left < rowBox.left) row.scrollLeft -= rowBox.left - tabBox.left + 24;
 }
 
 /**

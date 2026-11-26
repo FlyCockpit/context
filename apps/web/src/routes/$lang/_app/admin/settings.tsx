@@ -20,6 +20,7 @@ import { Braces, Cpu, Gauge, Lock, Shield, Timer, UserPlus } from "lucide-react"
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { SecurityPolicyCard } from "@/components/admin/security-policy-card";
 import { InlineRetry } from "@/components/inline-retry";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
@@ -196,64 +197,6 @@ function SignupCard({
                 : t("settings.signupOpenAction")}
           </Button>
         </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function SecurityPolicyCard({
-  policies,
-  adminHas2FA,
-  isUpdating,
-  onToggle,
-}: {
-  policies: Array<{
-    key: ForceTwoFactorSettingKey;
-    enabled: boolean;
-    title: string;
-    description: string;
-  }>;
-  adminHas2FA: boolean;
-  isUpdating: boolean;
-  onToggle: (key: ForceTwoFactorSettingKey, newValue: "true" | "false") => void;
-}) {
-  const { t } = useTranslation("admin");
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Shield className="size-5" />
-          {t("settings.securityTitle")}
-        </CardTitle>
-        <CardDescription>{t("settings.securityDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {!adminHas2FA && (
-          <p className="text-sm text-destructive">{t("settings.force2faAdminWarning")}</p>
-        )}
-        {policies.map((policy) => (
-          <div
-            key={policy.key}
-            className="flex items-start justify-between gap-4 rounded-lg border p-4"
-          >
-            <div className="space-y-1">
-              <p className="font-medium">{policy.title}</p>
-              <p className="text-sm text-muted-foreground">{policy.description}</p>
-            </div>
-            <Button
-              variant={policy.enabled ? "destructive" : "default"}
-              size="touch"
-              disabled={(!adminHas2FA && !policy.enabled) || isUpdating}
-              onClick={() => onToggle(policy.key, policy.enabled ? "false" : "true")}
-            >
-              {isUpdating
-                ? t("settings.updating")
-                : policy.enabled
-                  ? t("settings.disable")
-                  : t("settings.enable")}
-            </Button>
-          </div>
-        ))}
       </CardContent>
     </Card>
   );

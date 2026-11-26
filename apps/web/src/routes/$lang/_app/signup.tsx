@@ -16,9 +16,11 @@ import { AuthCard } from "@/components/auth/auth-screen";
 import { ResendVerification } from "@/components/auth/resend-verification";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { authClient } from "@/lib/auth-client";
+import { setServerFieldError } from "@/lib/form-server-error";
+import { newPasswordSchema, PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { decideAnonymousOnlyRouteAccess } from "@/lib/route-session-access";
 import { getRouteSession } from "@/server/auth-session";
-import { friendly } from "@/utils/friendly-error";
+import { friendly, isAccountExistsRejection } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 import { safeRedirectTo } from "@/utils/safe-redirect";
 
@@ -215,28 +217,40 @@ function SignUpForm({
     onSubmit: async ({ value }) => {
       setBootstrapRejected(false);
       const bootstrapToken = value.bootstrapToken.trim();
-      const result = await authClient.signUp.email(
-        {
-          email: value.email,
-          password: value.password,
-          name: value.name,
-        },
-        // The first-admin token travels in a header, never in the body.
-        bootstrap && bootstrapToken
-          ? { headers: { [BOOTSTRAP_TOKEN_HEADER]: bootstrapToken } }
-          : undefined,
-      );
+      let result: Awaited<ReturnType<typeof authClient.signUp.email>>;
+      try {
+        result = await authClient.signUp.email(
+          {
+            email: value.email,
+            password: value.password,
+            name: value.name,
+          },
+          // The first-admin token travels in a header, never in the body.
+          bootstrap && bootstrapToken
+            ? { headers: { [BOOTSTRAP_TOKEN_HEADER]: bootstrapToken } }
+            : undefined,
+        );
+      } catch (err) {
+        // The request itself failed (server unreachable, offline): say so,
+        // and the same values can be sent again.
+        console.error("[signup.signUp]", err);
+        toast.error(friendly(err, t("auth:errors.couldNotCreateAccount")));
+        return;
+      }
       if (result.error) {
         console.error("[signup.signUp]", result.error);
         if (bootstrap && result.error.code === "FAILED_TO_CREATE_USER") {
           setBootstrapRejected(true);
           return;
         }
-        toast.error(
-          result.error?.status === 409
-            ? t("auth:errors.accountAlreadyRegistered")
-            : friendly(result.error, t("auth:errors.couldNotCreateAccount")),
-        );
+        if (isAccountExistsRejection(result.error)) {
+          // About the address, so it goes under the email field. Only sent
+          // without SMTP; with it, a registered address gets the same neutral
+          // success as a free one (packages/auth/src/signup-response.ts).
+          setServerFieldError(form, "email", t("auth:errors.accountAlreadyRegistered"));
+          return;
+        }
+        toast.error(friendly(result.error, t("auth:errors.couldNotCreateAccount")));
         // Better-Auth's database hook rejects signup-disabled attempts with a
         // plain Error, which the sign-up route converts to this generic 422 —
         // the same response for every address, member or not, so reading it
@@ -269,7 +283,7 @@ function SignUpForm({
       onSubmit: z.object({
         name: z.string().min(2),
         email: z.email(),
-        password: z.string().min(12),
+        password: newPasswordSchema(),
         bootstrapToken: bootstrap ? z.string().trim().min(1) : z.string(),
       }),
     },
@@ -311,6 +325,8 @@ function SignUpForm({
           <TextField
             field={field}
             label={t("auth:fields.password")}
+            // The rule up front, so it is never learned from an error.
+            description={t("auth:fields.passwordRule", { min: PASSWORD_MIN_LENGTH })}
             type="password"
             autoComplete="new-password"
           />

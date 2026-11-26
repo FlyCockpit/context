@@ -8,6 +8,7 @@ import {
   STALE_BUILD_RELOAD_COOLDOWN_MS,
   STALE_BUILD_RELOAD_KEY,
   type StaleBuildRecoveryEnv,
+  suppressRouterReload,
 } from "./stale-build-recovery";
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -43,6 +44,13 @@ function env(overrides: Partial<StaleBuildRecoveryEnv> = {}) {
 }
 
 describe("recoverFromStaleChunk", () => {
+  it("leaves a failed chunk alone while offline (a reload would land on the browser's offline page)", () => {
+    const e = env({ offline: true });
+    expect(recoverFromStaleChunk(e)).toBe(false);
+    expect(e.assign).not.toHaveBeenCalled();
+    expect(e.storageData.has(STALE_BUILD_RELOAD_KEY)).toBe(false);
+  });
+
   it("navigates fully to the page the router was going to", () => {
     const e = env();
     expect(recoverFromStaleChunk(e)).toBe(true);
@@ -114,6 +122,34 @@ describe("claimReloadSlot", () => {
   });
 });
 
+const IMPORT_FAILURE = new TypeError(
+  "Failed to fetch dynamically imported module: https://ctx.example/assets/nodes-abc123.js",
+);
+const ROUTER_RELOAD_KEY = `tanstack_router_reload:${IMPORT_FAILURE.message}`;
+
+describe("suppressRouterReload", () => {
+  it("marks lazyRouteComponent's per-error reload slot for a failed module import", () => {
+    const storage = memoryStorage();
+    suppressRouterReload(storage, IMPORT_FAILURE);
+    expect(storage.data.get(ROUTER_RELOAD_KEY)).toBe("1");
+  });
+
+  it("ignores other errors and unavailable storage", () => {
+    const storage = memoryStorage();
+    suppressRouterReload(storage, new Error("boom"));
+    suppressRouterReload(storage, undefined);
+    suppressRouterReload(storage, { message: 42 });
+    expect(storage.data.size).toBe(0);
+    expect(() => suppressRouterReload(undefined, IMPORT_FAILURE)).not.toThrow();
+    const throwing = {
+      setItem: () => {
+        throw new Error("denied");
+      },
+    };
+    expect(() => suppressRouterReload(throwing, IMPORT_FAILURE)).not.toThrow();
+  });
+});
+
 // Exercise activation timing through the hook, including editor input that
 // arrives after a background navigation/preload has already begun.
 const hook = vi.hoisted(() => ({
@@ -160,8 +196,8 @@ function recoveryHook() {
   renderToStaticMarkup(createElement(RecoveryHarness));
   const navigation = () =>
     hook.callbacks.get("onBeforeNavigate")?.({ toLocation: navigating.latestLocation });
-  const failure = () => {
-    const event = new Event("vite:preloadError", { cancelable: true });
+  const failure = (payload: unknown = IMPORT_FAILURE) => {
+    const event = Object.assign(new Event("vite:preloadError", { cancelable: true }), { payload });
     win.dispatchEvent(event);
     return event;
   };
@@ -189,5 +225,21 @@ describe("stale recovery activation ownership", () => {
     expect(h.failure().defaultPrevented).toBe(true);
     expect(h.failure().defaultPrevented).toBe(true);
     expect(h.assign).toHaveBeenCalledExactlyOnceWith(navigating.latestLocation.publicHref);
+  });
+
+  it("offline: keeps TanStack's lazy-route reload from replacing the app with the offline page", () => {
+    vi.stubGlobal("navigator", { onLine: false });
+    const h = recoveryHook();
+    h.win.dispatchEvent(new Event("pointerdown"));
+    h.navigation();
+    expect(h.failure().defaultPrevented).toBe(false);
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.win.sessionStorage.data.get(ROUTER_RELOAD_KEY)).toBe("1");
+  });
+  it("online: leaves TanStack's once-per-error reload slot untouched", () => {
+    vi.stubGlobal("navigator", { onLine: true });
+    const h = recoveryHook();
+    h.failure();
+    expect(h.win.sessionStorage.data.has(ROUTER_RELOAD_KEY)).toBe(false);
   });
 });

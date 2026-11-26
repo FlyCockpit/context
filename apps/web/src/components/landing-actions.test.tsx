@@ -30,6 +30,15 @@ describe("LandingActions (CTX-08)", () => {
     ]);
   });
 
+  it("says the server is invite-only under Sign in while sign-up is closed", () => {
+    expect(links("invite-only")).toEqual([["/$lang/login", "home.signIn"]]);
+    const html = renderToStaticMarkup(<LandingActions lang="en-US" entry="invite-only" />);
+    expect(html).toContain("home.inviteOnly");
+    expect(renderToStaticMarkup(<LandingActions lang="en-US" entry={null} />)).not.toContain(
+      "home.inviteOnly",
+    );
+  });
+
   it("leads with Create account while open sign-up is on", () => {
     expect(links("signup")).toEqual([
       ["/$lang/signup", "home.createAccount"],

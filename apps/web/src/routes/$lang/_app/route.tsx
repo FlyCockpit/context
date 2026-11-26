@@ -7,6 +7,7 @@ import { useCallback } from "react";
 import { AdminSetupBanner } from "@/components/admin-setup-banner";
 import BottomNav from "@/components/bottom-nav";
 import Header from "@/components/header";
+import { OfflineBand } from "@/components/offline-band";
 import PullToRefresh from "@/components/pull-to-refresh";
 import { SkipLink } from "@/components/skip-link";
 import { useDocumentLang } from "@/hooks/use-document-lang";
@@ -54,6 +55,9 @@ function AppShellLayout() {
           <SkipLink />
           <Header />
           <AdminSetupBanner />
+          {/* In the top row, above the scroller: it never covers the page or
+              the BottomNav. */}
+          <OfflineBand />
         </div>
         {/* The page scroller. `[container-type:size]` lets the AppFrame sidebar
             stick at the scroller's height (`100cqh`); it also makes `main` the

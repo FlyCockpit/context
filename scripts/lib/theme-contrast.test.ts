@@ -128,3 +128,92 @@ test("toasts are a popover surface whose inks reach 4.5:1 on it, light and dark"
     [],
   );
 });
+
+test("field outlines (--input) reach 3:1 on every surface a field sits on, light and dark", () => {
+  // WCAG 1.4.11 non-text contrast: the border is what shows where to type.
+  // --border is decorative (dividers, cards) and is not held to this.
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  const outlines = measurePairs(
+    css,
+    (["background", "card", "popover", "muted"] as const).map((surface) => ({
+      text: "input",
+      surface,
+      themes: ["light", "dark"] as const,
+    })),
+  );
+  assert.deepEqual(
+    outlines
+      .filter((r) => r.ratio < 3)
+      .map((r) => `${r.theme}: ${r.label} = ${r.ratio.toFixed(2)}:1`),
+    [],
+  );
+  // The dark field fill (bg-input/30) must keep placeholder text readable.
+  const placeholders = measurePairs(
+    css,
+    (["background", "card", "popover"] as const).map((surface) => ({
+      text: "muted-foreground",
+      surface,
+      tint: { token: "input", alpha: 0.3 },
+      themes: ["dark"] as const,
+    })),
+  );
+  assert.deepEqual(
+    placeholders.filter((r) => r.ratio < AA_TEXT).map((r) => `${r.theme}: ${r.label}`),
+    [],
+  );
+  // The original light --input read 1.25:1 on white.
+  const white = parseOklch(readTokenBlock(css, ":root").get("background") ?? "");
+  assert.ok(contrastRatio(oklchToSrgb(0.925, 0.005, 214.3), white) < 3);
+});
+
+test("a long toast title stays inside the pill and the action button text reaches 4.5:1", () => {
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  // A long title must not outgrow sileo's 350px pill (the icon ended up half
+  // outside it): the header row is capped and the title ellipsised.
+  assert.equal(
+    ruleDeclarations(css, ":root [data-sileo-viewport] [data-sileo-header-inner]").get("max-width"),
+    "calc(var(--sileo-width) - 1rem - 10px)",
+  );
+  assert.equal(
+    ruleDeclarations(
+      css,
+      ":root [data-sileo-viewport] [data-sileo-header-inner] [data-sileo-title]",
+    ).get("text-overflow"),
+    "ellipsis",
+  );
+  // The action button ("Try again") writes --popover-foreground on an 8% (14%
+  // on hover) tint of itself over the pill.
+  const button = ruleDeclarations(
+    css,
+    ":root [data-sileo-viewport] [data-sileo-button][data-state]",
+  );
+  assert.equal(button.get("--sileo-btn-color"), "var(--popover-foreground)");
+  const pairs = ["--sileo-btn-bg", "--sileo-btn-bg-hover"].map((key) => {
+    const mix = /^color-mix\(in oklch, var\(--popover-foreground\) (\d+)%, transparent\)$/.exec(
+      button.get(key) ?? "",
+    );
+    assert.ok(mix, key);
+    return {
+      text: "popover-foreground",
+      surface: "popover",
+      tint: { token: "popover-foreground", alpha: Number(mix[1]) / 100 },
+      themes: ["light", "dark"] as const,
+    };
+  });
+  assert.deepEqual(
+    measurePairs(css, pairs)
+      .filter((r) => r.ratio < AA_TEXT)
+      .map((r) => `${r.theme}: toast button ${r.label}`),
+    [],
+  );
+});
+
+test("dropdown menus draw on an opaque popover surface", () => {
+  // A translucent menu (bg-popover/70 + blur) let a banner tint it (CTX-14).
+  const menu = readFileSync(
+    resolve(import.meta.dirname, "../../packages/ui/src/components/dropdown-menu.tsx"),
+    "utf-8",
+  );
+  assert.ok(menu.includes(" bg-popover "));
+  assert.doesNotMatch(menu, /bg-popover\/\d+|backdrop-blur/);
+});

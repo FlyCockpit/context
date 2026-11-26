@@ -118,6 +118,20 @@ describe("full-bleed rules inside the scroller", () => {
     expect(tag).not.toContain("scrollbar-gutter");
   });
 
+  it.each([
+    ["public", PublicRoute],
+    ["app", AppRoute],
+  ])(
+    "the %s shell puts the offline band in its top row, outside the scroller",
+    async (_name, route) => {
+      const html = await render(route);
+      const band = html.search(/<div role="status"[^>]*data-offline-band=""/);
+      expect(band, html).toBeGreaterThan(-1);
+      expect(band).toBeLessThan(html.indexOf("<main"));
+      expect(html.match(/data-offline-band=/g)).toHaveLength(1);
+    },
+  );
+
   it("the app shell has no footer (BottomNav on phones)", async () => {
     expect(await render(AppRoute)).not.toContain("<footer");
   });

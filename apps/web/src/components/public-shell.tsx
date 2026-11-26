@@ -7,6 +7,7 @@ import { AppNameLink } from "@/components/app-name-link";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ModeToggle } from "@/components/mode-toggle";
 import NotFoundState from "@/components/not-found-state";
+import { OfflineBand } from "@/components/offline-band";
 import { PublicFooter } from "@/components/public-footer";
 import { SkipLink } from "@/components/skip-link";
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/i18n/config";
@@ -33,9 +34,12 @@ export function PublicShell({ children }: { children: ReactNode }) {
         paddingRight: "var(--safe-area-right)",
       }}
     >
+      {/* The top row: header, then the offline band, which takes its own
+          space above the scroller instead of covering the page. */}
       <div>
         <SkipLink />
         <PublicHeader lang={lang} />
+        <OfflineBand />
       </div>
       {/* No `scrollbar-gutter: stable`: a reserved gutter stops the footer's
           and every other full-bleed rule inside the scroller short of the

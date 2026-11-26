@@ -18,6 +18,7 @@ import { bannedSessionGuard } from "./banned-session-guard.js";
 import { revokeBootstrapToken } from "./bootstrap-token.js";
 import { verifyInvitedEmailOnPasswordReset } from "./invite-verification.js";
 import { resolveMcpPlugins } from "./mcp-plugins.js";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password-policy.js";
 import {
   hasAnyUser,
   invalidateSignupAvailabilityCache,
@@ -159,12 +160,12 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: !forceSso,
     requireEmailVerification: emailConfigured,
-    // Better-Auth's default floor is 8. There is no breached-password check in
-    // this application, so length is the only guessing cost. The signup and
-    // reset-password forms mirror this; the login form deliberately does not,
-    // since an account created under an older policy must still be able to
-    // authenticate.
-    minPasswordLength: 12,
+    // ./password-policy.ts: the same numbers the web's new-password forms
+    // validate against and show under the field. The login form deliberately
+    // does not, since an account created under an older policy must still be
+    // able to authenticate.
+    minPasswordLength: PASSWORD_MIN_LENGTH,
+    maxPasswordLength: PASSWORD_MAX_LENGTH,
     ...(emailConfigured ? { sendResetPassword } : {}),
     // An emailed invite's set-password link proves the invitee controls the
     // address, so using it verifies the email (./invite-verification.ts).

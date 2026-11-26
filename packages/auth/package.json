@@ -25,6 +25,9 @@
     "./mcp-grant": {
       "default": "./src/mcp-grant.ts"
     },
+    "./password-policy": {
+      "default": "./src/password-policy.ts"
+    },
     "./roles": {
       "default": "./src/roles.ts"
     },

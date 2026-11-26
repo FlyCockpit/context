@@ -1,13 +1,11 @@
 import { Button, buttonVariants } from "@cockpit-context/ui/components/button";
-import { Input } from "@cockpit-context/ui/components/input";
-import { Label } from "@cockpit-context/ui/components/label";
 import { toast } from "@cockpit-context/ui/components/sileo";
 import { TextField } from "@cockpit-context/ui/components/text-field";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import z from "zod";
 
@@ -15,11 +13,18 @@ import { AdminSetupCard } from "@/components/auth/admin-setup-card";
 import { AuthConfigGate } from "@/components/auth/auth-config-gate";
 import { AuthCard } from "@/components/auth/auth-screen";
 import { PasswordHelp } from "@/components/auth/password-help";
+import {
+  initialTwoFactorState,
+  startTwoFactorChallenge,
+  TwoFactorChallenge,
+} from "@/components/auth/two-factor-challenge";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { authClient } from "@/lib/auth-client";
+import { clearServerFieldError, setServerFieldError } from "@/lib/form-server-error";
 import { decideAnonymousOnlyRouteAccess } from "@/lib/route-session-access";
+import { type SignupMode, signupMode } from "@/lib/signup-mode";
 import { getRouteSession } from "@/server/auth-session";
-import { friendly, isRateLimit } from "@/utils/friendly-error";
+import { friendly, isCredentialRejection } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 import { safeRedirectTo } from "@/utils/safe-redirect";
 
@@ -37,23 +42,6 @@ export const Route = createFileRoute("/$lang/_app/login")({
   component: LoginPage,
 });
 
-/**
- * The whole 2FA challenge as one state object (rather than five separate
- * `useState` calls) so a step change — entering the challenge, sending an
- * email code, or backing out — is a single update and a single render, with
- * no way for the pieces to drift apart mid-transition.
- *
- * `otpSent` marks the email-OTP path: once the user requests a code by email
- * we verify against verifyOtp instead of verifyTotp.
- */
-const initialTwoFactorState = {
-  active: false,
-  code: "",
-  verifying: false,
-  otpSent: false,
-  sendingOtp: false,
-};
-
 function LoginPage() {
   const { lang } = Route.useParams();
   const { redirectTo } = Route.useSearch();
@@ -70,11 +58,9 @@ function LoginPage() {
   const ssoEnabled = configData?.ssoEnabled ?? false;
   const forceSso = configData?.forceSso === true;
   const ssoProviderName = configData?.ssoProviderName ?? "SSO";
-  // Default to hiding the sign-up link until the config is known, so it never
-  // flashes on a closed server (the user menu does the same).
-  const signupAvailable =
-    !forceSso &&
-    (configData?.signupOpen === true || configData?.adminBootstrapSignupEnabled === true);
+  // The gate below waits for the config, so the sign-up line never flashes
+  // the wrong mode.
+  const accountMode = signupMode(configData ?? {});
   const emailConfigured = configData?.emailConfigured ?? false;
   // While no administrator exists (no account at all, or accounts but no
   // admin), explain how the operator finishes setup instead of a dead end.
@@ -94,55 +80,6 @@ function LoginPage() {
     }
   };
 
-  const handle2FAVerify = async () => {
-    setTwoFactor((s) => ({ ...s, verifying: true }));
-    try {
-      // When the user requested an emailed code we verify against the OTP
-      // endpoint; otherwise the code is a TOTP from their authenticator app.
-      const result = twoFactor.otpSent
-        ? await authClient.twoFactor.verifyOtp({ code: twoFactor.code })
-        : await authClient.twoFactor.verifyTotp({ code: twoFactor.code });
-      if (result.error) {
-        console.error("[login.twoFactor.verify]", result.error);
-        toast.error(t("auth:errors.invalidTotp"));
-      } else {
-        toast.success(t("auth:signedInSuccess"));
-        window.location.assign(postAuthRedirect);
-      }
-    } finally {
-      setTwoFactor((s) => ({ ...s, verifying: false }));
-    }
-  };
-
-  const handleSendEmailOtp = async () => {
-    setTwoFactor((s) => ({ ...s, sendingOtp: true }));
-    try {
-      // Delivery-aware preflight: Better-Auth's send-otp endpoint reports
-      // success even when SMTP delivery fails, so verify the transport is
-      // actually reachable before telling the user a code is on the way.
-      const preflight = await orpc.auth.verifyEmailTransport.call().catch((err) => {
-        console.error("[login.twoFactor.verifyEmailTransport]", err);
-        return { ok: false };
-      });
-      if (!preflight.ok) {
-        toast.error(t("auth:twoFactor.couldNotSendCode"));
-        return;
-      }
-      const result = await authClient.twoFactor.sendOtp();
-      if (result.error) {
-        console.error("[login.twoFactor.sendOtp]", result.error);
-        toast.error(
-          isRateLimit(result.error) ? friendly(result.error) : t("auth:twoFactor.couldNotSendCode"),
-        );
-        return;
-      }
-      setTwoFactor((s) => ({ ...s, otpSent: true, code: "" }));
-      toast.success(t("auth:twoFactor.codeSent"));
-    } finally {
-      setTwoFactor((s) => ({ ...s, sendingOtp: false }));
-    }
-  };
-
   return (
     <AuthConfigGate
       isPending={sessionPending || configPending}
@@ -158,61 +95,12 @@ function LoginPage() {
           forceSso={forceSso}
         />
       ) : twoFactor.active ? (
-        <AuthCard
-          title={t("auth:twoFactor.title")}
-          description={
-            twoFactor.otpSent
-              ? t("auth:twoFactor.emailCodeDescription")
-              : t("auth:twoFactor.description")
-          }
-        >
-          <div className="space-y-2">
-            <Label htmlFor="totp-code">{t("auth:fields.verificationCode")}</Label>
-            <Input
-              id="totp-code"
-              placeholder="000000"
-              value={twoFactor.code}
-              onChange={(e) => setTwoFactor((s) => ({ ...s, code: e.target.value }))}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              className="text-center text-lg tracking-widest"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && twoFactor.code.length === 6) {
-                  handle2FAVerify();
-                }
-              }}
-            />
-          </div>
-          <Button
-            className="min-h-[44px] w-full"
-            onClick={handle2FAVerify}
-            disabled={twoFactor.code.length !== 6 || twoFactor.verifying}
-          >
-            {twoFactor.verifying ? t("auth:twoFactor.verifying") : t("auth:twoFactor.verify")}
-          </Button>
-          {emailConfigured && (
-            <Button
-              variant="outline"
-              className="min-h-[44px] w-full"
-              onClick={handleSendEmailOtp}
-              disabled={twoFactor.sendingOtp}
-            >
-              {twoFactor.sendingOtp
-                ? t("auth:twoFactor.sendingCode")
-                : twoFactor.otpSent
-                  ? t("auth:twoFactor.resendEmailCode")
-                  : t("auth:twoFactor.emailMeCode")}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            className="min-h-[44px] w-full"
-            onClick={() => setTwoFactor(initialTwoFactorState)}
-          >
-            {t("auth:twoFactor.back")}
-          </Button>
-        </AuthCard>
+        <TwoFactorChallenge
+          twoFactor={twoFactor}
+          setTwoFactor={setTwoFactor}
+          emailEnabled={emailConfigured}
+          postAuthRedirect={postAuthRedirect}
+        />
       ) : (
         <AuthCard
           title={t("auth:login.signinTitle")}
@@ -249,7 +137,7 @@ function LoginPage() {
               lang={lang}
               redirectTo={postAuthRedirect}
               passwordResetAvailable={emailConfigured}
-              onNeeds2FA={() => setTwoFactor({ ...initialTwoFactorState, active: true })}
+              onNeeds2FA={() => setTwoFactor(startTwoFactorChallenge())}
             />
           )}
           {forceSso && !ssoEnabled && (
@@ -257,24 +145,52 @@ function LoginPage() {
               {t("auth:login.ssoUnavailable")}
             </div>
           )}
-          {signupAvailable && (
-            // `max-sm:-mt-2`: on phones the link's 44px box may use half of the
-            // gap above it (its text sits 12px inside the box), which keeps it
-            // above the BottomNav at 320×568.
-            <div className="text-center max-sm:-mt-2">
-              <Link
-                to="/$lang/signup"
-                params={{ lang }}
-                search={{ redirectTo }}
-                className={cn(buttonVariants({ variant: "link" }), "min-h-[44px]")}
-              >
-                {t("auth:login.signupHint")}
-              </Link>
-            </div>
-          )}
+          <SignupEntry mode={accountMode} lang={lang} redirectTo={redirectTo} />
         </AuthCard>
       )}
     </AuthConfigGate>
+  );
+}
+
+/**
+ * The line under the sign-in form that says how to get an account: a link to
+ * `/signup` while sign-up is open, and the invite-only note when it is closed,
+ * so a visitor without an account is never left guessing. (While the
+ * first-admin bootstrap is open the page shows `AdminSetupCard` instead.)
+ * docs/ui.md § Sign-up modes.
+ */
+function SignupEntry({
+  mode,
+  lang,
+  redirectTo,
+}: {
+  mode: SignupMode;
+  lang: string;
+  redirectTo: string | undefined;
+}) {
+  const { t } = useTranslation(["auth"]);
+  if (mode === "sso") return null;
+  if (mode === "closed") {
+    return (
+      <p className="text-center text-sm text-balance text-muted-foreground">
+        {t("auth:signupMode.inviteOnly")}
+      </p>
+    );
+  }
+  return (
+    // `max-sm:-mt-2`: on phones the link's 44px box may use half of the
+    // gap above it (its text sits 12px inside the box), which keeps it
+    // above the BottomNav at 320×568.
+    <div className="text-center max-sm:-mt-2">
+      <Link
+        to="/$lang/signup"
+        params={{ lang }}
+        search={{ redirectTo }}
+        className={cn(buttonVariants({ variant: "link" }), "min-h-[44px] whitespace-normal")}
+      >
+        {mode === "bootstrap" ? t("auth:signupMode.setupHint") : t("auth:login.signupHint")}
+      </Link>
+    </div>
   );
 }
 
@@ -291,14 +207,30 @@ function SignInForm({
 }) {
   const navigate = useNavigate();
   const { t } = useTranslation(["auth"]);
+  const passwordInput = useRef<HTMLInputElement>(null);
+  // "Not verified yet" is a notice under the email field, not a field error:
+  // a field error would keep the form unsubmittable until the email is edited,
+  // but the fix happens elsewhere (the link in the inbox) and the same
+  // credentials must work right after it.
+  const [unverified, setUnverified] = useState(false);
 
   const form = useForm({
     defaultValues: { email: "", password: "" },
     onSubmit: async ({ value }) => {
-      const result = await authClient.signIn.email({
-        email: value.email,
-        password: value.password,
-      });
+      setUnverified(false);
+      let result: Awaited<ReturnType<typeof authClient.signIn.email>>;
+      try {
+        result = await authClient.signIn.email({
+          email: value.email,
+          password: value.password,
+        });
+      } catch (err) {
+        // The request itself failed (server unreachable, offline): say so,
+        // and the same credentials can be sent again.
+        console.error("[login.signIn]", err);
+        toast.error(friendly(err));
+        return;
+      }
       if (result.error) {
         // `requireEmailVerification` rejects correct credentials on an
         // unverified account. Better-Auth distinguishes this itself, so say so
@@ -308,27 +240,24 @@ function SignInForm({
         //
         // `emailVerification.sendOnSignIn` is on, so Better-Auth has already
         // mailed a fresh link by the time we get here — but the original may
-        // have expired days ago, so the toast also offers the resend page
-        // rather than leaving a dead end if that mail doesn't arrive.
+        // have expired days ago, so the message under the email field comes
+        // with a link to the resend page rather than leaving a dead end if
+        // that mail doesn't arrive.
         if (result.error.code === "EMAIL_NOT_VERIFIED") {
-          toast.error(t("auth:verifyEmail.notVerified"), {
-            action: {
-              label: t("auth:verifyEmail.resend"),
-              onClick: () =>
-                navigate({
-                  to: "/$lang/verify-email",
-                  params: { lang },
-                  // No `ok`: this is a self-navigation, not a verification hop,
-                  // so the page must show its neutral resend state.
-                  search: { error: undefined, ok: undefined },
-                }),
-            },
-          });
+          setUnverified(true);
           return;
         }
-        toast.error(
-          isRateLimit(result.error) ? friendly(result.error) : t("auth:errors.invalidCredentials"),
-        );
+        if (!isCredentialRejection(result.error)) {
+          // Not about either field (rate limit, server or network trouble):
+          // a short-lived notice, and the same credentials can be sent again.
+          toast.error(friendly(result.error));
+          return;
+        }
+        // Under the password field (it is the one the user retypes), never
+        // saying which of the two was wrong.
+        setServerFieldError(form, "password", t("auth:errors.invalidCredentials"));
+        passwordInput.current?.focus();
+        passwordInput.current?.select();
         return;
       }
       if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
@@ -362,14 +291,38 @@ function SignInForm({
       }}
       className="space-y-4"
     >
-      <form.Field name="email">
+      <form.Field
+        name="email"
+        // A wrong email or password is shown under the password; fixing only
+        // the email must make the form submittable again.
+        listeners={{ onChange: () => clearServerFieldError(form, "password") }}
+      >
         {(field) => (
-          <TextField
-            field={field}
-            label={t("auth:fields.email")}
-            type="email"
-            autoComplete="email"
-          />
+          <div className="space-y-1">
+            <TextField
+              field={field}
+              label={t("auth:fields.email")}
+              type="email"
+              autoComplete="email"
+            />
+            {unverified && (
+              <p role="alert" className="text-sm text-destructive">
+                {t("auth:verifyEmail.notVerified")}
+              </p>
+            )}
+            {unverified && (
+              <Link
+                to="/$lang/verify-email"
+                params={{ lang }}
+                // No `ok`: this is a self-navigation, not a verification hop,
+                // so the page must show its neutral resend state.
+                search={{ error: undefined, ok: undefined }}
+                className={cn(buttonVariants({ variant: "link" }), "min-h-[44px] px-0")}
+              >
+                {t("auth:verifyEmail.resend")}
+              </Link>
+            )}
+          </div>
         )}
       </form.Field>
 
@@ -382,6 +335,7 @@ function SignInForm({
           {(field) => (
             <TextField
               field={field}
+              ref={passwordInput}
               label={t("auth:fields.password")}
               type="password"
               autoComplete="current-password"

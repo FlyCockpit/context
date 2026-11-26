@@ -74,5 +74,16 @@
     "title": "Page not found",
     "description": "The page you're looking for doesn't exist or is no longer available.",
     "home": "Go home"
+  },
+  "offline": "You're offline. Check your connection and try again.",
+  "unreachable": "Couldn't reach the server. Check your connection and try again.",
+  "offlineContent": "You're offline. This will load when you reconnect.",
+  "offlinePage": {
+    "title": "You're offline",
+    "description": "This page will load when you reconnect."
+  },
+  "unreachablePage": {
+    "title": "Couldn't reach the server",
+    "description": "Check your connection and try again."
   }
 }

@@ -1,26 +1,26 @@
 import { Button } from "@cockpit-context/ui/components/button";
-import { Input } from "@cockpit-context/ui/components/input";
-import { Label } from "@cockpit-context/ui/components/label";
 import { toast } from "@cockpit-context/ui/components/sileo";
 import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { TextField } from "@cockpit-context/ui/components/text-field";
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import z from "zod";
 
 import { AuthCard, AuthScreen } from "@/components/auth/auth-screen";
+import { ONE_TIME_CODE_LENGTH, OneTimeCodeField } from "@/components/auth/plain-field";
 import { ClientTile } from "@/components/mcp/client-tile";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { authClient } from "@/lib/auth-client";
+import { clearServerFieldError, setServerFieldError } from "@/lib/form-server-error";
 import {
   mcpPageHref,
   parseMcpOAuthSearch,
   resolveOauthRedirectUrl,
   toMcpPublicClientInfo,
 } from "@/lib/mcp-oauth-search";
-import { friendly, isRateLimit } from "@/utils/friendly-error";
+import { friendly, isCodeRejection, isCredentialRejection } from "@/utils/friendly-error";
 
 /**
  * The MCP OAuth login page: Better-Auth's `loginPage` and `postLogin.page`
@@ -100,6 +100,18 @@ function continueAuthorization(data: unknown, lang: string, rawSearch: string) {
   );
 }
 
+/**
+ * The MCP 2FA step. `error` is the inline message under the code field (a
+ * rejected code), cleared by the next edit; Cancel resets the whole object.
+ */
+const initialMcpTwoFactorState = {
+  active: false,
+  code: "",
+  busy: false,
+  error: null as string | null,
+};
+type McpTwoFactorState = typeof initialMcpTwoFactorState;
+
 function McpSignIn({
   lang,
   rawSearch,
@@ -110,11 +122,9 @@ function McpSignIn({
   clientId: string;
 }) {
   const { t } = useTranslation(["auth"]);
-  const [twoFactor, setTwoFactor] = useState<{ active: boolean; code: string; busy: boolean }>({
-    active: false,
-    code: "",
-    busy: false,
-  });
+  const [twoFactor, setTwoFactor] = useState<McpTwoFactorState>(initialMcpTwoFactorState);
+  const passwordInput = useRef<HTMLInputElement>(null);
+  const codeInput = useRef<HTMLInputElement>(null);
   const prelogin = useQuery({
     queryKey: ["mcp-prelogin-client", clientId, rawSearch],
     retry: false,
@@ -128,18 +138,35 @@ function McpSignIn({
   const form = useForm({
     defaultValues: { email: "", password: "" },
     onSubmit: async ({ value }) => {
-      const result = await authClient.signIn.email({
-        email: value.email,
-        password: value.password,
-      });
+      let result: Awaited<ReturnType<typeof authClient.signIn.email>>;
+      try {
+        result = await authClient.signIn.email({
+          email: value.email,
+          password: value.password,
+        });
+      } catch (err) {
+        // The request itself failed (server unreachable, offline): say so,
+        // and the same credentials can be sent again.
+        toast.error(friendly(err));
+        return;
+      }
       if (result.error) {
-        toast.error(
-          isRateLimit(result.error) ? friendly(result.error) : t("auth:errors.invalidCredentials"),
-        );
+        if (!isCredentialRejection(result.error)) {
+          // Not about either field (rate limit, server or network trouble):
+          // a toast with what happened, and the same credentials can be sent
+          // again.
+          toast.error(friendly(result.error));
+          return;
+        }
+        // Under the password (the field the user retypes), never saying which
+        // of the two was wrong; editing either field clears it.
+        setServerFieldError(form, "password", t("auth:errors.invalidCredentials"));
+        passwordInput.current?.focus();
+        passwordInput.current?.select();
         return;
       }
       if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
-        setTwoFactor({ active: true, code: "", busy: false });
+        setTwoFactor({ ...initialMcpTwoFactorState, active: true });
         return;
       }
       continueAuthorization(result.data, lang, rawSearch);
@@ -150,14 +177,34 @@ function McpSignIn({
   });
 
   const verifyTwoFactor = async () => {
-    setTwoFactor((current) => ({ ...current, busy: true }));
-    const result = await authClient.twoFactor.verifyTotp({ code: twoFactor.code });
-    if (result.error) {
-      toast.error(t("auth:errors.invalidTotp"));
+    if (twoFactor.busy) return;
+    setTwoFactor((current) => ({ ...current, busy: true, error: null }));
+    try {
+      const result = await authClient.twoFactor.verifyTotp({ code: twoFactor.code });
+      if (result.error) {
+        if (isCodeRejection(result.error)) {
+          // A wrong or expired code: under the field, with the code kept and
+          // selected so typing replaces it.
+          setTwoFactor((current) => ({
+            ...current,
+            busy: false,
+            error: t("auth:errors.invalidTotp"),
+          }));
+          codeInput.current?.focus();
+          codeInput.current?.select();
+          return;
+        }
+        // A rate limit, lockout or server failure says what happened, and the
+        // code stays to resend.
+        toast.error(friendly(result.error));
+        setTwoFactor((current) => ({ ...current, busy: false }));
+        return;
+      }
+      continueAuthorization(result.data, lang, rawSearch);
+    } catch (err) {
+      toast.error(friendly(err));
       setTwoFactor((current) => ({ ...current, busy: false }));
-      return;
     }
-    continueAuthorization(result.data, lang, rawSearch);
   };
 
   if (prelogin.isError) return <InvalidRequestCard />;
@@ -166,27 +213,32 @@ function McpSignIn({
   if (twoFactor.active) {
     return (
       <AuthCard title={t("auth:twoFactor.title")} description={t("auth:twoFactor.description")}>
-        <div className="space-y-2">
-          <Label htmlFor="mcp-totp-code">{t("auth:fields.verificationCode")}</Label>
-          <Input
-            id="mcp-totp-code"
-            placeholder="000000"
-            value={twoFactor.code}
-            onChange={(event) =>
-              setTwoFactor((current) => ({ ...current, code: event.target.value }))
-            }
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            className="text-center text-lg tracking-widest"
-          />
-        </div>
+        <OneTimeCodeField
+          id="mcp-totp-code"
+          label={t("auth:fields.verificationCode")}
+          value={twoFactor.code}
+          error={twoFactor.error}
+          inputRef={codeInput}
+          // Typing replaces the code and drops the previous rejection.
+          onValueChange={(code) => setTwoFactor((current) => ({ ...current, code, error: null }))}
+          onComplete={() => void verifyTwoFactor()}
+        />
         <Button
           className="min-h-[44px] w-full"
-          disabled={twoFactor.code.length !== 6 || twoFactor.busy}
+          disabled={twoFactor.code.length !== ONE_TIME_CODE_LENGTH || twoFactor.busy}
           onClick={() => void verifyTwoFactor()}
         >
           {twoFactor.busy ? t("auth:twoFactor.verifying") : t("auth:twoFactor.verify")}
+        </Button>
+        <Button
+          variant="ghost"
+          className="min-h-[44px] w-full"
+          disabled={twoFactor.busy}
+          // Back to the credential form with nothing carried over, so the next
+          // sign-in (maybe another account) starts clean.
+          onClick={() => setTwoFactor(initialMcpTwoFactorState)}
+        >
+          {t("auth:twoFactor.cancel")}
         </Button>
       </AuthCard>
     );
@@ -207,7 +259,12 @@ function McpSignIn({
         }}
         className="space-y-4"
       >
-        <form.Field name="email">
+        <form.Field
+          name="email"
+          // A wrong email or password is shown under the password; fixing only
+          // the email must make the form submittable again.
+          listeners={{ onChange: () => clearServerFieldError(form, "password") }}
+        >
           {(field) => (
             <TextField
               field={field}
@@ -221,6 +278,7 @@ function McpSignIn({
           {(field) => (
             <TextField
               field={field}
+              ref={passwordInput}
               label={t("auth:fields.password")}
               type="password"
               autoComplete="current-password"
