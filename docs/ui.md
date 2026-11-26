@@ -108,6 +108,6 @@ A setting that is on or off shows a `Switch` named by the setting's title, with 
 
 ## Smaller rules
 
-- **Field outlines** (`--input`: inputs, textareas, selects, checkboxes, the switch track) reach 3:1 on background, card, popover and muted in both themes (WCAG 1.4.11); `--border` stays a light decorative line.
+- **Field outlines** (`--input`: inputs, textareas, selects, checkboxes, the switch track) reach 3:1 on background, card, popover and muted in both themes (WCAG 1.4.11); `--border` stays a light decorative line. Fills made from the now strong `--input` must still carry muted text: hovered triggers stay at `dark:hover:bg-input/35` or lighter, and menu/picker search fields use an opaque `bg-muted dark:bg-muted` fill with `placeholder:text-muted-foreground` (`scripts/lib/theme-contrast.test.ts` scans every `hover:bg-input/NN`).
 - **Menus** draw on an opaque `bg-popover` (no translucency or blur), and a menu that picks the current choice (the theme menu) uses radio items, so the current value is checked.
 - **Selector rows** (`SelectorRow`: the admin strip, section tabs, segmented controls) fade out at an edge with more tabs past it, re-measured on scroll and resize, and scroll a focused tab clear of the fade (instantly under reduced motion).

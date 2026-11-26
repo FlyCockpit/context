@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import {
@@ -226,4 +226,59 @@ test("an Off switch fills its track with the opaque --input, which the 3:1 check
   );
   assert.ok(source.includes("data-unchecked:bg-input "));
   assert.doesNotMatch(source, /data-unchecked:bg-input\/\d+/);
+});
+
+test("muted text stays readable on every hovered --input fill", () => {
+  // Select and outline triggers hover to a stronger `bg-input/NN` while they
+  // still show a muted placeholder; at /50 the dark fill fell below 4.5:1 once
+  // --input reached 3:1. Every `hover:bg-input/NN` in the ui package and the
+  // web app is checked in the themes it applies to.
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  const roots = [
+    resolve(import.meta.dirname, "../../packages/ui/src"),
+    resolve(import.meta.dirname, "../../apps/web/src"),
+  ];
+  const fills: string[] = [];
+  const bad: string[] = [];
+  for (const root of roots) {
+    for (const file of readdirSync(root, { recursive: true, encoding: "utf8" })) {
+      if (!/\.tsx?$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
+      const source = readFileSync(resolve(root, file), "utf-8");
+      for (const match of source.matchAll(/(?<![\w-])((?:[\w-]+:)*hover:)bg-input\/(\d+)/g)) {
+        fills.push(`${file}: ${match[0]}`);
+        const themes = (match[1] ?? "").split(":").includes("dark")
+          ? (["dark"] as const)
+          : (["light", "dark"] as const);
+        const results = measurePairs(
+          css,
+          (["background", "card", "popover"] as const).map((surface) => ({
+            text: "muted-foreground",
+            surface,
+            tint: { token: "input", alpha: Number(match[2]) / 100 },
+            themes,
+          })),
+        );
+        for (const r of results.filter((r) => r.ratio < AA_TEXT))
+          bad.push(`${file} ${match[0]} ${r.theme}: ${r.label} = ${r.ratio.toFixed(2)}:1`);
+      }
+    }
+  }
+  assert.deepEqual(bad, []);
+  // The select, outline-button and language-switcher hovers.
+  assert.ok(fills.length >= 3, fills.join("\n"));
+});
+
+test("menu and picker search fields: muted placeholder on an opaque muted fill", () => {
+  // Tailwind's default placeholder is the text colour at 50%; a translucent
+  // bg-input fill moves with the --input outline token. Unprefixed and dark:
+  // InputGroup's own `dark:bg-input/30` would otherwise win in the dark theme.
+  for (const file of ["command.tsx", "async-combobox.tsx"]) {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "../../packages/ui/src/components", file),
+      "utf-8",
+    );
+    assert.ok(source.includes("placeholder:text-muted-foreground"), file);
+    assert.match(source, /InputGroup className="[^"]*(?<![\w:-])bg-muted[^"]*dark:bg-muted/);
+    assert.doesNotMatch(source, /InputGroup className="[^"]*bg-input\/\d+/);
+  }
 });

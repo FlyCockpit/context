@@ -121,10 +121,10 @@ function AsyncCombobox<T>({
             over an aria-label on the input), so the label goes here. */}
         <Command shouldFilter={false} label={searchPlaceholder}>
           <div data-slot="command-input-wrapper" className="border-b pb-0">
-            <InputGroup className="h-11 border-none border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2! md:h-8">
+            <InputGroup className="h-11 border-none border-input/30 bg-muted shadow-none! dark:bg-muted *:data-[slot=input-group-addon]:pl-2! md:h-8">
               <CommandPrimitive.Input
                 data-slot="command-input"
-                className="w-full text-base outline-hidden disabled:cursor-not-allowed disabled:opacity-50 md:text-xs"
+                className="w-full text-base outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 md:text-xs"
                 placeholder={searchPlaceholder}
                 value={query}
                 onValueChange={setQuery}
