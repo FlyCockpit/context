@@ -55,7 +55,7 @@ Routes auto-split; never export a component function from a route file. Anchor e
 
 ### Web shell — one page, one scroller, no reloads
 
-- The document never scrolls: `body` is `position: relative; overflow: clip`. Each layout branch (app, public) owns exactly one bounded `<main>` scroller (`relative min-h-0 min-w-0 overflow-y-auto overflow-x-clip`) with safe-area padding. No `h-screen`/`100vh` page scrollers. A conversation transcript sizes to `100cqh` and opts out of pull-to-refresh.
+- The document never scrolls: `body` is `position: relative; overflow: clip`. Each layout branch (app, public) owns exactly one bounded `<main>` scroller (`relative min-h-0 min-w-0 overflow-y-auto overflow-x-clip`) with safe-area padding. No `h-screen`/`100vh` page scrollers. A conversation fills the frame below any banner (`data-fill-frame`, `100cqh` column) and opts out of pull-to-refresh.
 - Tag that scroller with `data-scroll-restoration-id={MAIN_SCROLLER_ID}` (`apps/web/src/lib/main-scroller.ts`); the router resets/restores it through `scrollToTopSelectors`. In-page URL changes (filters, tabs) pass `resetScroll: false`.
 - No page View Transitions (`defaultViewTransition`, `viewTransitionName`): two pages must never be on screen at once. Pending UI replaces the outlet.
 - Internal navigation uses `<Link>` or `router.navigate`; full loads require a deliberate auth hop, sign-out or error recovery.

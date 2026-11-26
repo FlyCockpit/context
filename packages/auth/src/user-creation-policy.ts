@@ -17,6 +17,12 @@ const userCreationModeStorage = new AsyncLocalStorage<UserCreationContext>();
 export const SIGNUP_DISABLED_MESSAGE =
   "Sign-up is currently disabled. Contact an admin if you need access.";
 
+// Why any creation is refused while no account exists and the request is not
+// a valid first-admin bootstrap. One message for every address, listed or
+// not, so it reveals nothing about ADMIN_EMAILS.
+export const FIRST_ACCOUNT_REQUIRES_BOOTSTRAP_MESSAGE =
+  "This server has no account yet. The first account must be the administrator: use an ADMIN_EMAILS address and the bootstrap token from the latest server start.";
+
 export type UserCreationDecisionInput = {
   /** Effective open signup: SIGNUP_ENABLED AND the `signupOpen` AppSetting. */
   signupOpen: boolean;
@@ -51,6 +57,11 @@ export type UserCreationDecision =
  * Takes every input as a parameter (no env, no database) so the whole gate
  * matrix is unit-testable.
  *
+ * - While no account exists, the ONLY admitted creation is the first-admin
+ *   bootstrap. Open signup, SSO/JIT and a listed address with a wrong or
+ *   missing token are all refused, so a typo can never create a plain first
+ *   account that closes the bootstrap for good and leaves the server without
+ *   an administrator.
  * - Open signup (env AND setting) admits everyone with the default role.
  * - An admin invite (`users.invite`, mode `admin-invite`) is admitted even
  *   with signup closed.
@@ -67,6 +78,10 @@ export function decideUserCreation(input: UserCreationDecisionInput): UserCreati
     input.bootstrapTokenValid &&
     !input.usersExist;
   const isAdminInvite = input.creationMode === "admin-invite";
+
+  if (!input.usersExist && !mayBootstrapAdmin) {
+    return { allowed: false, reason: FIRST_ACCOUNT_REQUIRES_BOOTSTRAP_MESSAGE };
+  }
 
   if (!input.signupOpen && !mayBootstrapAdmin && !isAdminInvite) {
     return { allowed: false, reason: SIGNUP_DISABLED_MESSAGE };

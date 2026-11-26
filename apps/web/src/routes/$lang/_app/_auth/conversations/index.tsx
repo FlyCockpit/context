@@ -124,6 +124,7 @@ function ConversationsPage() {
         <div className="flex min-w-0 items-center gap-2 sm:w-80">
           <AsyncCombobox<PackageOption>
             className="min-h-[44px] min-w-0 flex-1"
+            label={t("dashboard:conversations.filters.packageLabel")}
             value={selectedOption}
             onSelect={(item) => void setPackageId(item.id)}
             onSearch={async (query, signal) => {

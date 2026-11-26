@@ -11,7 +11,7 @@ import { getSignupAvailability } from "@cockpit-context/auth/signup-availability
 import { ORPC_BATCH_MAX_SIZE } from "@cockpit-context/config/orpc-batch";
 import { THEME_INIT_SCRIPT } from "@cockpit-context/config/theme-init";
 import prisma from "@cockpit-context/db";
-import { ADMIN_EMAILS, env } from "@cockpit-context/env/server";
+import { ADMIN_EMAILS, env, FORCE_SSO } from "@cockpit-context/env/server";
 import { serve } from "@hono/node-server";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
@@ -602,6 +602,7 @@ if (env.NODE_ENV === "production") {
 try {
   await issueBootstrapTokenIfNeeded({
     adminEmailCount: ADMIN_EMAILS.size,
+    passwordSignupEnabled: !FORCE_SSO,
     // pagination:audited — bounded by findFirst (existence check)
     countUsers: async () => ((await prisma.user.findFirst({ select: { id: true } })) ? 1 : 0),
     log: (message) => console.log(message),

@@ -18,7 +18,16 @@ import { useUiPreferences } from "@/stores/ui-preferences";
  * BottomNav and its More sheet are the only navigation. The `_app` shell owns
  * safe areas, the header and the page scroller (`main`, a size container, so
  * the sidebar can stick at `100cqh`); pages own their own container.
+ *
+ * A full-height page (a conversation: its own transcript scroller above a
+ * composer) marks its root `data-fill-frame` and takes `min-h-0 flex-1`. The
+ * page column then becomes exactly the scroller's height (`100cqh`; the max
+ * also binds below `md`, where the column is a `flex-1` item of a column
+ * flexbox and its flex basis overrides `height`), so any
+ * banner the layout renders above the page (the admin 2FA nudge) comes out of
+ * the page's height instead of pushing its bottom (the composer) off-screen.
  */
+
 export function AppFrame({ lang, children }: { lang: string; children: ReactNode }) {
   const { t } = useTranslation(["nav"]);
   const { state } = useAuthSession();
@@ -97,7 +106,7 @@ export function AppFrame({ lang, children }: { lang: string; children: ReactNode
       <div
         id={MAIN_CONTENT_ID}
         tabIndex={-1}
-        className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col outline-none"
+        className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col outline-none has-[[data-fill-frame]]:h-[100cqh] has-[[data-fill-frame]]:max-h-[100cqh]"
       >
         {children}
       </div>

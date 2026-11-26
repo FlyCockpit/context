@@ -216,11 +216,12 @@
   "twoFactorNudge": {
     "title": "Two-factor authentication is not set up",
     "message": "Your admin account signs in with a password alone. Add an authenticator app as a second factor so a stolen password can't unlock this dashboard.",
-    "requiredTitle": "Two-factor authentication is required for your admin account",
+    "requiredTitle": "Two-factor authentication required {{deadline}}",
     "requiredMessage": "Add an authenticator app as a second factor {{deadline}}. After that, this dashboard stays locked until you finish enrolling.",
-    "blockedTitle": "Admin access is locked until you set up two-factor authentication",
+    "blockedTitle": "Admin access locked: set up two-factor authentication",
     "blockedMessage": "Your enrollment window has closed, so admin actions are being refused. Set up an authenticator app now to get this dashboard back.",
     "configurable": "An admin who has already enrolled can change this policy under Settings in the admin dashboard.",
+    "details": "Details",
     "cta": "Set up 2FA"
   },
   "users": {

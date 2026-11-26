@@ -151,7 +151,12 @@ function LoginPage() {
     >
       {adminSetup === "configure" || (adminSetup === "bootstrap" && !forceSso) ? (
         // No account exists, so there is nothing to sign in to yet.
-        <AdminSetupCard state={adminSetup} lang={lang} redirectTo={redirectTo} />
+        <AdminSetupCard
+          state={adminSetup}
+          lang={lang}
+          redirectTo={redirectTo}
+          forceSso={forceSso}
+        />
       ) : twoFactor.active ? (
         <AuthCard
           title={t("auth:twoFactor.title")}

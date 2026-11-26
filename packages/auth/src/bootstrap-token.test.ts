@@ -63,6 +63,7 @@ describe("issueBootstrapTokenIfNeeded (server start)", () => {
     const log = vi.fn();
     const issued = await issueBootstrapTokenIfNeeded({
       adminEmailCount: 1,
+      passwordSignupEnabled: true,
       countUsers: async () => 0,
       log,
     });
@@ -80,6 +81,7 @@ describe("issueBootstrapTokenIfNeeded (server start)", () => {
     for (let boot = 0; boot < 2; boot++) {
       await issueBootstrapTokenIfNeeded({
         adminEmailCount: 1,
+        passwordSignupEnabled: true,
         countUsers: async () => 0,
         log: (m) => tokens.push(/\[bootstrap\] {3}(\S+)/.exec(m)?.[1] ?? ""),
       });
@@ -93,7 +95,12 @@ describe("issueBootstrapTokenIfNeeded (server start)", () => {
     issueBootstrapToken();
     const log = vi.fn();
     await expect(
-      issueBootstrapTokenIfNeeded({ adminEmailCount: 1, countUsers: async () => 1, log }),
+      issueBootstrapTokenIfNeeded({
+        adminEmailCount: 1,
+        passwordSignupEnabled: true,
+        countUsers: async () => 1,
+        log,
+      }),
     ).resolves.toBe(false);
     expect(log).not.toHaveBeenCalled();
     expect(isBootstrapTokenActive()).toBe(false);
@@ -103,9 +110,34 @@ describe("issueBootstrapTokenIfNeeded (server start)", () => {
     const countUsers = vi.fn(async () => 0);
     const log = vi.fn();
     await expect(
-      issueBootstrapTokenIfNeeded({ adminEmailCount: 0, countUsers, log }),
+      issueBootstrapTokenIfNeeded({
+        adminEmailCount: 0,
+        passwordSignupEnabled: true,
+        countUsers,
+        log,
+      }),
     ).resolves.toBe(false);
     expect(countUsers).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
+  });
+
+  it("issues no unusable token under FORCE_SSO and logs how to create the administrator", async () => {
+    const log = vi.fn();
+    await expect(
+      issueBootstrapTokenIfNeeded({
+        adminEmailCount: 1,
+        passwordSignupEnabled: false,
+        countUsers: async () => 0,
+        log,
+      }),
+    ).resolves.toBe(false);
+    expect(isBootstrapTokenActive()).toBe(false);
+    expect(log).toHaveBeenCalledOnce();
+    const message = String(log.mock.calls[0]?.[0]);
+    expect(message).toContain("FORCE_SSO");
+    // The handoff must prove SSO reaches the administrator before forcing it.
+    expect(message).toMatch(/sign in once with SSO as that administrator/);
+    expect(message).toMatch(/Only then turn FORCE_SSO back on/);
+    expect(message).not.toMatch(/\[bootstrap\] {3}\S/);
   });
 });

@@ -98,7 +98,10 @@ export async function hasAnyUser(opts: { fresh?: boolean } = {}): Promise<boolea
 }
 
 export type SignupAvailability = {
-  /** Anyone may self-register. */
+  /**
+   * Anyone may self-register. Never before the first account exists: that one
+   * is always the bootstrap administrator (./user-creation-policy.ts).
+   */
   signupOpen: boolean;
   /** An ADMIN_EMAILS address with the boot-log token may create the first (admin) account. */
   adminBootstrapOpen: boolean;
@@ -121,7 +124,7 @@ export async function getSignupAvailability(): Promise<SignupAvailability> {
     tokenActive: isBootstrapTokenActive(),
   });
   return {
-    signupOpen,
+    signupOpen: signupOpen && usersExist,
     adminBootstrapOpen,
     adminSetup: resolveAdminSetupState({ adminExists, adminBootstrapOpen, usersExist }),
   };

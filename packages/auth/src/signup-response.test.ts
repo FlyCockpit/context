@@ -91,8 +91,27 @@ vi.mock("better-auth/adapters/prisma", async () => {
 
 const NEUTRAL = '{"token":null,"user":null}';
 
-async function loadAuth(opts: { emailConfigured: boolean }) {
+const SEED_ADMIN_EMAIL = "seed-admin@example.test";
+
+/**
+ * `firstAccount`: start with no account at all (the first-admin bootstrap).
+ * Otherwise the administrator already exists, as open sign-up requires
+ * (./user-creation-policy.ts admits only the bootstrap as the first account).
+ */
+async function loadAuth(opts: { emailConfigured: boolean; firstAccount?: boolean }) {
   for (const rows of Object.values(state.db)) rows.length = 0;
+  if (!opts.firstAccount) {
+    const now = new Date();
+    state.db.user?.push({
+      id: "seed-admin",
+      email: SEED_ADMIN_EMAIL,
+      name: "Admin",
+      emailVerified: true,
+      role: "admin",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
   state.emailConfigured = opts.emailConfigured;
   state.signupSetting = null;
   // A fresh module graph so `emailConfigured` (read at import) takes effect,
@@ -143,7 +162,11 @@ async function loadAuth(opts: { emailConfigured: boolean }) {
       settingReads: state.settingReads - reads,
     };
   };
-  const emails = () => (state.db.user ?? []).map((u) => u.email).sort();
+  const emails = () =>
+    (state.db.user ?? [])
+      .map((u) => u.email)
+      .filter((email) => email !== SEED_ADMIN_EMAIL)
+      .sort();
   // An admin closing sign-up (settings.update writes, then invalidates the
   // cache) while the next sign-up is already past its before hook.
   const closeSignupMidRequest = () => {
@@ -216,6 +239,7 @@ describe("sign-up response is the same for free and registered addresses", {
   it("lets only a real first-admin bootstrap answer 200 while sign-up is closed", async () => {
     const { signUp, bootstrapSignUp, closeSignup, issueBootstrapToken, emails } = await loadAuth({
       emailConfigured: true,
+      firstAccount: true,
     });
     closeSignup();
     const token = issueBootstrapToken();
@@ -246,6 +270,24 @@ describe("sign-up response is the same for free and registered addresses", {
     expect(fresh.status).toBe(200);
     expect(taken).toEqual(fresh);
     expect(emails()).toEqual(["fresh@example.test", "taken@example.test"]);
+  });
+
+  it("refuses a wrong-token first sign-up with open sign-up exactly like any other address", async () => {
+    const { signUp, bootstrapSignUp, issueBootstrapToken, emails } = await loadAuth({
+      emailConfigured: true,
+      firstAccount: true,
+    });
+    const token = issueBootstrapToken();
+    // The server marker sets no bootstrap mode for a wrong token, so the
+    // listed address arrives exactly like a stranger: same refusal.
+    const listed = await signUp("owner@example.test");
+    expect(listed.status).toBe(422);
+    expect(JSON.parse(listed.body)).toMatchObject({ code: "FAILED_TO_CREATE_USER" });
+    expect(await signUp("stranger@example.test")).toEqual(listed);
+    expect(emails()).toEqual([]);
+    // Nothing was created, so the bootstrap is still open.
+    expect((await bootstrapSignUp("owner@example.test", token)).status).toBe(200);
+    expect(state.db.user?.find((u) => u.email === "owner@example.test")?.role).toBe("admin");
   });
 
   it("leaves the no-SMTP sign-up alone: it signs the new account in", async () => {

@@ -38,6 +38,11 @@ import type { Context, Next } from "hono";
 //     timing is normalized too). The only divergence is a VALID new-admin
 //     signup succeeding — which needs the boot-log token, so guessing a
 //     listed address alone gets the same refusal as any other address.
+//
+// Falling through does NOT mean open signup can take the first account: while
+// no account exists the hook admits only the bootstrap this marker grants, so
+// a wrong token (listed address or not) is refused there, uniformly, instead
+// of creating a plain account that would close the bootstrap for good.
 export function adminBootstrapMarker(adminEmails: Set<string>) {
   return async function adminBootstrapMarkerMiddleware(c: Context, next: Next) {
     if (adminEmails.size === 0) return next();

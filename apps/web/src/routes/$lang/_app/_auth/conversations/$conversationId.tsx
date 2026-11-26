@@ -91,9 +91,11 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
       : null;
 
   return (
+    // Fills the frame below any layout banner (AppFrame `data-fill-frame`).
     <div
+      data-fill-frame=""
       data-pull-to-refresh="off"
-      className="mx-auto flex h-[100cqh] w-full max-w-4xl min-w-0 flex-col"
+      className="mx-auto flex min-h-0 w-full max-w-4xl min-w-0 flex-1 flex-col"
     >
       <div className="shrink-0 border-b px-4 pt-2 pb-3">
         <ConversationHeader
@@ -102,6 +104,8 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
           reconnecting={watch.status === "reconnecting"}
         />
       </div>
+      {/* The transcript fills this slot absolutely: below `md` the slot's
+          height comes from flexing, which a percentage height cannot use. */}
       <div className="relative min-h-0 flex-1">
         <section
           ref={scroll.containerRef}
@@ -110,7 +114,7 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
           aria-label={t("dashboard:conversation.transcript.label")}
           // The transcript scrolls on its own, so keyboard users must be able to focus it.
           tabIndex={0}
-          className="h-full min-w-0 overflow-y-auto overflow-x-clip overscroll-contain px-4 py-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [scrollbar-gutter:stable]"
+          className="absolute inset-0 min-w-0 overflow-y-auto overflow-x-clip overscroll-contain px-4 py-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [scrollbar-gutter:stable]"
         >
           {state.truncated ? (
             <p className="mb-4 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
@@ -243,7 +247,11 @@ function ConversationComposer({
 
 function ConversationSkeleton() {
   return (
-    <div className="mx-auto flex h-[100cqh] w-full max-w-4xl flex-col" aria-hidden="true">
+    <div
+      data-fill-frame=""
+      className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col"
+      aria-hidden="true"
+    >
       <div className="space-y-3 border-b px-4 py-4">
         <Skeleton className="h-5 w-32" />
         <Skeleton className="h-7 w-3/4" />

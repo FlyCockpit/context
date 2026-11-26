@@ -842,6 +842,7 @@
         "mcp": "MCP",
         "web": "Web"
       },
+      "packageLabel": "Filtrar por paquete",
       "package": "Todos los paquetes",
       "packageSearch": "Buscar paquetes…",
       "packageEmpty": "Ningún paquete coincide.",

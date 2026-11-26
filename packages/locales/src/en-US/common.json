@@ -2,7 +2,9 @@
   "home": {
     "title": "Cockpit Context",
     "description": "Let your AI coding agents ask how to use your dependencies. Cockpit Context answers by reading the real source code at the exact version you use.",
-    "signIn": "Sign in"
+    "signIn": "Sign in",
+    "setUp": "Set up this server",
+    "createAccount": "Create account"
   },
   "actions": {
     "back": "Back",

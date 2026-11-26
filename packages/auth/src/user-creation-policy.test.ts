@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveSignupOpen } from "./signup-policy";
 import {
   decideUserCreation,
+  FIRST_ACCOUNT_REQUIRES_BOOTSTRAP_MESSAGE,
   getAllowedUserCreationMode,
   runWithAllowedUserCreation,
   SIGNUP_DISABLED_MESSAGE,
@@ -64,7 +65,10 @@ describe("signup gate matrix (SMTP configured, email verification enabled)", () 
         creationMode: row.bootstrap ? "admin-bootstrap" : undefined,
         isAdminEmail: row.bootstrap,
         emailConfigured: true,
-        usersExist: false,
+        // The bootstrap rows are the first account; the others sign up once
+        // the administrator exists (before that only the bootstrap is
+        // admitted: "first account" below).
+        usersExist: !row.bootstrap,
         bootstrapTokenValid: row.bootstrap,
       });
       if (!row.allowed) {
@@ -93,21 +97,94 @@ describe("signup gate matrix (SMTP configured, email verification enabled)", () 
       expect(decision).toEqual({ allowed: false, reason: SIGNUP_DISABLED_MESSAGE });
     },
   );
+});
 
-  it.each([true, false])(
-    "refuses a listed address without a valid bootstrap token (SMTP=%s)",
-    (emailConfigured) => {
-      const decision = decideUserCreation({
-        signupOpen: false,
-        creationMode: "admin-bootstrap",
-        isAdminEmail: true,
-        emailConfigured,
-        usersExist: false,
-        bootstrapTokenValid: false,
-      });
-      expect(decision).toEqual({ allowed: false, reason: SIGNUP_DISABLED_MESSAGE });
+// CTX-01: a wrong token for the admin address used to fall through to open
+// signup and create a plain first account, closing the bootstrap for good.
+describe("first account", () => {
+  const refused = { allowed: false, reason: FIRST_ACCOUNT_REQUIRES_BOOTSTRAP_MESSAGE };
+  type Case = {
+    name: string;
+    creationMode: UserCreationMode | undefined;
+    isAdminEmail: boolean;
+    bootstrapTokenValid: boolean;
+  };
+  const cases: Case[] = [
+    // The server marker only sets the bootstrap mode for a listed address with
+    // the valid token, so a wrong token arrives here with no mode.
+    {
+      name: "listed address, wrong token",
+      creationMode: undefined,
+      isAdminEmail: true,
+      bootstrapTokenValid: false,
+    },
+    {
+      name: "unlisted address, no token",
+      creationMode: undefined,
+      isAdminEmail: false,
+      bootstrapTokenValid: false,
+    },
+    {
+      name: "unlisted address, valid token",
+      creationMode: "admin-bootstrap",
+      isAdminEmail: false,
+      bootstrapTokenValid: true,
+    },
+    {
+      name: "bootstrap mode with a stale token",
+      creationMode: "admin-bootstrap",
+      isAdminEmail: true,
+      bootstrapTokenValid: false,
+    },
+  ];
+
+  it.each(
+    cases.flatMap((c) =>
+      [true, false].flatMap((signupOpen) =>
+        [true, false].map((emailConfigured) => ({ ...c, signupOpen, emailConfigured })),
+      ),
+    ),
+  )(
+    "refuses $name with one message (signupOpen=$signupOpen, SMTP=$emailConfigured)",
+    ({ creationMode, isAdminEmail, bootstrapTokenValid, signupOpen, emailConfigured }) => {
+      expect(
+        decideUserCreation({
+          signupOpen,
+          creationMode,
+          isAdminEmail,
+          emailConfigured,
+          usersExist: false,
+          bootstrapTokenValid,
+        }),
+      ).toEqual(refused);
     },
   );
+
+  it("still admits the real bootstrap with open signup, as admin", () => {
+    expect(
+      decideUserCreation({
+        signupOpen: true,
+        creationMode: "admin-bootstrap",
+        isAdminEmail: true,
+        emailConfigured: true,
+        usersExist: false,
+        bootstrapTokenValid: true,
+      }),
+    ).toEqual({ allowed: true, role: "admin", forceEmailVerified: false });
+  });
+
+  it("lets open signup admit plain accounts once an account exists", () => {
+    expect(
+      decideUserCreation({
+        signupOpen: true,
+        creationMode: undefined,
+        isAdminEmail: true,
+        emailConfigured: true,
+        usersExist: true,
+        bootstrapTokenValid: false,
+      }),
+    ).toEqual({ allowed: true, forceEmailVerified: false });
+  });
 });
 
 describe("admin invites", () => {
@@ -200,7 +277,7 @@ describe("bootstrap marker is re-checked", () => {
         creationMode,
         isAdminEmail: false,
         emailConfigured: true,
-        usersExist: false,
+        usersExist: true,
         bootstrapTokenValid: true,
       });
       expect(decision).toEqual({ allowed: true, forceEmailVerified: false });

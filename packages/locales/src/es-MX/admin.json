@@ -216,11 +216,12 @@
   "twoFactorNudge": {
     "title": "La autenticación de dos factores no está configurada",
     "message": "Tu cuenta de administrador inicia sesión solo con una contraseña. Agrega una aplicación de autenticación como segundo factor para que una contraseña robada no alcance para abrir este panel de administración.",
-    "requiredTitle": "La autenticación de dos factores es obligatoria para tu cuenta de administrador",
+    "requiredTitle": "Autenticación de dos factores obligatoria {{deadline}}",
     "requiredMessage": "Agrega una aplicación de autenticación como segundo factor {{deadline}}. Después de eso, este panel queda bloqueado hasta que termines de configurarla.",
-    "blockedTitle": "El acceso de administrador está bloqueado hasta que configures la autenticación de dos factores",
+    "blockedTitle": "Acceso de administrador bloqueado: configura la autenticación de dos factores",
     "blockedMessage": "Tu plazo para configurarla terminó, así que las acciones de administrador se están rechazando. Configura una aplicación de autenticación ahora para recuperar este panel.",
     "configurable": "Un administrador que ya la tenga configurada puede cambiar esta política en Configuración, dentro del panel de administración.",
+    "details": "Detalles",
     "cta": "Configurar 2FA"
   },
   "users": {

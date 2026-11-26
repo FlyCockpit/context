@@ -137,6 +137,34 @@ describe("signup availability", () => {
     });
   });
 
+  it("keeps open sign-up closed until the first account (the administrator) exists", async () => {
+    envMock.ADMIN_EMAILS = new Set(["owner@example.com"]);
+    issueBootstrapToken();
+    await expect(getSignupAvailability()).resolves.toEqual({
+      signupOpen: false,
+      adminBootstrapOpen: true,
+      adminSetup: "bootstrap",
+    });
+
+    // No allowlist: nobody can sign up until ADMIN_EMAILS is set.
+    revokeBootstrapToken();
+    envMock.ADMIN_EMAILS = new Set();
+    invalidateSignupAvailabilityCache();
+    await expect(getSignupAvailability()).resolves.toEqual({
+      signupOpen: false,
+      adminBootstrapOpen: false,
+      adminSetup: "configure",
+    });
+
+    invalidateSignupAvailabilityCache();
+    db.user.findMany.mockResolvedValue([{ role: "admin" }]);
+    await expect(getSignupAvailability()).resolves.toEqual({
+      signupOpen: true,
+      adminBootstrapOpen: false,
+      adminSetup: null,
+    });
+  });
+
   it("caches the account-existence read except for fresh reads", async () => {
     await expect(hasAnyUser()).resolves.toBe(false);
     db.user.findFirst.mockResolvedValue({ id: "u1" });

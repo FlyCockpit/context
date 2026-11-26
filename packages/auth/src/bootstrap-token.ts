@@ -69,16 +69,33 @@ export function revokeBootstrapToken(): void {
 
 /**
  * Startup step: issue and print a token when the bootstrap is possible
- * (ADMIN_EMAILS set and no account yet). Returns whether one was issued.
+ * (ADMIN_EMAILS set, password sign-up available and no account yet). Returns
+ * whether one was issued.
+ *
+ * With FORCE_SSO password sign-up is off, so a token could never be used, and
+ * the first account must be the bootstrap administrator (SSO cannot create it:
+ * ./user-creation-policy.ts). Print the way out instead; without a token the
+ * setup state is `configure` and /login shows the same steps.
  */
 export async function issueBootstrapTokenIfNeeded(deps: {
   adminEmailCount: number;
+  passwordSignupEnabled: boolean;
   countUsers: () => Promise<number>;
   log: (message: string) => void;
 }): Promise<boolean> {
   revokeBootstrapToken();
   if (deps.adminEmailCount === 0) return false;
   if ((await deps.countUsers()) > 0) return false;
+  if (!deps.passwordSignupEnabled) {
+    deps.log(
+      [
+        "[bootstrap] No account exists yet, but FORCE_SSO=true turns password sign-up off, so the first administrator cannot be created.",
+        "[bootstrap] Restart with FORCE_SSO unset, sign up at /signup with an ADMIN_EMAILS address and the [bootstrap] token, and sign in once with SSO as that administrator (the identity provider must send the same, verified email, or the accounts do not link).",
+        "[bootstrap] Only then turn FORCE_SSO back on: it disables password sign-in, so an administrator SSO cannot reach is locked out.",
+      ].join("\n"),
+    );
+    return false;
+  }
   const token = issueBootstrapToken();
   deps.log(
     [

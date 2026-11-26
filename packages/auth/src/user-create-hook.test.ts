@@ -92,7 +92,8 @@ function bootstrapSignUp(auth: ReturnType<typeof buildAuth>["auth"], email: stri
 
 describe("sign-up without SMTP", () => {
   it("succeeds, is verified, and is signed in straight away", async () => {
-    const { auth, db } = buildAuth({ emailConfigured: false, signupOpen: true });
+    // Open signup applies once the administrator exists ("first account" below).
+    const { auth, db } = buildAuth({ emailConfigured: false, signupOpen: true, usersExist: true });
     const result = await signUp(auth, "new@example.com");
 
     expect(result.token).toEqual(expect.any(String));
@@ -187,6 +188,7 @@ describe("sign-up with SMTP", () => {
     const { auth, db, sendVerificationEmail } = buildAuth({
       emailConfigured: true,
       signupOpen: true,
+      usersExist: true,
     });
     const result = await signUp(auth, "new@example.com");
 
@@ -222,4 +224,36 @@ describe("sign-up with SMTP", () => {
     ).rejects.toMatchObject({ body: { code: "FAILED_TO_CREATE_USER" } });
     expect(db.user).toHaveLength(0);
   });
+});
+
+// CTX-01: with open signup, a wrong token for the admin address used to
+// create a plain first account ("Account created"), which closed the bootstrap
+// for good and left the server without an administrator.
+describe("first account with open signup", () => {
+  it.each([true, false])(
+    "refuses every non-bootstrap first signup and keeps the bootstrap open (SMTP=%s)",
+    async (emailConfigured) => {
+      const { auth, db } = buildAuth({ emailConfigured, signupOpen: true });
+      const token = issueBootstrapToken();
+      // The server marker sets no mode for a wrong token, whatever the address.
+      for (const email of [OWNER, "stranger@example.com"]) {
+        await expect(signUp(auth, email)).rejects.toMatchObject({
+          body: { code: "FAILED_TO_CREATE_USER" },
+        });
+      }
+      // A valid token on an unlisted address (a typo in the email) is refused too.
+      await expect(bootstrapSignUp(auth, "typo-owner@example.com", token)).rejects.toMatchObject({
+        body: { code: "FAILED_TO_CREATE_USER" },
+      });
+      expect(db.user).toHaveLength(0);
+
+      const admin = await bootstrapSignUp(auth, OWNER, token);
+      expect(admin.user).toMatchObject({ role: "admin" });
+
+      // Now that the administrator exists, open signup admits plain accounts.
+      const member = await signUp(auth, "member@example.com");
+      expect(member.user).toMatchObject({ role: "user" });
+      expect(db.user).toHaveLength(2);
+    },
+  );
 });

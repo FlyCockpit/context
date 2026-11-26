@@ -173,7 +173,12 @@ describe("appConfig", () => {
     });
   });
 
-  describe("signupOpen = SIGNUP_ENABLED AND the signupOpen setting", () => {
+  describe("signupOpen = SIGNUP_ENABLED AND the signupOpen setting (once an account exists)", () => {
+    beforeEach(() => {
+      db.user.findMany.mockResolvedValue([{ role: "admin" }]);
+      db.user.findFirst.mockResolvedValue({ id: "u1" });
+    });
+
     it.each([
       { env: false, setting: null, expected: false },
       { env: false, setting: "true", expected: false },
@@ -241,12 +246,13 @@ describe("appConfig", () => {
     });
   });
 
-  it("offers the bootstrap even while open signup is on (the first listed address becomes admin)", async () => {
+  it("offers only the bootstrap while open signup is on and no account exists (the first account is the admin)", async () => {
     adminEmailsMock.add("admin@example.com");
     issueBootstrapToken();
     expect(await appConfig()).toMatchObject({
-      signupOpen: true,
+      signupOpen: false,
       adminBootstrapSignupEnabled: true,
+      adminSetup: "bootstrap",
     });
   });
 });

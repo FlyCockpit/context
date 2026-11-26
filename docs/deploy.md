@@ -61,7 +61,15 @@ The first administrator is created through `/signup` with an `ADMIN_EMAILS` addr
 - While no account exists and `ADMIN_EMAILS` is set, every server start prints a fresh token to the boot log, on lines starting with `[bootstrap]` (for example `docker compose -p cockpit-context logs app | grep '\[bootstrap\]'`). The signup form asks for it.
 - The token is held in memory only and compared in constant time. A restart replaces it; the previous one stops working. It is never printed again once used.
 - The bootstrap closes for good as soon as **any** account exists, with or without SMTP. A guessed listed address without the token gets the same refusal as any other address. Later administrators are invited or promoted from Admin → Users.
-- If accounts exist but none is an administrator (for example an open-signup server where someone else signed up first), the bootstrap stays closed and the sign-in page says so. This release has no in-app recovery for that state: an administrator account has to be restored ([backup and restore](./backup-restore.md)), so keep `SIGNUP_ENABLED=false` until the administrator exists.
+- Until that first account exists, the bootstrap is the **only** way in, even with `SIGNUP_ENABLED=true`: every other sign-up (a wrong or old token, an address not in `ADMIN_EMAILS`, SSO) is refused and creates nothing, so you can correct the token or address and try again. Open sign-up and SSO sign-in start creating accounts once the administrator exists. `FORCE_SSO=true` turns password sign-up off, so create the administrator with `FORCE_SSO` unset, then, still with it unset and SSO configured, sign in once with SSO as that administrator. Better-Auth links the SSO identity to the password account only when the identity provider sends the same email marked verified. Turn `FORCE_SSO` on only after that sign-in works: it also turns password sign-in off, so an administrator whose SSO identity does not link would be locked out.
+- If accounts exist but none is an administrator (data from an older release, or an administrator removed from the database by hand), the bootstrap stays closed and the sign-in page says so. To recover, promote an existing account from the database (the address in lowercase; on Dokploy run the `psql … -c` part in the Postgres service's terminal):
+
+  ```sh
+  docker compose -p cockpit-context exec postgres psql -U cockpit_context -d cockpit_context \
+    -c "UPDATE \"user\" SET role = 'admin' WHERE email = 'you@example.com';"
+  ```
+
+  The app notices within a minute (or restart it). Sign in again with that account. It must enroll two-factor authentication; past its 24-hour grace the app opens on the enrollment screen. Restoring a backup that holds an administrator also works ([backup and restore](./backup-restore.md)).
 - With SMTP the new administrator still verifies the address by email; without SMTP the account is created verified.
 
 Treat the boot log as secret until the first signup is done. The token makes a reachable form safe to leave up briefly, but finishing signup privately before routing the public domain is still the most conservative path. One concrete private setup uses a temporary local HTTPS origin:
@@ -264,4 +272,4 @@ If `/ready` fails, inspect app logs for migration admission or missing productio
 
 For missing LSP tools, run `node scripts/check-runtime-tools.mjs --require-sandbox` inside the app container and inspect Admin → Settings. The image includes the helper and language servers, but host Landlock enforcement depends on the kernel. Unsupported protection disables LSP; retain required mode.
 
-For OAuth failures verify BETTER_AUTH_URL and the browser/client origin match, then check discovery/auth forwarding and proxy streaming. For a signup-closed first boot, set ADMIN_EMAILS and restart privately, then use the `[bootstrap]` token from the new boot log; do not open public signup as a workaround. A stale chunk uses the guarded recovery UI; a deployment should not add a second app replica to hide startup failure.
+For OAuth failures verify BETTER_AUTH_URL and the browser/client origin match, then check discovery/auth forwarding and proxy streaming. For a signup-closed first boot, set ADMIN_EMAILS and restart privately, then use the `[bootstrap]` token from the new boot log; opening public signup does not help, because the first account must be the bootstrap administrator. A stale chunk uses the guarded recovery UI; a deployment should not add a second app replica to hide startup failure.

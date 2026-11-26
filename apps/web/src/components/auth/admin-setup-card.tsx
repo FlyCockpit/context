@@ -14,11 +14,17 @@ export function AdminSetupCard({
   state,
   lang,
   redirectTo,
+  forceSso = false,
 }: {
   /** `appConfig.adminSetup`: non-null only while the server has no administrator. */
   state: "bootstrap" | "configure" | "locked";
   lang: string;
   redirectTo: string | undefined;
+  /**
+   * `appConfig.forceSso`: password sign-up is off, so the bootstrap needs a
+   * restart without FORCE_SSO (the server issues no token while it is on).
+   */
+  forceSso?: boolean;
 }) {
   const { t } = useTranslation(["auth"]);
   if (state === "bootstrap") {
@@ -46,7 +52,9 @@ export function AdminSetupCard({
       description={t(
         state === "locked"
           ? "auth:adminSetup.lockedDescription"
-          : "auth:adminSetup.configureDescription",
+          : forceSso
+            ? "auth:adminSetup.configureForceSsoDescription"
+            : "auth:adminSetup.configureDescription",
       )}
     >
       <p className="text-sm text-muted-foreground">{t("auth:adminSetup.operatorHint")}</p>

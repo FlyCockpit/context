@@ -21,6 +21,12 @@ interface AsyncComboboxProps<T> {
   onSelect: (item: T) => void;
   /** The currently selected item (controlled). */
   value?: T | null;
+  /**
+   * Accessible name of the trigger, e.g. "Filter by package". A combobox does
+   * not take its name from its content, so without it the trigger is
+   * unnamed; the selected value (or placeholder) is announced after it.
+   */
+  label?: string;
   /** Placeholder text shown when no value is selected. */
   placeholder?: string;
   /** Placeholder text shown in the search input. */
@@ -43,6 +49,7 @@ function AsyncCombobox<T>({
   onSearch,
   onSelect,
   value,
+  label,
   placeholder = "Select...",
   searchPlaceholder = "Search...",
   emptyText = "No results found.",
@@ -55,6 +62,8 @@ function AsyncCombobox<T>({
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const { results, isLoading } = useAsyncSearch(onSearch, query);
+  const labelId = React.useId();
+  const valueId = React.useId();
 
   // Dev-only contract guard. The "IDs travel, names display" rule means the
   // trigger should show a human-readable label, never the raw id. When a
@@ -81,12 +90,18 @@ function AsyncCombobox<T>({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
+      {label ? (
+        <span id={labelId} className="sr-only">
+          {label}
+        </span>
+      ) : null}
       <PopoverTrigger
         render={
           <Button
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            aria-labelledby={label ? `${labelId} ${valueId}` : undefined}
             disabled={disabled}
             className={cn(
               "w-full justify-between font-normal",
@@ -96,11 +111,15 @@ function AsyncCombobox<T>({
           />
         }
       >
-        <span className="truncate">{value ? getLabel(value) : placeholder}</span>
+        <span id={valueId} className="truncate">
+          {value ? getLabel(value) : placeholder}
+        </span>
         <ChevronsUpDownIcon className="ml-auto size-4 shrink-0 opacity-50" />
       </PopoverTrigger>
       <PopoverContent className="w-[var(--anchor-width)] p-0" align="start">
-        <Command shouldFilter={false}>
+        {/* cmdk names its input through its own label (aria-labelledby wins
+            over an aria-label on the input), so the label goes here. */}
+        <Command shouldFilter={false} label={searchPlaceholder}>
           <div data-slot="command-input-wrapper" className="border-b pb-0">
             <InputGroup className="h-11 border-none border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2! md:h-8">
               <CommandPrimitive.Input

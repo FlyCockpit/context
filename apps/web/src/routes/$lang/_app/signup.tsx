@@ -205,10 +205,15 @@ function SignUpForm({
   onPendingVerification: (email: string) => void;
 }) {
   const { t } = useTranslation(["auth"]);
+  // A refused first-admin signup is explained inline, next to the fields to
+  // fix: it is the operator's only way in, and nothing was created, so they
+  // retry here.
+  const [bootstrapRejected, setBootstrapRejected] = useState(false);
 
   const form = useForm({
     defaultValues: { name: "", email: "", password: "", bootstrapToken: "" },
     onSubmit: async ({ value }) => {
+      setBootstrapRejected(false);
       const bootstrapToken = value.bootstrapToken.trim();
       const result = await authClient.signUp.email(
         {
@@ -223,12 +228,14 @@ function SignUpForm({
       );
       if (result.error) {
         console.error("[signup.signUp]", result.error);
+        if (bootstrap && result.error.code === "FAILED_TO_CREATE_USER") {
+          setBootstrapRejected(true);
+          return;
+        }
         toast.error(
-          bootstrap && result.error.code === "FAILED_TO_CREATE_USER"
-            ? t("auth:signup.bootstrapRejected")
-            : result.error?.status === 409
-              ? t("auth:errors.accountAlreadyRegistered")
-              : friendly(result.error, t("auth:errors.couldNotCreateAccount")),
+          result.error?.status === 409
+            ? t("auth:errors.accountAlreadyRegistered")
+            : friendly(result.error, t("auth:errors.couldNotCreateAccount")),
         );
         // Better-Auth's database hook rejects signup-disabled attempts with a
         // plain Error, which the sign-up route converts to this generic 422 —
@@ -323,6 +330,15 @@ function SignUpForm({
             />
           )}
         </form.Field>
+      ) : null}
+
+      {bootstrapRejected ? (
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+        >
+          {t("auth:signup.bootstrapRejected")}
+        </p>
       ) : null}
 
       <form.Subscribe

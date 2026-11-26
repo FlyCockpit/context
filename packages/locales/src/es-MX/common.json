@@ -2,7 +2,9 @@
   "home": {
     "title": "Cockpit Context",
     "description": "Deja que tus agentes de programación con IA pregunten cómo usar tus dependencias. Cockpit Context responde leyendo el código fuente real en la versión exacta que usas.",
-    "signIn": "Iniciar sesión"
+    "signIn": "Iniciar sesión",
+    "setUp": "Configura este servidor",
+    "createAccount": "Crear cuenta"
   },
   "actions": {
     "back": "Atrás",
