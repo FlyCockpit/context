@@ -175,7 +175,6 @@ function CreateTokenForm({
             field={field}
             label={t("dashboard:access.tokens.form.name")}
             description={t("dashboard:access.tokens.form.nameHint")}
-            placeholder={t("dashboard:access.tokens.form.namePlaceholder")}
             inputMode="text"
             autoComplete="off"
             maxLength={NAME_MAX}
@@ -323,6 +322,90 @@ function TokenSetup({ secret, onDone }: { secret: string; onDone: () => void }) 
         <Skeleton className="h-11 w-full" />
       )}
     </SecretReveal>
+  );
+}
+
+/**
+ * Regenerate → Dialog: a confirmation, then the new token exactly once with
+ * the same setup snippets as Create. The server revokes the old row and
+ * creates its replacement (same name, flags and expiry) in one transaction,
+ * so the old secret stops working at once. Like Create, the dialog cannot
+ * close while the request runs and the response stays out of the cache.
+ */
+export function RegenerateTokenDialog({
+  token,
+  onOpenChange,
+}: {
+  token: { id: string; name: string } | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useTranslation(["dashboard", "common"]);
+  const queryClient = useQueryClient();
+  const [secret, setSecret] = useState<string | null>(null);
+  const regenerate = useMutation({
+    ...orpc.mcpTokens.regenerate.mutationOptions(),
+    gcTime: 0,
+    meta: { errorFallbackKey: "dashboard:access.tokens.regenerate.failed" },
+  });
+  const close = () => {
+    if (regenerate.isPending) return;
+    setSecret(null);
+    regenerate.reset();
+    onOpenChange(false);
+  };
+  const confirm = async () => {
+    if (!token) return;
+    const result = await regenerate.mutateAsync({ id: token.id }).catch(() => null);
+    // The list changed either way (a concurrent revoke is a refusal too).
+    void queryClient.invalidateQueries({ queryKey: orpc.mcpTokens.key() });
+    if (!result) return;
+    setSecret(result.secret);
+    regenerate.reset();
+  };
+
+  return (
+    <Dialog open={token !== null} onOpenChange={(next) => (next ? null : close())}>
+      <DialogContent closeLabel={t("common:actions.close")} className={DIALOG_CLASS}>
+        <DialogHeader>
+          <DialogTitle>
+            {secret
+              ? t("dashboard:access.tokens.regenerate.doneTitle")
+              : t("dashboard:access.tokens.regenerate.title", { name: token?.name ?? "" })}
+          </DialogTitle>
+          <DialogDescription>
+            {secret
+              ? t("dashboard:access.tokens.regenerate.doneDescription")
+              : t("dashboard:access.tokens.regenerate.description")}
+          </DialogDescription>
+        </DialogHeader>
+        {secret ? (
+          <TokenSetup secret={secret} onDone={close} />
+        ) : (
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="touch"
+              onClick={close}
+              disabled={regenerate.isPending}
+            >
+              {t("common:actions.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="touch"
+              onClick={() => void confirm()}
+              disabled={regenerate.isPending || token === null}
+            >
+              {regenerate.isPending
+                ? t("dashboard:access.tokens.regenerate.pending")
+                : t("dashboard:access.tokens.regenerate.submit")}
+            </Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -12,6 +12,7 @@ import {
   type ConversationDetail,
   type ConversationViewState,
   type MessagePart,
+  type TranscriptBlock,
   type WatchEvent,
 } from "@/lib/conversations";
 
@@ -41,6 +42,7 @@ function conversation(status: Status): ConversationDetail {
     requestedVersion: "5.1.0",
     requestedRef: null,
     commitSha: "a".repeat(40),
+    sourceUrl: null,
     resolvedFrom: "tag:v5.1.0",
     checkoutAvailable: true,
     origin: "web",
@@ -144,6 +146,7 @@ describe("TranscriptBlocks tool calls", () => {
         status: "stopped",
         stopReason: "aborted",
         answer: null,
+        sourceUrl: null,
       },
     ];
     for (const lng of ["en-US", "es-MX"]) {
@@ -152,5 +155,33 @@ describe("TranscriptBlocks tool calls", () => {
       expect(live).not.toContain(PULSE);
       expect(live).toContain(lng === "en-US" ? "Stopped." : "Detenida.");
     }
+  });
+});
+
+describe("TranscriptBlocks file citations", () => {
+  const sha = "b".repeat(40);
+  const answer: TranscriptBlock = {
+    kind: "answer",
+    key: "run-1:answer",
+    text: "Defined in `lib/router/index.js:12-30`; call `router.use()`.",
+  };
+  const renderAnswer = (sourceUrl: string | null) =>
+    renderToStaticMarkup(
+      <TranscriptBlocks blocks={[answer]} askedBy={null} sourceUrl={sourceUrl} commitSha={sha} />,
+    );
+
+  it("links a cited file to the public repository at the commit", () => {
+    const html = renderAnswer("https://github.com/expressjs/express.git");
+    expect(html).toContain(
+      `href="https://github.com/expressjs/express/blob/${sha}/lib/router/index.js#L12-L30"`,
+    );
+    expect(html).toContain("<code>router.use()</code>");
+    expect(html.match(/<a /g)).toHaveLength(1);
+  });
+
+  it("keeps citations as plain code for a source it cannot link", () => {
+    const html = renderAnswer("git@github.com:expressjs/express.git");
+    expect(html).toContain("<code>lib/router/index.js:12-30</code>");
+    expect(html).not.toContain("<a ");
   });
 });

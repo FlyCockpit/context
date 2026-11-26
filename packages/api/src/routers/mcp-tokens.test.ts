@@ -239,6 +239,117 @@ describe("mcpTokensRouter", () => {
     });
   });
 
+  describe("regenerate", () => {
+    const FUTURE = new Date(Date.now() + 30 * 86_400_000);
+
+    it("revokes the old row and mints a new secret with the same name, flags and expiry, in one Serializable transaction", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      db.mcpAgentToken.findFirst.mockResolvedValue(
+        tokenRow({ allowPropose: true, autoApprove: true, expiresAt: FUTURE }),
+      );
+      db.mcpAgentToken.updateMany.mockResolvedValue({ count: 1 });
+      db.mcpAgentToken.create.mockImplementation(async ({ data }: { data: object }) =>
+        tokenRow({ ...data, id: "tok-2" }),
+      );
+      const result = await client().regenerate({ id: "tok-1" });
+
+      expect(db.mcpAgentToken.findFirst.mock.calls[0]?.[0].where).toEqual({
+        AND: [{ id: "tok-1" }, { userId: "user-a" }],
+      });
+      const revoke = db.mcpAgentToken.updateMany.mock.calls[0]?.[0];
+      expect(revoke.where).toMatchObject({
+        id: "tok-1",
+        userId: "user-a",
+        revokedAt: null,
+        name: "laptop",
+        allowPropose: true,
+        autoApprove: true,
+      });
+      expect(revoke.data).toEqual({ revokedAt: expect.any(Date) });
+      expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: "Serializable",
+      });
+
+      const data = db.mcpAgentToken.create.mock.calls[0]?.[0].data;
+      expect(data).toMatchObject({
+        userId: "user-a",
+        name: "laptop",
+        allowPropose: true,
+        autoApprove: true,
+        expiresAt: FUTURE,
+      });
+      expect(result.secret).toMatch(/^cockpit_context_[A-Za-z0-9_-]{43}$/);
+      expect(data.lookupPrefix).toBe(mcpAgentTokenLookupPrefix(result.secret));
+      expect(data.lookupPrefix).not.toBe(tokenRow().lookupPrefix);
+      expect(data.secretDigest).toBe(mcpAgentTokenDigest(result.secret, SECRET));
+      expect(result.token).toMatchObject({ id: "tok-2", state: "active" });
+      expect(result.token).not.toHaveProperty("secretDigest");
+
+      // One audit line, naming both rows and never the secret or its prefix.
+      const audit = warn.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.startsWith("[audit]"));
+      expect(audit).toHaveLength(1);
+      expect(JSON.parse(audit[0]!.slice("[audit] ".length))).toMatchObject({
+        audit: "credential",
+        action: "mcpTokens.regenerate",
+        actorUserId: "user-a",
+        details: { revokedTokenId: "tok-1", newTokenId: "tok-2" },
+      });
+      expect(audit[0]).not.toContain(result.secret);
+      expect(audit[0]).not.toContain(data.lookupPrefix);
+      warn.mockRestore();
+    });
+
+    it("creates nothing when the old row changed or was revoked concurrently", async () => {
+      db.mcpAgentToken.findFirst.mockResolvedValue(tokenRow());
+      db.mcpAgentToken.updateMany.mockResolvedValue({ count: 0 });
+      await expect(client().regenerate({ id: "tok-1" })).rejects.toSatisfy(
+        expectReason("CONFLICT", "TOKEN_CHANGED"),
+      );
+      expect(db.mcpAgentToken.create).not.toHaveBeenCalled();
+    });
+
+    it("retries a serialization failure", async () => {
+      const serialization = Object.assign(new Error("could not serialize access"), {
+        code: "P2034",
+      });
+      db.mcpAgentToken.findFirst.mockResolvedValue(tokenRow());
+      db.mcpAgentToken.updateMany.mockResolvedValue({ count: 1 });
+      db.mcpAgentToken.create
+        .mockRejectedValueOnce(serialization)
+        .mockImplementationOnce(async ({ data }: { data: object }) => tokenRow(data));
+      await expect(client().regenerate({ id: "tok-1" })).resolves.toMatchObject({
+        secret: expect.stringMatching(/^cockpit_context_/),
+      });
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+      db.mcpAgentToken.create.mockReset();
+    });
+
+    it("is NOT_FOUND for another user's token and refuses revoked or expired ones", async () => {
+      db.mcpAgentToken.findFirst.mockResolvedValue(null);
+      await expect(
+        client(sessionContext({ id: "user-b" })).regenerate({ id: "tok-1" }),
+      ).rejects.toSatisfy(expectReason("NOT_FOUND"));
+      db.mcpAgentToken.findFirst.mockResolvedValue(tokenRow({ revokedAt: NOW }));
+      await expect(client().regenerate({ id: "tok-1" })).rejects.toSatisfy(
+        expectReason("CONFLICT", "TOKEN_REVOKED"),
+      );
+      db.mcpAgentToken.findFirst.mockResolvedValue(tokenRow({ expiresAt: new Date("2020-01-01") }));
+      await expect(client().regenerate({ id: "tok-1" })).rejects.toSatisfy(
+        expectReason("CONFLICT", "TOKEN_EXPIRED"),
+      );
+      expect(db.mcpAgentToken.updateMany).not.toHaveBeenCalled();
+      expect(db.mcpAgentToken.create).not.toHaveBeenCalled();
+    });
+
+    it("requires a session", async () => {
+      await expect(client(anonymousContext).regenerate({ id: "tok-1" })).rejects.toSatisfy(
+        expectReason("UNAUTHORIZED"),
+      );
+    });
+  });
+
   describe("revoke", () => {
     it("revokes the caller's token", async () => {
       db.mcpAgentToken.findFirst.mockResolvedValue({ id: "tok-1" });

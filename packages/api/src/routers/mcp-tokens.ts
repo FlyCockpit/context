@@ -5,6 +5,7 @@ import { env } from "@cockpit-context/env/server";
 import { z } from "zod";
 
 import { protectedProcedure } from "../index";
+import { recordCredentialAudit } from "../lib/admin-audit";
 import { reasonError } from "../lib/domain-errors";
 import { findOwnedOrThrow } from "../lib/ownership";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
@@ -37,6 +38,27 @@ function isSerializationFailure(error: unknown): boolean {
   return (
     typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2034"
   );
+}
+
+/**
+ * Run a Serializable transaction, again when Postgres aborts it for a
+ * concurrent one (P2034). Nothing was written, so a re-run re-reads and the
+ * limits it checks still hold; after a few losses say CONFLICT rather than a 500.
+ */
+async function withSerializableRetry<T>(
+  run: () => Promise<T>,
+  conflictMessage: string,
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      if (!isSerializationFailure(error)) throw error;
+      if (attempt >= CREATE_ATTEMPTS) {
+        throw reasonError("CONFLICT", "CREATE_CONFLICT", conflictMessage);
+      }
+    }
+  }
 }
 
 /**
@@ -159,25 +181,10 @@ export const mcpTokensRouter = {
           },
           { isolationLevel: "Serializable" },
         );
-      // Two creates by the same user at once: Postgres aborts one with a
-      // serialization failure (P2034). Nothing was written, so run it again
-      // (it re-counts, so the limit holds); after a few losses say CONFLICT
-      // rather than a 500.
-      let row: Awaited<ReturnType<typeof insert>> | undefined;
-      for (let attempt = 1; row === undefined; attempt += 1) {
-        try {
-          row = await insert();
-        } catch (error) {
-          if (!isSerializationFailure(error)) throw error;
-          if (attempt >= CREATE_ATTEMPTS) {
-            throw reasonError(
-              "CONFLICT",
-              "CREATE_CONFLICT",
-              "Another token was being created at the same time. Try again.",
-            );
-          }
-        }
-      }
+      const row = await withSerializableRetry(
+        insert,
+        "Another token was being created at the same time. Try again.",
+      );
       return { token: serializeToken(row, now), secret: minted.token };
     }),
 
@@ -235,6 +242,92 @@ export const mcpTokensRouter = {
         notFound: "Token not found.",
       });
       return serializeToken(row);
+    }),
+
+  /**
+   * Regenerate (rotate) a token: in one Serializable transaction the old row is
+   * revoked and a new row with a new secret, the same name, flags and expiry
+   * is created. The `/mcp` resolver reads the row on every request (no cache),
+   * so the old secret is refused from the next request on. The old row stays,
+   * revoked, as history. Counts against the create budget (it mints a
+   * secret); an expired or revoked token cannot be regenerated (create a new one).
+   */
+  regenerate: protectedProcedure
+    .input(z.object({ id: entityId }))
+    .handler(async ({ input, context }) => {
+      const userId = context.session.user.id;
+      const current = await findOwnedOrThrow({
+        find: (args) => prisma.mcpAgentToken.findFirst(args),
+        args: { where: { id: input.id }, select: mcpTokenSelect },
+        owner: { field: "userId", id: userId },
+        notFound: "Token not found.",
+      });
+      const now = new Date();
+      const state = tokenState(current, now);
+      if (state === "revoked") {
+        throw reasonError("CONFLICT", "TOKEN_REVOKED", "That token was revoked.");
+      }
+      if (state === "expired") {
+        throw reasonError(
+          "CONFLICT",
+          "TOKEN_EXPIRED",
+          "That token has expired. Create a new token instead.",
+        );
+      }
+      await consumeCreateBudget(`user:${userId}`);
+      const minted = mintMcpAgentToken(env.BETTER_AUTH_SECRET);
+      const rotate = () =>
+        prisma.$transaction(
+          async (tx) => {
+            // Revoke only the live row exactly as it was read (name and flags are
+            // copied from that read); a concurrent revoke, rotation, rename or
+            // flag change makes this a no-op and the rotation stops.
+            const { count } = await tx.mcpAgentToken.updateMany({
+              where: {
+                id: current.id,
+                userId,
+                revokedAt: null,
+                name: current.name,
+                allowPropose: current.allowPropose,
+                autoApprove: current.autoApprove,
+                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+              },
+              data: { revokedAt: now },
+            });
+            if (count !== 1) {
+              throw reasonError(
+                "CONFLICT",
+                "TOKEN_CHANGED",
+                "That token changed or was revoked. Reload and try again.",
+              );
+            }
+            return tx.mcpAgentToken.create({
+              data: {
+                userId,
+                name: current.name,
+                lookupPrefix: minted.lookupPrefix,
+                secretDigest: minted.secretDigest,
+                expiresAt: current.expiresAt,
+                ...flags(current.allowPropose, current.autoApprove),
+              },
+              select: mcpTokenSelect,
+            });
+          },
+          { isolationLevel: "Serializable" },
+        );
+      const row = await withSerializableRetry(
+        rotate,
+        "That token was being changed at the same time. Try again.",
+      );
+      recordCredentialAudit(
+        {
+          action: "mcpTokens.regenerate",
+          actorUserId: userId,
+          details: { revokedTokenId: current.id, newTokenId: row.id },
+        },
+        now,
+      );
+      return { token: serializeToken(row, now), secret: minted.token };
     }),
 
   /** Revoke a token. Idempotent; the `/mcp` resolver refuses revoked tokens. */

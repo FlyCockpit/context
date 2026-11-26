@@ -93,7 +93,7 @@ describe("SecurityPolicyCard", () => {
     expect(note?.[1]).toContain("bg-state-info-bg");
     expect(note?.[1]).not.toContain("destructive");
     expect(note?.[0]).toContain(
-      `<p class="flex-1">${enAdmin.settings.force2faAdminPrerequisite}</p>`,
+      `<p class="max-w-prose flex-1 text-pretty">${enAdmin.settings.force2faAdminPrerequisite}</p>`,
     );
     expect(note?.[0]).toContain(enAdmin.settings.force2faAdminPrerequisite);
     expect(note?.[0]).toMatch(

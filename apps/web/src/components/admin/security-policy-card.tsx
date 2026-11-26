@@ -61,7 +61,9 @@ export function SecurityPolicyCard({
             className="flex flex-col gap-3 rounded-lg border border-state-info/40 bg-state-info-bg p-4 text-sm sm:flex-row sm:items-start"
           >
             <Info className="mt-0.5 size-4 shrink-0 text-state-info" aria-hidden="true" />
-            <p className="flex-1">{t("settings.force2faAdminPrerequisite")}</p>
+            <p className="max-w-prose flex-1 text-pretty">
+              {t("settings.force2faAdminPrerequisite")}
+            </p>
             <Link
               to="/$lang/settings/security"
               params={{ lang }}

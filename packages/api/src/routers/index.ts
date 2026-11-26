@@ -6,6 +6,7 @@ import type { RouterClient } from "@orpc/server";
 import { publicProcedure } from "../index";
 import { adminBackupsRouter } from "./admin-backups";
 import { adminJobsRouter } from "./admin-jobs";
+import { adminOverviewRouter } from "./admin-overview";
 import { adminStorageRouter } from "./admin-storage";
 import { authRouter } from "./auth";
 import { conversationsRouter } from "./conversations";
@@ -71,6 +72,7 @@ export const appRouter = {
   }),
   adminBackups: adminBackupsRouter,
   adminJobs: adminJobsRouter,
+  adminOverview: adminOverviewRouter,
   adminStorage: adminStorageRouter,
   auth: authRouter,
   conversations: conversationsRouter,

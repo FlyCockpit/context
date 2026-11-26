@@ -122,7 +122,13 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
               {t("dashboard:conversation.truncated")}
             </p>
           ) : null}
-          <TranscriptBlocks blocks={blocks} askedBy={askedBy} retry={retry} />
+          <TranscriptBlocks
+            blocks={blocks}
+            askedBy={askedBy}
+            retry={retry}
+            sourceUrl={state.conversation.sourceUrl}
+            commitSha={state.conversation.commitSha}
+          />
         </section>
         {scroll.following ? null : (
           <button

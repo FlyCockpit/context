@@ -35,7 +35,21 @@
       "storage": "Espacio en disco de clones y checkouts, frente al límite.",
       "jobs": "Tareas en segundo plano, con reintento para las fallidas.",
       "settings": "Registro, política de dos factores y configuración del servidor."
-    }
+    },
+    "stats": {
+      "loadFailed": "No se pudieron cargar las cifras del resumen.",
+      "activeUsers_one": "usuario activo",
+      "activeUsers_other": "usuarios activos",
+      "archivedUsers_one": "{{formatted}} archivado",
+      "archivedUsers_other": "{{formatted}} archivados",
+      "storageOfCap": "usados de {{cap}}",
+      "failedJobs_one": "tarea fallida",
+      "failedJobs_other": "tareas fallidas",
+      "signup": "Registro",
+      "signupOpen": "Abierto",
+      "signupClosed": "Cerrado"
+    },
+    "review": "Revisar"
   },
   "seedPage": {
     "back": "Volver a admin",
@@ -265,7 +279,6 @@
     "inviteDescription": "Crea la cuenta y envía al nuevo usuario un enlace de un solo uso para que elija su contraseña. Si el correo no está configurado, recibes el enlace para compartirlo con él. Nadie, ni siquiera tú, ve una contraseña.",
     "nameLabel": "Nombre",
     "emailLabel": "Correo",
-    "emailPlaceholder": "usuario@ejemplo.com",
     "roleLabel": "Rol",
     "roleUser": "Usuario",
     "roleAdmin": "Administrador",

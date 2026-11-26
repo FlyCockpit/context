@@ -154,7 +154,6 @@ export function PackageForm({
             field={field}
             label={t("dashboard:packages.form.subdirectory")}
             description={t("dashboard:packages.form.subdirectoryHint")}
-            placeholder={t("dashboard:packages.form.placeholders.subdirectory")}
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
@@ -168,7 +167,6 @@ export function PackageForm({
             field={field}
             label={t("dashboard:packages.form.tagPattern")}
             description={t("dashboard:packages.form.tagPatternHint")}
-            placeholder={t("dashboard:packages.form.placeholders.tagPattern")}
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
@@ -182,7 +180,6 @@ export function PackageForm({
             field={field}
             label={t("dashboard:packages.form.defaultRef")}
             description={t("dashboard:packages.form.defaultRefHint")}
-            placeholder={t("dashboard:packages.form.placeholders.defaultRef")}
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
@@ -243,7 +240,12 @@ export function PackageForm({
                   <TextField
                     field={field}
                     label={t("dashboard:packages.form.name")}
-                    placeholder={t(`dashboard:packages.form.namePlaceholders.${ecosystem}`)}
+                    description={
+                      // Git packages get their naming rule from the lookup hint below.
+                      hasRegistry(ecosystem)
+                        ? t(`dashboard:packages.form.nameExamples.${ecosystem}`)
+                        : undefined
+                    }
                     inputMode="url"
                     autoComplete="off"
                     autoCapitalize="none"
@@ -282,7 +284,6 @@ export function PackageForm({
                 field={field}
                 label={t("dashboard:packages.form.gitUrl")}
                 description={t("dashboard:packages.form.gitUrlHint")}
-                placeholder={t("dashboard:packages.form.placeholders.gitUrl")}
                 inputMode="url"
                 autoComplete="off"
                 spellCheck={false}

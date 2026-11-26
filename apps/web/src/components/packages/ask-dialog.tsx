@@ -159,7 +159,7 @@ function AskForm({
           <TextareaField
             field={field}
             label={t("dashboard:ask.question")}
-            placeholder={t("dashboard:ask.questionPlaceholder")}
+            description={t("dashboard:ask.questionHint")}
             autoComplete="off"
             rows={5}
             maxLength={MAX_QUESTION}
@@ -201,11 +201,6 @@ function AskForm({
                 }
                 description={
                   target === "version" ? t("dashboard:ask.versionHint") : t("dashboard:ask.refHint")
-                }
-                placeholder={
-                  target === "version"
-                    ? t("dashboard:ask.versionPlaceholder")
-                    : t("dashboard:ask.refPlaceholder")
                 }
                 inputMode="url"
                 autoComplete="off"

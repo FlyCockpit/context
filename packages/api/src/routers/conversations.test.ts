@@ -250,9 +250,96 @@ describe("conversationsRouter", () => {
       });
       expect(result.next).toBeNull();
     });
+
+    it("searches titles case-insensitively, trimmed, alongside the other filters", async () => {
+      db.conversation.findMany
+        .mockResolvedValueOnce([conversationRow("c-live", "RUNNING")])
+        .mockResolvedValueOnce([]);
+      await client().list({ limit: 2, search: "  Router  ", packageId: "p-1", origin: "mcp" });
+      const expectedBase = {
+        ownerId: "user-a",
+        packageId: "p-1",
+        origin: "MCP",
+        title: { contains: "Router", mode: "insensitive" },
+      };
+      const [ongoing, finished] = db.conversation.findMany.mock.calls.map((call) => call[0]);
+      // Both segments carry the search, so the keyset never crosses into unmatched rows.
+      expect(ongoing.where.AND[0].AND[0]).toEqual(expectedBase);
+      expect(finished.where.AND[0].AND[0]).toEqual(expectedBase);
+    });
+
+    it("applies the search to the finished-segment probe too", async () => {
+      db.conversation.findMany.mockResolvedValueOnce([conversationRow("c-1", "RUNNING")]);
+      db.conversation.findFirst.mockResolvedValueOnce(null);
+      const result = await client().list({ limit: 1, search: "router" });
+      expect(db.conversation.findFirst.mock.calls[0]?.[0].where.AND[0]).toEqual({
+        ownerId: "user-a",
+        title: { contains: "router", mode: "insensitive" },
+      });
+      expect(result.next).toBeNull();
+    });
+
+    it("treats a blank search as no filter", async () => {
+      db.conversation.findMany.mockResolvedValueOnce([conversationRow("c-old")]);
+      await client().list({ segment: "finished", search: "   " });
+      expect(db.conversation.findMany.mock.calls[0]?.[0].where.AND[0].AND[0]).toEqual({
+        ownerId: "user-a",
+      });
+    });
+
+    it("rejects a search longer than 200 characters", async () => {
+      await expect(client().list({ search: "x".repeat(201) })).rejects.toSatisfy(
+        expectReason("BAD_REQUEST"),
+      );
+      expect(db.conversation.findMany).not.toHaveBeenCalled();
+      // The bound applies after trimming: padding around 200 characters is fine.
+      db.conversation.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      await client().list({ search: ` ${"x".repeat(200)} ` });
+      expect(db.conversation.findMany).toHaveBeenCalled();
+    });
   });
 
   describe("get", () => {
+    it("returns the commit's https source: the checkout's public repository, else the package URL", async () => {
+      db.agentRun.findMany.mockResolvedValue([]);
+      db.runTurn.findMany.mockResolvedValue([]);
+      const source = async (overrides: Record<string, unknown>) => {
+        db.conversation.findFirst.mockResolvedValueOnce(
+          conversationRow("c-1", "COMPLETED", overrides),
+        );
+        return (await client().get({ id: "c-1" })).sourceUrl;
+      };
+      expect(
+        await source({
+          Checkout: {
+            Repository: { remoteUrl: "https://github.com/psf/requests", visibility: "PUBLIC" },
+          },
+        }),
+      ).toBe("https://github.com/psf/requests");
+      // No checkout (unresolved or pruned): no source, whatever the package says now.
+      expect(await source({ Checkout: null })).toBeNull();
+      // A private clone never links, even if its URL were https.
+      expect(
+        await source({
+          Checkout: {
+            Repository: { remoteUrl: "https://github.com/me/private", visibility: "PRIVATE" },
+          },
+        }),
+      ).toBeNull();
+      expect(
+        await source({
+          Checkout: {
+            Repository: { remoteUrl: "git@github.com:me/private.git", visibility: "PRIVATE" },
+          },
+        }),
+      ).toBeNull();
+      const select = db.conversation.findFirst.mock.calls[0]?.[0].select;
+      expect(select.Checkout).toEqual({
+        select: { Repository: { select: { remoteUrl: true, visibility: true } } },
+      });
+      expect(select).not.toHaveProperty("Package");
+    });
+
     it("shows a run's failure allowlisted, never its server-side error text", async () => {
       db.conversation.findFirst.mockResolvedValue(
         conversationRow("c-2", "FAILED", { commitSha: null, resolvedFrom: null, checkoutId: null }),
@@ -465,7 +552,7 @@ describe("conversationsRouter", () => {
       const pending = iterator.next();
       bus.publish("c-1", live);
       const { error: _error, ...relayed } = live;
-      expect((await pending).value).toEqual(relayed);
+      expect((await pending).value).toEqual({ ...relayed, sourceUrl: null });
 
       await iterator.return?.();
       expect(bus.listenerCount("c-1")).toBe(0);
@@ -494,8 +581,72 @@ describe("conversationsRouter", () => {
         status: "failed",
         stopReason: "checkout-failed",
         answer: null,
+        sourceUrl: null,
       });
       expect(relayed).not.toHaveProperty("error");
+
+      await iterator.return?.();
+    });
+
+    it("adds the owner-scoped public source to conversation.resolved", async () => {
+      db.conversation.findFirst
+        .mockResolvedValueOnce({ id: "c-1" })
+        .mockResolvedValueOnce(conversationRow("c-1", "RUNNING", { Checkout: null }))
+        .mockResolvedValueOnce({
+          Checkout: {
+            Repository: { remoteUrl: "https://github.com/psf/requests", visibility: "PUBLIC" },
+          },
+        })
+        .mockResolvedValueOnce({
+          Checkout: {
+            Repository: { remoteUrl: "git@github.com:me/private.git", visibility: "PRIVATE" },
+          },
+        });
+      const iterator = await client().watch({ id: "c-1" });
+      expect((await iterator.next()).value).toMatchObject({
+        type: "snapshot",
+        conversation: { sourceUrl: null },
+      });
+      const resolved = {
+        type: "conversation.resolved" as const,
+        runId: "run-c-1",
+        commitSha: "a".repeat(40),
+        resolvedFrom: "tag:v2.32.3",
+        stale: false,
+      };
+      let pending = iterator.next();
+      bus.publish("c-1", resolved);
+      expect((await pending).value).toEqual({
+        ...resolved,
+        sourceUrl: "https://github.com/psf/requests",
+      });
+      expect(db.conversation.findFirst.mock.calls[2]?.[0].where).toEqual({
+        id: "c-1",
+        ownerId: "user-a",
+      });
+      pending = iterator.next();
+      bus.publish("c-1", resolved);
+      expect((await pending).value).toEqual({ ...resolved, sourceUrl: null });
+
+      // A finished run re-reads it (a follow-up may have re-created a pruned checkout).
+      db.conversation.findFirst.mockResolvedValueOnce({
+        Checkout: {
+          Repository: { remoteUrl: "https://github.com/psf/requests", visibility: "PUBLIC" },
+        },
+      });
+      pending = iterator.next();
+      bus.publish("c-1", {
+        type: "run.finished",
+        runId: "run-c-2",
+        status: "completed",
+        stopReason: "completed",
+        answer: "done",
+        error: null,
+      });
+      expect((await pending).value).toMatchObject({
+        type: "run.finished",
+        sourceUrl: "https://github.com/psf/requests",
+      });
 
       await iterator.return?.();
     });

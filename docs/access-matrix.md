@@ -58,11 +58,12 @@ Public HTTPS repository clones, checkouts and generated overviews can be shared 
 | List own MCP API tokens | implemented | none | own | own | `mcpTokens.list` |  |
 | Create an MCP API token | implemented | none | own | own | `mcpTokens.create` | Plaintext shown once; only a digest is stored. |
 | Change an MCP token's flags (propose, auto-approve) | implemented | none | own | own | `mcpTokens.update` |  |
+| Regenerate an MCP API token (new secret, same name, flags and expiry; the old one is revoked at once) | implemented | none | own | own | `mcpTokens.regenerate` | Plaintext shown once; audited in the server log. |
 | Revoke an MCP API token | implemented | none | own | own | `mcpTokens.revoke` |  |
 | List own OAuth MCP connections | implemented | none | own | own | `mcpConnections.list` |  |
 | Change an OAuth connection's flags | implemented | none | own | own | `mcpConnections.update` |  |
 | Revoke an OAuth MCP connection | implemented | none | own | own | `mcpConnections.revoke` |  |
-| List own conversations (ongoing first) | implemented | none | own | own | `conversations.list` |  |
+| List own conversations (ongoing first; filter by package, origin, title search) | implemented | none | own | own | `conversations.list` |  |
 | View a conversation with its runs and turns | implemented | none | own | own | `conversations.get` |  |
 | Watch a run live | implemented | none | own | own | `conversations.watch` |  |
 | Watch own conversations' activity (live lists) | implemented | none | own | own | `conversations.activity` |  |
@@ -84,6 +85,7 @@ Public HTTPS repository clones, checkouts and generated overviews can be shared 
 | Sign in as another user, set their password or email directly, list their sessions | implemented | none | none | none | — |  |
 | Change site settings (signup toggle) | implemented | none | none | full | `settings.update` |  |
 | View the effective server configuration (COCKPIT_CONTEXT_* limits, model names, OpenRouter/SMTP/backups configured, conversation retention, operator identity, LSP tools and their sandbox: mechanism, Landlock ABI, active protections) | implemented | none | none | full | `settings.runtimeConfig` | Effective configuration; secret presence is reported as booleans. |
+| View the admin overview figures (active and archived user counts, storage used, failed job count, sign-up open) | implemented | none | none | full | `adminOverview.stats` | Counts and totals only; no rows. |
 | View backup freshness on the admin dashboard | implemented | none | none | full | `adminBackups.status` | Off-site freshness monitoring, independent of backup scheduling. |
 | View storage across all repositories | implemented | none | none | full | `adminStorage.list` |  |
 | Delete any clone or checkout | implemented | none | none | full | `adminStorage.delete` |  |

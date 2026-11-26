@@ -202,7 +202,7 @@ function TextField({
         aria-describedby={describedBy}
       />
       {description ? (
-        <div id={descriptionId} className="text-xs text-muted-foreground">
+        <div id={descriptionId} className="text-xs text-pretty text-muted-foreground">
           {description}
         </div>
       ) : null}
@@ -286,7 +286,7 @@ function TextareaField({
         aria-describedby={describedBy}
       />
       {description ? (
-        <div id={descriptionId} className="text-xs text-muted-foreground">
+        <div id={descriptionId} className="text-xs text-pretty text-muted-foreground">
           {description}
         </div>
       ) : null}
@@ -416,7 +416,7 @@ function SelectField<TValue extends string>({
         </SelectContent>
       </Select>
       {description ? (
-        <div id={descriptionId} className="text-xs text-muted-foreground">
+        <div id={descriptionId} className="text-xs text-pretty text-muted-foreground">
           {description}
         </div>
       ) : null}

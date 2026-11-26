@@ -1,7 +1,9 @@
 import { AsyncCombobox } from "@cockpit-context/ui/components/async-combobox";
 import { Button } from "@cockpit-context/ui/components/button";
 import { Card, CardContent } from "@cockpit-context/ui/components/card";
+import { Input } from "@cockpit-context/ui/components/input";
 import { Skeleton } from "@cockpit-context/ui/components/skeleton";
+import { useDebounce } from "@cockpit-context/ui/hooks/use-async-search";
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { MessagesSquare, X } from "lucide-react";
@@ -29,6 +31,8 @@ export const Route = createFileRoute("/$lang/_app/_auth/conversations/")({
 
 const PAGE_LIMIT = 25;
 const ORIGINS = ["all", "mcp", "web"] as const;
+/** The server's bound on `conversations.list` search (packages/api/src/routers/conversations.ts). */
+const SEARCH_MAX_LENGTH = 200;
 
 /** The instance-wide retention period (COCKPIT_CONTEXT_CONVERSATION_RETENTION_DAYS). */
 function RetentionNote() {
@@ -57,8 +61,8 @@ type PackageOption = { id: string; identifier: string };
 
 /**
  * Conversation history (docs/product.md): every
- * conversation, live ones first, cursor-paginated, filterable by package
- * and origin (both in the URL). Rows update live.
+ * conversation, live ones first, cursor-paginated, searchable by question
+ * and filterable by package and origin (all in the URL). Rows update live.
  */
 function ConversationsPage() {
   const { lang } = Route.useParams();
@@ -68,6 +72,8 @@ function ConversationsPage() {
     parseAsStringLiteral(ORIGINS).withDefault("all"),
   );
   const [packageId, setPackageId] = useQueryState("package", parseAsString);
+  const [search, setSearch] = useQueryState("q", parseAsString.withDefault(""));
+  const debouncedSearch = useDebounce(search.trim(), 300);
   useRunActivity();
 
   const list = useInfiniteQuery(
@@ -78,6 +84,7 @@ function ConversationsPage() {
         cursor: page.cursor,
         packageId: packageId ?? undefined,
         origin: origin === "all" ? undefined : origin,
+        search: debouncedSearch || undefined,
       }),
       initialPageParam: { segment: "ongoing", cursor: null } as PageParam,
       getNextPageParam: (lastPage) => lastPage.next ?? undefined,
@@ -100,6 +107,7 @@ function ConversationsPage() {
   const clearFilters = () => {
     void setOrigin(null);
     void setPackageId(null);
+    void setSearch(null);
   };
 
   return (
@@ -112,7 +120,7 @@ function ConversationsPage() {
         <RetentionNote />
       </div>
 
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <SegmentedControl
           ariaLabel={t("dashboard:conversations.filters.origin")}
           value={origin}
@@ -122,37 +130,50 @@ function ConversationsPage() {
             label: t(`dashboard:conversations.filters.origins.${value}`),
           }))}
         />
-        <div className="flex min-w-0 items-center gap-2 sm:w-80">
-          <AsyncCombobox<PackageOption>
-            className="min-h-[44px] min-w-0 flex-1"
-            label={t("dashboard:conversations.filters.packageLabel")}
-            value={selectedOption}
-            onSelect={(item) => void setPackageId(item.id)}
-            onSearch={async (query, signal) => {
-              const page = await orpc.packages.list.call(
-                { limit: 10, search: query.trim() || undefined },
-                { signal },
-              );
-              return page.items.map((item) => ({ id: item.id, identifier: item.identifier }));
-            }}
-            getKey={(item) => item.id}
-            getLabel={(item) => item.identifier}
-            renderItem={(item) => <span className="font-mono text-sm">{item.identifier}</span>}
-            placeholder={t("dashboard:conversations.filters.package")}
-            searchPlaceholder={t("dashboard:conversations.filters.packageSearch")}
-            emptyText={t("dashboard:conversations.filters.packageEmpty")}
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            type="search"
+            inputMode="search"
+            autoComplete="off"
+            maxLength={SEARCH_MAX_LENGTH}
+            aria-label={t("dashboard:conversations.filters.search")}
+            placeholder={t("dashboard:conversations.filters.searchPlaceholder")}
+            value={search}
+            onChange={(event) => void setSearch(event.target.value || null)}
+            className="min-h-[44px] min-w-0 sm:flex-1 xl:w-64 xl:flex-none"
           />
-          {packageId ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-touch"
-              aria-label={t("dashboard:conversations.filters.clearPackage")}
-              onClick={() => void setPackageId(null)}
-            >
-              <X aria-hidden="true" className="size-4" />
-            </Button>
-          ) : null}
+          <div className="flex min-w-0 items-center gap-2 sm:flex-1 xl:w-80 xl:flex-none">
+            <AsyncCombobox<PackageOption>
+              className="min-h-[44px] min-w-0 flex-1"
+              label={t("dashboard:conversations.filters.packageLabel")}
+              value={selectedOption}
+              onSelect={(item) => void setPackageId(item.id)}
+              onSearch={async (query, signal) => {
+                const page = await orpc.packages.list.call(
+                  { limit: 10, search: query.trim() || undefined },
+                  { signal },
+                );
+                return page.items.map((item) => ({ id: item.id, identifier: item.identifier }));
+              }}
+              getKey={(item) => item.id}
+              getLabel={(item) => item.identifier}
+              renderItem={(item) => <span className="font-mono text-sm">{item.identifier}</span>}
+              placeholder={t("dashboard:conversations.filters.package")}
+              searchPlaceholder={t("dashboard:conversations.filters.packageSearch")}
+              emptyText={t("dashboard:conversations.filters.packageEmpty")}
+            />
+            {packageId ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-touch"
+                aria-label={t("dashboard:conversations.filters.clearPackage")}
+                onClick={() => void setPackageId(null)}
+              >
+                <X aria-hidden="true" className="size-4" />
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -165,7 +186,27 @@ function ConversationsPage() {
             errorClassName="py-12"
             isEmpty={(data) => data.pages.every((page) => page.items.length === 0)}
             empty={
-              filtered ? (
+              debouncedSearch ? (
+                <EmptyState
+                  icon={MessagesSquare}
+                  title={t("dashboard:conversations.emptySearch.title", {
+                    query: debouncedSearch,
+                  })}
+                  description={t("dashboard:conversations.emptySearch.description")}
+                  action={
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <Button variant="outline" size="touch" onClick={() => void setSearch(null)}>
+                        {t("dashboard:conversations.filters.clearSearch")}
+                      </Button>
+                      {filtered ? (
+                        <Button variant="ghost" size="touch" onClick={clearFilters}>
+                          {t("dashboard:conversations.filters.clear")}
+                        </Button>
+                      ) : null}
+                    </div>
+                  }
+                />
+              ) : filtered ? (
                 <EmptyState
                   icon={MessagesSquare}
                   title={t("dashboard:conversations.emptyFiltered.title")}

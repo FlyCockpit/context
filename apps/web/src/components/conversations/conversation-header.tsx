@@ -19,6 +19,7 @@ import {
   latestMainRun,
 } from "@/lib/conversations";
 import { shortSha } from "@/lib/packages";
+import { sourceLinks } from "@/lib/source-links";
 import { orpc } from "@/utils/orpc";
 
 /**
@@ -42,6 +43,7 @@ export function ConversationHeader({
   const live = main !== null && isActive(main.status);
   const totals = conversationTotals(state);
   const version = conversationVersion(conversation);
+  const commitUrl = sourceLinks(conversation.sourceUrl, conversation.commitSha)?.commit ?? null;
   const [deleteOpen, setDeleteOpen] = useState(false);
   const origin =
     conversation.origin === "mcp"
@@ -97,7 +99,20 @@ export function ConversationHeader({
           <div className="flex items-center gap-1">
             <dt>{t("dashboard:conversation.header.commit")}</dt>
             <dd className="font-mono" title={conversation.commitSha}>
-              {shortSha(conversation.commitSha)}
+              {commitUrl ? (
+                <a
+                  href={commitUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  // 44px tall on phones, in flow: a wrapped row grows rather than
+                  // letting the tap area cover the package link above it.
+                  className="inline-flex min-h-11 items-center rounded-sm text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-0"
+                >
+                  {shortSha(conversation.commitSha)}
+                </a>
+              ) : (
+                shortSha(conversation.commitSha)
+              )}
             </dd>
           </div>
         ) : null}

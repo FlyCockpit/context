@@ -121,6 +121,29 @@ describe("resolveAgentToken", () => {
     });
   });
 
+  it("after a regenerate, refuses the old secret and accepts only the new one", async () => {
+    // mcpTokens.regenerate revokes the old row and creates a new one with a
+    // new lookup prefix; the resolver reads the row on every request.
+    const old = mintMcpAgentToken(SECRET);
+    const rotated = mintMcpAgentToken(SECRET);
+    const rows = new Map([
+      [old.lookupPrefix, tokenRow(old, { revokedAt: NOW })],
+      [rotated.lookupPrefix, tokenRow(rotated, { id: "tok-2" })],
+    ]);
+    prisma.mcpAgentToken.findUnique.mockImplementation(
+      async ({ where }: { where: { lookupPrefix: string } }) =>
+        rows.get(where.lookupPrefix) ?? null,
+    );
+    expect(await resolveToken(old.token, prisma)).toMatchObject({
+      ok: false,
+      refusal: "unauthorized",
+    });
+    expect(await resolveToken(rotated.token, prisma)).toMatchObject({
+      ok: true,
+      identity: { credential: { kind: "agent_token", tokenId: "tok-2" } },
+    });
+  });
+
   it("refuses an unknown token and a non-Cockpit Context bearer without a lookup", async () => {
     prisma.mcpAgentToken.findUnique.mockResolvedValue(null);
     expect(await resolveToken(mintMcpAgentToken(SECRET).token, prisma)).toMatchObject({

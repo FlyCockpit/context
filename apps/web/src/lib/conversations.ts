@@ -268,6 +268,7 @@ export function applyWatchEvent(
           ...state.conversation,
           commitSha: event.commitSha,
           resolvedFrom: event.resolvedFrom,
+          sourceUrl: event.sourceUrl,
         },
       };
     case "turn":
@@ -305,19 +306,24 @@ export function applyWatchEvent(
         helperIndex: event.index,
       }));
     case "run.finished":
-      return updateRun(state, event.runId, event.parentRunId ?? null, (run) => ({
-        ...run,
-        status: event.status,
-        stopReason: event.stopReason,
-        answer: event.answer,
-        failure: event.failure ?? null,
-        phase: null,
-        phaseDetail: null,
-        // A completed run saved the streaming message as a turn. One that
-        // ended otherwise never saves it (nor can a crashed process), so it
-        // goes: the live view shows what a reload shows.
-        partial: null,
-      }));
+      return updateRun(
+        { ...state, conversation: { ...state.conversation, sourceUrl: event.sourceUrl } },
+        event.runId,
+        event.parentRunId ?? null,
+        (run) => ({
+          ...run,
+          status: event.status,
+          stopReason: event.stopReason,
+          answer: event.answer,
+          failure: event.failure ?? null,
+          phase: null,
+          phaseDetail: null,
+          // A completed run saved the streaming message as a turn. One that
+          // ended otherwise never saves it (nor can a crashed process), so it
+          // goes: the live view shows what a reload shows.
+          partial: null,
+        }),
+      );
     default:
       return state;
   }

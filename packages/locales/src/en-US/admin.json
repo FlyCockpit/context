@@ -58,7 +58,21 @@
       "storage": "Disk used by clones and checkouts, against the cap.",
       "jobs": "Background jobs, with retry for failed ones.",
       "settings": "Sign-up, two-factor policy and the server configuration."
-    }
+    },
+    "stats": {
+      "loadFailed": "Couldn't load the overview figures.",
+      "activeUsers_one": "active user",
+      "activeUsers_other": "active users",
+      "archivedUsers_one": "{{formatted}} archived",
+      "archivedUsers_other": "{{formatted}} archived",
+      "storageOfCap": "used of {{cap}}",
+      "failedJobs_one": "failed job",
+      "failedJobs_other": "failed jobs",
+      "signup": "Sign-up",
+      "signupOpen": "Open",
+      "signupClosed": "Closed"
+    },
+    "review": "Review"
   },
   "setupBanner": {
     "title": "This server has no administrator",
@@ -265,7 +279,6 @@
     "inviteDescription": "Creates the account and emails the new user a one-time link to choose their password. If email isn't configured, you get the link to share with them instead. Nobody, including you, is shown a password.",
     "nameLabel": "Name",
     "emailLabel": "Email",
-    "emailPlaceholder": "user@example.com",
     "roleLabel": "Role",
     "roleUser": "User",
     "roleAdmin": "Admin",

@@ -1,10 +1,11 @@
 import { CodeSnippet } from "@cockpit-context/ui/components/code-snippet";
-import { memo, useId, useMemo } from "react";
+import { createContext, memo, useContext, useId, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { WideContent } from "@/components/wide-content";
+import { parseFileReference, type SourceLinks } from "@/lib/source-links";
 
 /**
  * Markdown written by the model (answers, checkout overviews) or edited by the
@@ -13,8 +14,10 @@ import { WideContent } from "@/components/wide-content";
  * `urlTransform` (no `javascript:`), links open in a new tab without an
  * opener or referrer, images are links (a text cannot make the browser fetch
  * a URL by itself), code blocks are `CodeSnippet`s (copyable, scrolling on
- * their own) and wide tables scroll on their own. Ported from ws-model-proxy's
- * chat-markdown.
+ * their own) and wide tables scroll on their own. Inside a
+ * `SourceLinksContext` (a conversation on a public GitHub/GitLab source),
+ * inline code citing a file (`src/a.ts:12-20`) links to it at the commit.
+ * Ported from ws-model-proxy's chat-markdown.
  */
 type HastText = { type?: string; value?: unknown; children?: HastText[] };
 
@@ -23,6 +26,57 @@ function textOf(node: HastText | undefined): string {
   if (!node) return "";
   if (node.type === "text" && typeof node.value === "string") return node.value;
   return (node.children ?? []).map(textOf).join("");
+}
+
+/**
+ * Where the rendered answers' cited files live: provided only around a
+ * conversation's transcript; null (the default) renders citations as code.
+ */
+export const SourceLinksContext = createContext<SourceLinks | null>(null);
+
+const CITATION_LINK_CLASS_NAME =
+  "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+type HastElement = {
+  type?: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastElement[];
+  value?: unknown;
+};
+
+/**
+ * Wraps inline code citing a file (not in a code block, not already inside a
+ * link) in a link to that file at the commit; the `a` component then opens it
+ * in a new tab without an opener or referrer.
+ */
+function rehypeSourceLinks(links: SourceLinks) {
+  const visit = (node: HastElement, inLinkOrPre: boolean) => {
+    const children = node.children;
+    if (!children) return;
+    children.forEach((child, index) => {
+      if (child.type !== "element") return;
+      const blocked = inLinkOrPre || child.tagName === "a" || child.tagName === "pre";
+      if (child.tagName === "code" && !inLinkOrPre) {
+        const only = child.children?.length === 1 ? child.children[0] : undefined;
+        const ref =
+          only?.type === "text" && typeof only.value === "string"
+            ? parseFileReference(only.value)
+            : null;
+        if (ref) {
+          children[index] = {
+            type: "element",
+            tagName: "a",
+            properties: { href: links.file(ref), className: [CITATION_LINK_CLASS_NAME] },
+            children: [child],
+          };
+        }
+        return;
+      }
+      visit(child, blocked);
+    });
+  };
+  return (tree: HastElement) => visit(tree, false);
 }
 
 function buildComponents(copyLabel: string): Components {
@@ -108,13 +162,23 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
   const id = useId();
   const { t } = useTranslation(["common"]);
   const copyLabel = t("common:actions.copy");
+  const links = useContext(SourceLinksContext);
   const components = useMemo(() => buildComponents(copyLabel), [copyLabel]);
+  const rehypePlugins = useMemo<Options["rehypePlugins"]>(
+    () => [
+      [rehypePrefixFootnoteLabel, `${id}-`],
+      ...(links
+        ? [[rehypeSourceLinks, links] satisfies [typeof rehypeSourceLinks, SourceLinks]]
+        : []),
+    ],
+    [id, links],
+  );
   return (
     <div className={MARKDOWN_CLASS_NAME}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         remarkRehypeOptions={{ clobberPrefix: `${id}-` }}
-        rehypePlugins={[[rehypePrefixFootnoteLabel, `${id}-`]]}
+        rehypePlugins={rehypePlugins}
         components={components}
       >
         {content}

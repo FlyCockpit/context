@@ -166,10 +166,19 @@
       "form": {
         "name": "Name",
         "nameHint": "For example, the laptop or CI job that will use it.",
-        "namePlaceholder": "Work laptop",
         "nameRequired": "Give the token a name.",
         "nameTooLong": "Use at most {{max}} characters.",
         "expiry": "Expires after"
+      },
+      "regenerate": {
+        "open": "Regenerate",
+        "title": "Regenerate “{{name}}”?",
+        "description": "You get a new secret with the same name, permissions and expiry. The current secret stops working at once, so any agent using it is cut off until you give it the new one.",
+        "submit": "Regenerate",
+        "pending": "Regenerating…",
+        "failed": "Couldn’t regenerate the token. Try again.",
+        "doneTitle": "Your regenerated token",
+        "doneDescription": "The old secret no longer works. Add this one to your agent, then close this dialog."
       },
       "rename": {
         "open": "Rename",
@@ -269,12 +278,10 @@
       "form": {
         "name": "Name",
         "nameHint": "For example, the host or repositories it opens.",
-        "namePlaceholder": "GitHub deploy key",
         "nameRequired": "Give the key a name.",
         "nameTooLong": "Use at most {{max}} characters.",
         "privateKey": "Private key",
         "privateKeyHint": "The whole file, including the BEGIN and END lines.",
-        "privateKeyPlaceholder": "BEGIN OPENSSH PRIVATE KEY …",
         "privateKeyRequired": "Paste the private key.",
         "privateKeyTooLong": "That’s too long to be a private key.",
         "passphrase": "Passphrase (optional)",
@@ -315,8 +322,7 @@
       },
       "form": {
         "host": "Host",
-        "hostHint": "A host name, or paste an SSH git URL.",
-        "hostPlaceholder": "git.example.com",
+        "hostHint": "A host name, like git.example.com, or paste an SSH git URL.",
         "hostInvalid": "Enter a host name such as git.example.com.",
         "port": "Port",
         "portInvalid": "Use a port from 1 to 65535."
@@ -429,7 +435,7 @@
       "displayName": "Display name",
       "displayNameHint": "Optional. Defaults to the package name.",
       "gitUrl": "Git URL",
-      "gitUrlHint": "An https:// URL for public repositories, or an SSH URL (git@host:owner/repo) for private ones.",
+      "gitUrlHint": "An https:// URL (https://github.com/owner/repo) for public repositories, or an SSH URL (git@host:owner/repo) for private ones.",
       "gitUrlInvalid": "Use an https:// URL, or an SSH URL like git@github.com:owner/repo.",
       "sshKey": "SSH key",
       "sshKeyHint": "Add its public key to the repository as a read-only deploy key.",
@@ -453,28 +459,21 @@
         "noNotes": "No notes"
       },
       "subdirectory": "Subdirectory",
-      "subdirectoryHint": "For monorepos: the package’s folder. The agent still sees the whole repository but starts here.",
+      "subdirectoryHint": "For monorepos: the package’s folder, like packages/core. The agent still sees the whole repository but starts here.",
       "subdirectoryInvalid": "Use a relative folder inside the repository, like packages/core.",
       "tagPattern": "Tag pattern",
-      "tagPatternHint": "Optional. How release tags are named, with {version}. Tried first when an agent asks for a version.",
+      "tagPatternHint": "Optional. How release tags are named, with {version}, like v{version}. Tried first when an agent asks for a version.",
       "tagPatternInvalid": "Include {version} and use only letters, numbers and . _ / @ + -, for example v{version}.",
       "defaultRef": "Default ref",
-      "defaultRefHint": "Optional. Used when an agent gives no version. Empty means the remote’s default branch.",
+      "defaultRefHint": "Optional. A tag, branch or commit, like main, used when an agent gives no version. Empty means the remote’s default branch.",
       "defaultRefInvalid": "Use a tag, branch or commit name, like main or v2.0.0 (no spaces).",
       "notes": "Notes",
       "notesHint": "Optional. Context the agent reads before every investigation of this package.",
-      "placeholders": {
-        "gitUrl": "https://github.com/owner/repo",
-        "subdirectory": "packages/core",
-        "tagPattern": "v{version}",
-        "defaultRef": "main"
-      },
-      "namePlaceholders": {
-        "npm": "@tanstack/react-query",
-        "pypi": "requests",
-        "cargo": "serde",
-        "go": "github.com/spf13/cobra",
-        "git": "owner/repo"
+      "nameExamples": {
+        "npm": "For example, @tanstack/react-query.",
+        "pypi": "For example, requests.",
+        "cargo": "For example, serde.",
+        "go": "For example, github.com/spf13/cobra."
       }
     },
     "lookup": {
@@ -662,7 +661,7 @@
     "title": "Ask about {{identifier}}",
     "description": "Cockpit Context reads the source at the version you pick and answers here. This uses model tokens.",
     "question": "Your question",
-    "questionPlaceholder": "How do I retry a failed request with backoff?",
+    "questionHint": "For example: How do I retry a failed request with backoff?",
     "target": "Which code?",
     "targets": {
       "default": "Default",
@@ -674,7 +673,7 @@
     "versionLabel": "Version",
     "versionHint": "A released version, like 5.2.0. Cockpit Context finds its tag.",
     "refLabel": "Tag, branch or commit",
-    "refHint": "Any git ref: a tag, a branch name or a commit hash.",
+    "refHint": "Any git ref: a tag, a branch name like main, or a commit hash.",
     "valueRequired": "Enter a version or a ref, or choose Default.",
     "submit": "Ask",
     "pending": "Starting…",
@@ -682,8 +681,6 @@
     "failed": "Couldn’t start the investigation. Try again.",
     "nearestTags": "Tags close to that version. Pick one to ask about it:",
     "confirmHost": "Confirm the host’s SSH key",
-    "versionPlaceholder": "5.2.0",
-    "refPlaceholder": "main",
     "aiDisclosure": "Cockpit Context’s answers are written by an AI model. They can be wrong: check the cited files."
   },
   "proposals": {
@@ -874,7 +871,14 @@
       "title": "No conversations match",
       "description": "Try another package or origin."
     },
+    "emptySearch": {
+      "title": "No conversations match “{{query}}”",
+      "description": "Search matches conversation titles. Try other words."
+    },
     "filters": {
+      "search": "Search questions",
+      "searchPlaceholder": "Search questions…",
+      "clearSearch": "Clear search",
       "origin": "Filter by origin",
       "origins": {
         "all": "All",

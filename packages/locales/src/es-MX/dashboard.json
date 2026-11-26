@@ -166,10 +166,19 @@
       "form": {
         "name": "Nombre",
         "nameHint": "Por ejemplo, la laptop o el trabajo de CI que lo usará.",
-        "namePlaceholder": "Laptop del trabajo",
         "nameRequired": "Ponle un nombre al token.",
         "nameTooLong": "Usa como máximo {{max}} caracteres.",
         "expiry": "Vence en"
+      },
+      "regenerate": {
+        "open": "Regenerar",
+        "title": "¿Regenerar “{{name}}”?",
+        "description": "Obtienes un secreto nuevo con el mismo nombre, permisos y vencimiento. El secreto actual deja de funcionar de inmediato, así que cualquier agente que lo use queda desconectado hasta que le des el nuevo.",
+        "submit": "Regenerar",
+        "pending": "Regenerando…",
+        "failed": "No se pudo regenerar el token. Inténtalo de nuevo.",
+        "doneTitle": "Tu token regenerado",
+        "doneDescription": "El secreto anterior ya no funciona. Agrega este a tu agente y luego cierra este diálogo."
       },
       "rename": {
         "open": "Renombrar",
@@ -269,12 +278,10 @@
       "form": {
         "name": "Nombre",
         "nameHint": "Por ejemplo, el servidor o los repositorios que abre.",
-        "namePlaceholder": "Llave de despliegue de GitHub",
         "nameRequired": "Ponle un nombre a la llave.",
         "nameTooLong": "Usa como máximo {{max}} caracteres.",
         "privateKey": "Llave privada",
         "privateKeyHint": "El archivo completo, incluidas las líneas BEGIN y END.",
-        "privateKeyPlaceholder": "BEGIN OPENSSH PRIVATE KEY …",
         "privateKeyRequired": "Pega la llave privada.",
         "privateKeyTooLong": "Es demasiado largo para ser una llave privada.",
         "passphrase": "Frase de contraseña (opcional)",
@@ -315,8 +322,7 @@
       },
       "form": {
         "host": "Host",
-        "hostHint": "Un nombre de host, o pega una URL git de SSH.",
-        "hostPlaceholder": "git.example.com",
+        "hostHint": "Un nombre de host, como git.example.com, o pega una URL git de SSH.",
         "hostInvalid": "Escribe un nombre de host como git.example.com.",
         "port": "Puerto",
         "portInvalid": "Usa un puerto del 1 al 65535."
@@ -429,7 +435,7 @@
       "displayName": "Nombre visible",
       "displayNameHint": "Opcional. Por defecto es el nombre del paquete.",
       "gitUrl": "URL de git",
-      "gitUrlHint": "Una URL https:// para repositorios públicos, o una URL SSH (git@host:dueño/repo) para los privados.",
+      "gitUrlHint": "Una URL https:// (https://github.com/dueño/repo) para repositorios públicos, o una URL SSH (git@host:dueño/repo) para los privados.",
       "gitUrlInvalid": "Usa una URL https:// o una URL SSH como git@github.com:dueño/repo.",
       "sshKey": "Llave SSH",
       "sshKeyHint": "Agrega su llave pública al repositorio como deploy key de solo lectura.",
@@ -453,28 +459,21 @@
         "noNotes": "Sin notas"
       },
       "subdirectory": "Subdirectorio",
-      "subdirectoryHint": "Para monorepos: la carpeta del paquete. El agente sigue viendo todo el repositorio, pero empieza aquí.",
+      "subdirectoryHint": "Para monorepos: la carpeta del paquete, como packages/core. El agente sigue viendo todo el repositorio, pero empieza aquí.",
       "subdirectoryInvalid": "Usa una carpeta relativa dentro del repositorio, como packages/core.",
       "tagPattern": "Patrón de tags",
-      "tagPatternHint": "Opcional. Cómo se nombran los tags de cada versión, con {version}. Se prueba primero cuando un agente pide una versión.",
+      "tagPatternHint": "Opcional. Cómo se nombran los tags de cada versión, con {version}, como v{version}. Se prueba primero cuando un agente pide una versión.",
       "tagPatternInvalid": "Incluye {version} y usa solo letras, números y . _ / @ + -, por ejemplo v{version}.",
       "defaultRef": "Ref predeterminada",
-      "defaultRefHint": "Opcional. Se usa cuando un agente no indica versión. Vacía significa la rama predeterminada del remoto.",
+      "defaultRefHint": "Opcional. Un tag, rama o commit, como main, que se usa cuando un agente no indica versión. Vacía significa la rama predeterminada del remoto.",
       "defaultRefInvalid": "Usa el nombre de una etiqueta, rama o commit, como main o v2.0.0 (sin espacios).",
       "notes": "Notas",
       "notesHint": "Opcional. Contexto que el agente lee antes de cada investigación de este paquete.",
-      "placeholders": {
-        "gitUrl": "https://github.com/dueño/repo",
-        "subdirectory": "packages/core",
-        "tagPattern": "v{version}",
-        "defaultRef": "main"
-      },
-      "namePlaceholders": {
-        "npm": "@tanstack/react-query",
-        "pypi": "requests",
-        "cargo": "serde",
-        "go": "github.com/spf13/cobra",
-        "git": "dueño/repo"
+      "nameExamples": {
+        "npm": "Por ejemplo, @tanstack/react-query.",
+        "pypi": "Por ejemplo, requests.",
+        "cargo": "Por ejemplo, serde.",
+        "go": "Por ejemplo, github.com/spf13/cobra."
       }
     },
     "lookup": {
@@ -662,7 +661,7 @@
     "title": "Preguntar sobre {{identifier}}",
     "description": "Cockpit Context lee el código en la versión que elijas y responde aquí. Esto usa tokens del modelo.",
     "question": "Tu pregunta",
-    "questionPlaceholder": "¿Cómo reintento una solicitud fallida con espera exponencial?",
+    "questionHint": "Por ejemplo: ¿Cómo reintento una solicitud fallida con espera exponencial?",
     "target": "¿Qué código?",
     "targets": {
       "default": "Predeterminado",
@@ -674,7 +673,7 @@
     "versionLabel": "Versión",
     "versionHint": "Una versión publicada, como 5.2.0. Cockpit Context encuentra su tag.",
     "refLabel": "Tag, rama o commit",
-    "refHint": "Cualquier ref de git: un tag, el nombre de una rama o el hash de un commit.",
+    "refHint": "Cualquier ref de git: un tag, el nombre de una rama como main o el hash de un commit.",
     "valueRequired": "Escribe una versión o una ref, o elige Predeterminado.",
     "submit": "Preguntar",
     "pending": "Iniciando…",
@@ -682,8 +681,6 @@
     "failed": "No se pudo iniciar la investigación. Inténtalo de nuevo.",
     "nearestTags": "Tags cercanos a esa versión. Elige uno para preguntar sobre él:",
     "confirmHost": "Confirmar la llave SSH del host",
-    "versionPlaceholder": "5.2.0",
-    "refPlaceholder": "main",
     "aiDisclosure": "Las respuestas de Cockpit Context las escribe un modelo de IA. Pueden ser incorrectas: revisa los archivos citados."
   },
   "proposals": {
@@ -874,6 +871,10 @@
       "title": "Ninguna conversación coincide",
       "description": "Prueba con otro paquete u origen."
     },
+    "emptySearch": {
+      "title": "Ninguna conversación coincide con “{{query}}”",
+      "description": "La búsqueda revisa los títulos de las conversaciones. Prueba con otras palabras."
+    },
     "filters": {
       "origin": "Filtrar por origen",
       "origins": {
@@ -886,7 +887,10 @@
       "packageSearch": "Buscar paquetes…",
       "packageEmpty": "Ningún paquete coincide.",
       "clearPackage": "Mostrar todos los paquetes",
-      "clear": "Quitar filtros"
+      "clear": "Quitar filtros",
+      "search": "Buscar preguntas",
+      "searchPlaceholder": "Buscar preguntas…",
+      "clearSearch": "Borrar búsqueda"
     },
     "row": {
       "elapsed": "En ejecución desde hace",

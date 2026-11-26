@@ -73,6 +73,7 @@ function detail(
     requestedVersion: "1.3.0",
     requestedRef: null,
     commitSha: "a".repeat(40),
+    sourceUrl: null,
     resolvedFrom: "tag:v1.3.0",
     checkoutAvailable: true,
     origin: "web",
@@ -251,6 +252,7 @@ describe("applyWatchEvent", () => {
       status,
       stopReason: status === "completed" ? "completed" : "aborted",
       answer: null,
+      sourceUrl: null,
     });
     // Nothing saves the in-flight message of a run that did not complete, so
     // the snapshot a reload folds has none: the live view must match it.
@@ -288,6 +290,7 @@ describe("applyWatchEvent", () => {
       status: "stopped",
       stopReason: "aborted",
       answer: null,
+      sourceUrl: null,
     };
     const mainFinished: WatchEvent = {
       type: "run.finished",
@@ -295,6 +298,7 @@ describe("applyWatchEvent", () => {
       status: "stopped",
       stopReason: "aborted",
       answer: null,
+      sourceUrl: null,
     };
     const helper = (state: ConversationViewState) => state.runs.find((run) => run.id === "h-1");
 
@@ -895,15 +899,32 @@ describe("web conversations that resolve inside their first run", () => {
         commitSha: "b".repeat(40),
         resolvedFrom: "tag:v1.3.0",
         stale: false,
+        sourceUrl: "https://github.com/acme/widget",
       },
       { type: "run.phase", runId: "run-1", phase: "preparing" },
     ]);
     expect(state.conversation).toMatchObject({
       commitSha: "b".repeat(40),
+      sourceUrl: "https://github.com/acme/widget",
       resolvedFrom: "tag:v1.3.0",
       checkoutAvailable: false,
     });
     expect(state.runs[0]).toMatchObject({ phase: "preparing", phaseDetail: null });
+    // A finished run carries the current source (a follow-up may have
+    // re-created a pruned checkout), replacing what the conversation had.
+    expect(
+      applyWatchEvent(
+        { ...state, conversation: { ...state.conversation, sourceUrl: null } },
+        {
+          type: "run.finished",
+          runId: "run-1",
+          status: "completed",
+          stopReason: "completed",
+          answer: "done",
+          sourceUrl: "https://github.com/acme/widget",
+        },
+      )?.conversation.sourceUrl,
+    ).toBe("https://github.com/acme/widget");
     state = applyWatchEvent(state, { type: "run.phase", runId: "run-1", phase: "queued" })!;
     expect(state.conversation.checkoutAvailable).toBe(true);
     state = applyWatchEvent(state, {
@@ -937,6 +958,7 @@ describe("web conversations that resolve inside their first run", () => {
         status: "failed",
         stopReason: "resolve-failed",
         answer: null,
+        sourceUrl: null,
         failure: { reason: "VERSION_NOT_FOUND", nearestTags: ["v1.3.1"] },
       },
     ]);

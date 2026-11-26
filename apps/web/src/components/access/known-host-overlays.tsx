@@ -169,7 +169,6 @@ function ScanForm({
               field={field}
               label={t("dashboard:access.knownHosts.form.host")}
               description={t("dashboard:access.knownHosts.form.hostHint")}
-              placeholder={t("dashboard:access.knownHosts.form.hostPlaceholder")}
               inputMode="url"
               autoComplete="off"
               spellCheck={false}

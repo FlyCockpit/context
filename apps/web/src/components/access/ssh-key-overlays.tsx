@@ -181,7 +181,6 @@ function GenerateKeyForm({
             field={field}
             label={t("dashboard:access.sshKeys.form.name")}
             description={t("dashboard:access.sshKeys.form.nameHint")}
-            placeholder={t("dashboard:access.sshKeys.form.namePlaceholder")}
             inputMode="text"
             autoComplete="off"
             maxLength={NAME_MAX}
@@ -305,7 +304,7 @@ function ImportKeyForm({
           <TextField
             field={field}
             label={t("dashboard:access.sshKeys.form.name")}
-            placeholder={t("dashboard:access.sshKeys.form.namePlaceholder")}
+            description={t("dashboard:access.sshKeys.form.nameHint")}
             inputMode="text"
             autoComplete="off"
             maxLength={NAME_MAX}
@@ -318,7 +317,6 @@ function ImportKeyForm({
             field={field}
             label={t("dashboard:access.sshKeys.form.privateKey")}
             description={t("dashboard:access.sshKeys.form.privateKeyHint")}
-            placeholder={t("dashboard:access.sshKeys.form.privateKeyPlaceholder")}
             autoComplete="off"
             spellCheck={false}
             rows={8}

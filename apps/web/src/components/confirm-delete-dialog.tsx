@@ -26,8 +26,6 @@ type ConfirmDeleteDialogProps = {
   typePrompt: string;
   /** aria-label for the copy-to-clipboard button (i18n owns this string). */
   copyAriaLabel: string;
-  /** Defaults to confirmToken. */
-  placeholder?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   /** Defaults to t("common:actions.delete"). */
   confirmLabel?: string;
@@ -53,7 +51,6 @@ export function ConfirmDeleteDialog({
   confirmToken,
   typePrompt,
   copyAriaLabel,
-  placeholder,
   inputMode,
   confirmLabel,
   pendingLabel,
@@ -92,7 +89,6 @@ export function ConfirmDeleteDialog({
             id={inputId}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            placeholder={placeholder ?? confirmToken}
             autoComplete="off"
             inputMode={inputMode}
           />

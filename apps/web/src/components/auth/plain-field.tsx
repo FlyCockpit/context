@@ -66,7 +66,6 @@ export function OneTimeCodeField({
       label={label}
       error={error}
       inputRef={inputRef}
-      placeholder="000000"
       value={value}
       onChange={(e) => onValueChange(e.target.value)}
       inputMode="numeric"

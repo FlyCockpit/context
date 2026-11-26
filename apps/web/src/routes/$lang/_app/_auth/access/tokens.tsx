@@ -10,7 +10,7 @@ import { toast } from "@cockpit-context/ui/components/sileo";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Ban, KeyRound, MoreVertical, Pencil, Plus } from "lucide-react";
+import { ArrowRight, Ban, KeyRound, MoreVertical, Pencil, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +24,7 @@ import {
 import { FlagSwitches } from "@/components/access/flag-switches";
 import {
   CreateTokenDialog,
+  RegenerateTokenDialog,
   RenameTokenSheet,
   RevokeTokenDialog,
 } from "@/components/access/token-overlays";
@@ -40,13 +41,16 @@ export const Route = createFileRoute("/$lang/_app/_auth/access/tokens")({
 
 const PAGE_LIMIT = 25;
 
-/** MCP API tokens (docs/mcp.md): create (secret shown once), flags, rename, revoke. */
+/** MCP API tokens (docs/mcp.md): create (secret shown once), flags, rename, regenerate, revoke. */
 function AccessTokensPage() {
   const { lang } = Route.useParams();
   const { t } = useTranslation(["dashboard"]);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<McpToken | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
+  const [regenerateTarget, setRegenerateTarget] = useState<{ id: string; name: string } | null>(
+    null,
+  );
 
   const list = useInfiniteQuery(
     orpc.mcpTokens.list.infiniteOptions({
@@ -119,6 +123,7 @@ function AccessTokensPage() {
                       key={token.id}
                       token={token}
                       onRename={() => setRenameTarget(token)}
+                      onRegenerate={() => setRegenerateTarget({ id: token.id, name: token.name })}
                       onRevoke={() => setRevokeTarget({ id: token.id, name: token.name })}
                     />
                   ))}
@@ -139,6 +144,10 @@ function AccessTokensPage() {
         token={renameTarget}
         onOpenChange={(open) => (open ? null : setRenameTarget(null))}
       />
+      <RegenerateTokenDialog
+        token={regenerateTarget}
+        onOpenChange={(open) => (open ? null : setRegenerateTarget(null))}
+      />
       <RevokeTokenDialog
         token={revokeTarget}
         onOpenChange={(open) => (open ? null : setRevokeTarget(null))}
@@ -150,10 +159,12 @@ function AccessTokensPage() {
 function TokenRow({
   token,
   onRename,
+  onRegenerate,
   onRevoke,
 }: {
   token: McpToken;
   onRename: () => void;
+  onRegenerate: () => void;
   onRevoke: () => void;
 }) {
   const { t } = useTranslation(["dashboard"]);
@@ -220,6 +231,10 @@ function TokenRow({
             <DropdownMenuItem className="min-h-[44px]" onClick={onRename}>
               <Pencil aria-hidden="true" className="size-4" />
               {t("dashboard:access.tokens.rename.open")}
+            </DropdownMenuItem>
+            <DropdownMenuItem className="min-h-[44px]" onClick={onRegenerate}>
+              <RefreshCw aria-hidden="true" className="size-4" />
+              {t("dashboard:access.tokens.regenerate.open")}
             </DropdownMenuItem>
             <DropdownMenuItem className="min-h-[44px]" variant="destructive" onClick={onRevoke}>
               <Ban aria-hidden="true" className="size-4" />

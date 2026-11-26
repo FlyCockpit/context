@@ -81,7 +81,7 @@ function FormPage({
         <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">{title}</h1>
       </header>
       {description ? (
-        <p className="max-w-prose pb-6 text-sm text-muted-foreground">{description}</p>
+        <p className="max-w-prose pb-6 text-sm text-pretty text-muted-foreground">{description}</p>
       ) : (
         <div className="pb-4" />
       )}
@@ -133,7 +133,7 @@ function FormSection({
       <div className="space-y-1">
         <h2 className="text-base font-medium">{title}</h2>
         {description ? (
-          <p className="max-w-prose text-sm text-muted-foreground">{description}</p>
+          <p className="max-w-prose text-sm text-pretty text-muted-foreground">{description}</p>
         ) : null}
       </div>
       <div className={cn("grid grid-cols-1 gap-4 lg:grid-cols-2", gridClassName)}>{children}</div>
@@ -203,7 +203,7 @@ function AdvancedSection({
       </summary>
       <div className="space-y-4 pt-2 pb-6">
         {description ? (
-          <p className="max-w-prose text-sm text-muted-foreground">{description}</p>
+          <p className="max-w-prose text-sm text-pretty text-muted-foreground">{description}</p>
         ) : null}
         <div className={cn("grid grid-cols-1 gap-4 lg:grid-cols-2", gridClassName)}>{children}</div>
       </div>

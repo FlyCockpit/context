@@ -172,7 +172,7 @@ function SignupCard({
         <CardDescription>{t("settings.signupDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="max-w-prose text-sm text-muted-foreground">
+        <p className="max-w-prose text-sm text-pretty text-muted-foreground">
           {envEnabled ? t("settings.signupEnvEnabled") : t("settings.signupEnvDisabled")}
         </p>
         <SettingSwitchRow
@@ -269,7 +269,9 @@ function ServicesCard({ config }: { config: RuntimeConfig }) {
       </CardHeader>
       <CardContent className="space-y-3">
         {modelReady ? null : (
-          <p className="text-sm text-destructive">{t("settings.runtime.modelMissing")}</p>
+          <p className="max-w-prose text-sm text-pretty text-destructive">
+            {t("settings.runtime.modelMissing")}
+          </p>
         )}
         <dl className="divide-y">
           <ConfigRow label={t("settings.runtime.openRouter")} envName="OPENROUTER_API_KEY">
@@ -314,11 +316,15 @@ function ServicesCard({ config }: { config: RuntimeConfig }) {
           </ConfigRow>
         </dl>
         {config.emailConfigured ? null : (
-          <p className="text-sm text-muted-foreground">{t("settings.runtime.emailMissing")}</p>
+          <p className="max-w-prose text-sm text-pretty text-muted-foreground">
+            {t("settings.runtime.emailMissing")}
+          </p>
         )}
         <p
           className={
-            config.backupsConfigured ? "text-sm text-muted-foreground" : "text-sm text-destructive"
+            config.backupsConfigured
+              ? "max-w-prose text-sm text-pretty text-muted-foreground"
+              : "max-w-prose text-sm text-pretty text-destructive"
           }
         >
           {config.backupsConfigured
@@ -382,7 +388,9 @@ function PrivacyCard({ config }: { config: RuntimeConfig }) {
           </ConfigRow>
         </dl>
         {operatorIncomplete ? (
-          <p className="text-sm text-muted-foreground">{t("settings.runtime.operatorMissing")}</p>
+          <p className="max-w-prose text-sm text-pretty text-muted-foreground">
+            {t("settings.runtime.operatorMissing")}
+          </p>
         ) : null}
       </CardContent>
     </Card>
@@ -488,17 +496,21 @@ function LanguageServersCard({ config }: { config: RuntimeConfig }) {
         </dl>
         {sandbox.mode === "unavailable" ? (
           <div className="space-y-2">
-            <p className="text-sm text-destructive">{unavailableMessage}</p>
+            <p className="max-w-prose text-sm text-pretty text-destructive">{unavailableMessage}</p>
             <code className="block font-mono text-xs break-words text-muted-foreground">
               {sandbox.detail}
             </code>
           </div>
         ) : null}
         {sandbox.mode === "off" ? (
-          <p className="text-sm text-destructive">{t("settings.runtime.lsp.offWarning")}</p>
+          <p className="max-w-prose text-sm text-pretty text-destructive">
+            {t("settings.runtime.lsp.offWarning")}
+          </p>
         ) : null}
         {limits.lspMaxServers === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("settings.runtime.lsp.disabledByCap")}</p>
+          <p className="max-w-prose text-sm text-pretty text-muted-foreground">
+            {t("settings.runtime.lsp.disabledByCap")}
+          </p>
         ) : null}
       </CardContent>
     </Card>

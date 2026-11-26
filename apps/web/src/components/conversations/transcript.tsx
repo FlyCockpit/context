@@ -18,7 +18,7 @@ import {
 import { memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Markdown } from "@/components/markdown";
+import { Markdown, SourceLinksContext } from "@/components/markdown";
 import { RunStatusPill } from "@/components/run-status-pill";
 import { useNow } from "@/hooks/use-now";
 import {
@@ -38,6 +38,7 @@ import {
   toolCallOf,
   toolResultsOf,
 } from "@/lib/conversations";
+import { sourceLinks } from "@/lib/source-links";
 
 /**
  * The conversation transcript (docs/product.md): questions
@@ -83,20 +84,28 @@ export function TranscriptBlocks({
   blocks,
   askedBy,
   retry = null,
+  sourceUrl = null,
+  commitSha = null,
 }: {
   blocks: TranscriptBlock[];
   /** The MCP connection that asked the first question; null for the web. */
   askedBy: string | null;
   retry?: RetryControls | null;
+  /** The package's repository and the commit read: cited files link there when public. */
+  sourceUrl?: string | null;
+  commitSha?: string | null;
 }) {
+  const links = useMemo(() => sourceLinks(sourceUrl, commitSha), [sourceUrl, commitSha]);
   return (
-    <ol className="min-w-0 space-y-5">
-      {blocks.map((block) => (
-        <li key={block.key} className="min-w-0">
-          <Block block={block} askedBy={askedBy} retry={retry} />
-        </li>
-      ))}
-    </ol>
+    <SourceLinksContext value={links}>
+      <ol className="min-w-0 space-y-5">
+        {blocks.map((block) => (
+          <li key={block.key} className="min-w-0">
+            <Block block={block} askedBy={askedBy} retry={retry} />
+          </li>
+        ))}
+      </ol>
+    </SourceLinksContext>
   );
 }
 

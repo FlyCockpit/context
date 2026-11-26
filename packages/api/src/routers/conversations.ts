@@ -77,6 +77,8 @@ const activeMainRunCount = {
 const MAX_RUNS = 200;
 const MAX_TURNS = 5_000;
 const MAX_MESSAGE_LENGTH = 20_000;
+/** Same bound as the Packages and Users search boxes. */
+const MAX_SEARCH_LENGTH = 200;
 
 const messageText = z.string().trim().min(1).max(MAX_MESSAGE_LENGTH);
 
@@ -122,6 +124,40 @@ const conversationSelect = {
 } satisfies Prisma.ConversationSelect;
 
 type ConversationRow = Prisma.ConversationGetPayload<{ select: typeof conversationSelect }>;
+
+/**
+ * `get` / `watch` only: where the commit lives, for links to cited files. Only
+ * the checkout's own repository, and only when it is a PUBLIC (https) clone:
+ * it is the exact remote the commit came from. The package's URL is never a
+ * stand-in (it can be edited later, or be a private repository's https form),
+ * so a private or pruned checkout gives no links.
+ */
+const conversationSourceSelect = {
+  Checkout: { select: { Repository: { select: { remoteUrl: true, visibility: true } } } },
+} satisfies Prisma.ConversationSelect;
+
+const conversationDetailSelect = {
+  ...conversationSelect,
+  ...conversationSourceSelect,
+} satisfies Prisma.ConversationSelect;
+
+/** The public https clone URL the commit came from, or null. */
+function sourceUrlOf(
+  row: Prisma.ConversationGetPayload<{ select: typeof conversationSourceSelect }>,
+): string | null {
+  const repository = row.Checkout?.Repository;
+  if (repository?.visibility !== "PUBLIC") return null;
+  return /^https:\/\//i.test(repository.remoteUrl) ? repository.remoteUrl : null;
+}
+
+/** `sourceUrlOf` read now (owner-scoped; null if the conversation is gone). */
+async function resolvedSourceUrl(ownerId: string, conversationId: string): Promise<string | null> {
+  const row = await prisma.conversation.findFirst({
+    where: { id: conversationId, ownerId },
+    select: conversationSourceSelect,
+  });
+  return row ? sourceUrlOf(row) : null;
+}
 
 function usageOf(row: {
   inputTokens: number;
@@ -250,7 +286,7 @@ const turnSelect = {
 async function loadConversationDetail(ownerId: string, conversationId: string) {
   const conversation = await findOwnedOrThrow({
     find: (args) => prisma.conversation.findFirst(args),
-    args: { where: { id: conversationId }, select: conversationSelect },
+    args: { where: { id: conversationId }, select: conversationDetailSelect },
     owner: { field: "ownerId", id: ownerId },
     notFound: "Conversation not found.",
   });
@@ -305,6 +341,8 @@ async function loadConversationDetail(ownerId: string, conversationId: string) {
   const costs = (await totalCosts(ownerId, [conversation.id])).get(conversation.id) ?? NO_COST;
   return {
     ...serializeConversation(conversation, costs),
+    /** The public https repository the commit came from; null when private, pruned or unresolved. */
+    sourceUrl: sourceUrlOf(conversation),
     runs: runs.map((run) => ({
       id: run.id,
       createdAt: run.createdAt,
@@ -353,19 +391,38 @@ async function ownedConversation(context: { session: { user: { id: string } } },
 
 const segmentSchema = z.enum(["ongoing", "finished"]);
 
-/** `run.finished` as a client sees it: no `error` text (docs/product.md). */
-type ClientRunFinished = Omit<Extract<RunEvent, { type: "run.finished" }>, "error">;
-type ClientRunEvent = Exclude<RunEvent, { type: "run.finished" }> | ClientRunFinished;
+/**
+ * `run.finished` as a client sees it: no `error` text (docs/product.md), and
+ * the current source (a follow-up may have re-created a pruned checkout).
+ */
+type ClientRunFinished = Omit<Extract<RunEvent, { type: "run.finished" }>, "error"> & {
+  sourceUrl: string | null;
+};
+/** `conversation.resolved` as a client sees it: with the source the commit lives in. */
+type ClientConversationResolved = Extract<RunEvent, { type: "conversation.resolved" }> & {
+  sourceUrl: string | null;
+};
+type ClientRunEvent =
+  | Exclude<RunEvent, { type: "run.finished" } | { type: "conversation.resolved" }>
+  | ClientRunFinished
+  | ClientConversationResolved;
 
 /**
  * Map a bus event to what `watch` sends. A run's `error` text can carry git
  * stderr, filesystem paths or provider messages, so it never leaves the
  * server (`get` leaves it out too); `stopReason` is the stable reason code.
+ * The two events after which the conversation's checkout may have changed
+ * (its version resolved; a run, which may have re-created a pruned checkout,
+ * finished) carry `sourceUrl` (`sourceUrlOf`), read when the event is sent.
  */
-function toClientEvent(event: RunEvent): ClientRunEvent {
+async function toClientEvent(
+  event: RunEvent,
+  sourceUrl: () => Promise<string | null>,
+): Promise<ClientRunEvent> {
+  if (event.type === "conversation.resolved") return { ...event, sourceUrl: await sourceUrl() };
   if (event.type !== "run.finished") return event;
   const { error: _error, ...rest } = event;
-  return rest;
+  return { ...rest, sourceUrl: await sourceUrl() };
 }
 
 export const conversationsRouter = {
@@ -393,6 +450,8 @@ export const conversationsRouter = {
         cursor: cursorTokenSchema.nullish(),
         packageId: entityId.optional(),
         origin: z.enum(["mcp", "web"]).optional(),
+        /** Case-insensitive substring of the title (the question's first line); blank = no filter. */
+        search: z.string().trim().max(MAX_SEARCH_LENGTH).optional(),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -401,6 +460,7 @@ export const conversationsRouter = {
         ownerId,
         ...(input.packageId ? { packageId: input.packageId } : {}),
         ...(input.origin ? { origin: input.origin === "mcp" ? "MCP" : "WEB" } : {}),
+        ...(input.search ? { title: { contains: input.search, mode: "insensitive" } } : {}),
       };
       const fetchSegment = (
         segment: z.infer<typeof segmentSchema>,
@@ -503,7 +563,11 @@ export const conversationsRouter = {
         // any other request of a banned user, and drop what the bus buffered.
         for await (const event of events) {
           stream.assertOpen();
-          yield toClientEvent(event);
+          const relayed = await toClientEvent(event, () =>
+            resolvedSourceUrl(ownerId, conversation.id),
+          );
+          stream.assertOpen();
+          yield relayed;
         }
       } finally {
         await events.return?.();

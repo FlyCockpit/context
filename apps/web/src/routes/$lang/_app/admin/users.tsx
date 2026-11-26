@@ -563,7 +563,6 @@ function InviteUserDialog({
                 label={t("admin:users.emailLabel")}
                 type="email"
                 autoComplete="email"
-                placeholder={t("admin:users.emailPlaceholder")}
                 className="space-y-1.5"
               />
             )}
