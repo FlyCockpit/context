@@ -37,8 +37,8 @@ vi.mock("@tanstack/react-router-devtools", () => ({ TanStackRouterDevtools: () =
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@cockpit-context/env/web", () => ({ env: { VITE_APP_NAME: "Cockpit Context" } }));
 vi.mock("@/components/admin-setup-banner", () => ({ AdminSetupBanner: () => null }));
-vi.mock("@/components/bottom-nav", () => ({ default: () => null }));
-vi.mock("@/components/header", () => ({ default: () => null }));
+vi.mock("@/components/bottom-nav", () => ({ default: () => <nav data-bottom-nav="" /> }));
+vi.mock("@/components/header", () => ({ default: () => <div data-shell-header="" /> }));
 vi.mock("@/components/pull-to-refresh", () => ({
   default: ({ children }: { children: ReactNode }) => children,
 }));
@@ -168,5 +168,31 @@ describe("app shell first load", () => {
     const html = await render(AppRoute);
     expect(html).toContain("[&amp;:not(:has(&gt;[data-shell-end]))]:invisible");
     expect(html).toMatch(/<span data-shell-end="" hidden=""><\/span><\/div>/);
+  });
+});
+
+describe("the app shell while a page loads", () => {
+  // With `ssr: false` the server renders `_app`'s pending component, and the
+  // client keeps it until the layout mounts, so it is the first frame of every
+  // hard refresh. It must be the real shell with only the content waiting.
+  const pending = () => {
+    const { pendingComponent: Pending } = (
+      AppRoute as unknown as { options: { pendingComponent: () => ReactNode } }
+    ).options;
+    return renderToStaticMarkup(<Pending />);
+  };
+  /** Everything outside `<main>`: the shell's own chrome. */
+  const chrome = (html: string) => html.replace(/<main\b[\s\S]*<\/main>/, "<main/>");
+
+  it("renders the header, the scroller and the bottom nav around a content skeleton", () => {
+    const html = pending();
+    expect(html).toContain("data-shell-header");
+    expect(html).toContain("data-bottom-nav");
+    expect(mainTag(html)).toContain('data-scroll-restoration-id="app-main"');
+    expect(html).toMatch(/<main\b[^>]*><p>skeleton<\/p>/);
+  });
+
+  it("is the same frame as the loaded layout, so nothing outside the content moves", async () => {
+    expect(chrome(pending())).toBe(chrome(await render(AppRoute)));
   });
 });
