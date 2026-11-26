@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/i18n/config";
+import { signupMode } from "@/lib/signup-mode";
 import { orpc } from "@/utils/orpc";
 
 // Lazy so the shared Base UI overlay chunk (Menu/Dialog/focus-guards) leaves the
@@ -62,10 +63,11 @@ export default function UserMenu() {
     // Default to NOT showing Sign up until the flags are known, so it never
     // flashes when sign-up is closed. The first-admin bootstrap counts: it is
     // on only until the first account exists (appConfig), and then the
-    // operator needs this way in.
-    const showSignUp =
-      !configPending &&
-      (configData?.signupOpen === true || configData?.adminBootstrapSignupEnabled === true);
+    // operator needs this way in. Forced SSO never offers it: the sign-up page
+    // refuses it and the identity provider is the only way in
+    // (lib/signup-mode.ts).
+    const mode = !configPending && configData ? signupMode(configData) : undefined;
+    const showSignUp = mode === "open" || mode === "bootstrap";
     return (
       <div className="flex items-center gap-2">
         {/* Links styled as buttons, not a <Button> inside a <Link>: nesting

@@ -107,6 +107,18 @@ describe("signed-out account control", () => {
     expect(link(render(), "/$lang/signup")).toBeDefined();
   });
 
+  it("offers no Sign up under forced SSO, even with open sign-up or the first-admin bootstrap", () => {
+    for (const config of [
+      { forceSso: true, signupOpen: true, adminBootstrapSignupEnabled: false },
+      { forceSso: true, signupOpen: false, adminBootstrapSignupEnabled: true },
+    ]) {
+      fixture.config = config;
+      const html = render();
+      expect(link(html, "/$lang/signup")).toBeUndefined();
+      expect(link(html, "/$lang/login")).toBeDefined();
+    }
+  });
+
   it("never flashes Sign up while the config is still loading", () => {
     fixture.config = undefined;
     expect(link(render(), "/$lang/signup")).toBeUndefined();
