@@ -55,6 +55,12 @@ describe("FormPage", () => {
     expect(html).toContain('aria-label="Memory"');
   });
 
+  it("wraps the summary instead of cutting it, so no value is hidden on a phone", () => {
+    const summary = html.match(/<span data-slot="advanced-section-summary"[^>]*>/)?.[0] ?? "";
+    expect(summary).toContain("break-words");
+    expect(summary).not.toMatch(/\b(truncate|text-ellipsis|whitespace-nowrap)\b/);
+  });
+
   it("opens an advanced section on request", () => {
     const open = renderToStaticMarkup(
       <AdvancedSection title="Network" defaultOpen>

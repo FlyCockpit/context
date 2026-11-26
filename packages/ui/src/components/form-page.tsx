@@ -14,7 +14,7 @@ import type * as React from "react";
  *   (1024px) and one on phones; a field that needs the full row passes
  *   `className="lg:col-span-2"`.
  * - `AdvancedSection`: a collapsed section for expert fields with safe
- *   defaults, showing a one-line summary of the current values while closed,
+ *   defaults, showing a summary of the current values (it wraps) while closed,
  *   so nothing is hidden without a trace.
  * - `FormActionBar`: the sticky action bar, one right-aligned row at every
  *   width (a phone keeps the fields in view), primary action last, so it is
@@ -144,7 +144,7 @@ function FormSection({
 type AdvancedSectionProps = {
   title: React.ReactNode;
   /**
-   * One line naming the current values, shown while the section is closed
+   * A line naming the current values (it wraps, never cut), shown while closed
    * ("2 vCPU · 4 GiB · destroy after 5 min"), so a hidden default is never a
    * secret.
    */
@@ -194,7 +194,7 @@ function AdvancedSection({
           {summary ? (
             <span
               data-slot="advanced-section-summary"
-              className="min-w-0 truncate text-sm text-muted-foreground group-open/advanced:hidden"
+              className="min-w-0 text-sm text-pretty break-words text-muted-foreground group-open/advanced:hidden"
             >
               {summary}
             </span>
