@@ -5,8 +5,9 @@ import "@cockpit-context/env/load-dotenv";
 import { createHash } from "node:crypto";
 import { type CredentialKind, createContext } from "@cockpit-context/api/context";
 import { appRouter } from "@cockpit-context/api/routers/index";
-import { auth, type Session } from "@cockpit-context/auth";
+import { auth, passwordPepper, type Session } from "@cockpit-context/auth";
 import { issueBootstrapTokenIfNeeded } from "@cockpit-context/auth/bootstrap-token";
+import { syncPasswordPepper } from "@cockpit-context/auth/password-pepper-store";
 import { getSignupAvailability } from "@cockpit-context/auth/signup-availability";
 import { ORPC_BATCH_MAX_SIZE } from "@cockpit-context/config/orpc-batch";
 import { THEME_INIT_SCRIPT } from "@cockpit-context/config/theme-init";
@@ -613,6 +614,8 @@ try {
     `[bootstrap] Could not check for existing accounts (${errLabel}); no bootstrap token this boot. Restart once the database is reachable.`,
   );
 }
+
+await syncPasswordPepper(prisma, passwordPepper);
 
 await lifecycle.start((onReady) =>
   serve(

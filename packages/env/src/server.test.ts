@@ -523,3 +523,67 @@ describe("server env — Cockpit Context", () => {
     expect(mod.env.COCKPIT_CONTEXT_MODEL_API).toBe("messages");
   });
 });
+
+describe("server env — BETTER_AUTH_SECRET_PREVIOUS", () => {
+  const previous = "Qm7vT2xK9pL4wN8rB3cZ6hJ1dF5sG0yU";
+
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it.each([undefined, ""])("treats an absent or empty previous key as unset", async (value) => {
+    const { env } = await importServerEnv({
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET_PREVIOUS: value,
+    });
+    expect(env.BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
+  });
+
+  it("accepts a distinct strong previous key in production", async () => {
+    const { env } = await importServerEnv({
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET_PREVIOUS: previous,
+    });
+    expect(env.BETTER_AUTH_SECRET_PREVIOUS === previous).toBe(true);
+  });
+
+  it("rejects previous keys shorter than 32 characters", async () => {
+    await expect(
+      importServerEnv({ BETTER_AUTH_SECRET_PREVIOUS: previous.slice(0, 31) }),
+    ).rejects.toThrow();
+  });
+
+  it.each(["development", "production"])(
+    "rejects equal current and previous keys in %s",
+    async (nodeEnv) => {
+      await expect(
+        importServerEnv({
+          NODE_ENV: nodeEnv,
+          BETTER_AUTH_SECRET_PREVIOUS: BASE_ENV.BETTER_AUTH_SECRET,
+        }),
+      ).rejects.toThrow(/must differ from BETTER_AUTH_SECRET/);
+    },
+  );
+
+  it.each(["x".repeat(32), "ab".repeat(16), "changeme".repeat(5), "abcde".repeat(8)])(
+    "rejects a weak previous key in production",
+    async (value) => {
+      await expect(
+        importServerEnv({ NODE_ENV: "production", BETTER_AUTH_SECRET_PREVIOUS: value }),
+      ).rejects.toThrow(/BETTER_AUTH_SECRET_PREVIOUS is weak/);
+    },
+  );
+
+  it("warns about a weak previous key in development without logging it", async () => {
+    const weak = "a".repeat(32);
+    const warn = vi.mocked(console.warn);
+    await importServerEnv({ BETTER_AUTH_SECRET_PREVIOUS: weak });
+    expect(
+      warn.mock.calls.some(([line]) =>
+        String(line).includes("BETTER_AUTH_SECRET_PREVIOUS is weak"),
+      ),
+    ).toBe(true);
+    expect(warn.mock.calls.some(([line]) => String(line).includes(weak))).toBe(false);
+  });
+});

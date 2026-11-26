@@ -6,6 +6,8 @@ Backup artifacts are verified `pg_dump -Fc` database archives, including applica
 
 `/data` contains clones/checkouts. Ordinary repositories can be refetched, but a private snapshot made with a one-time SSH key cannot necessarily be recreated. Take a separate consistent volume snapshot of those clones, or retain a safe way to reauthorize them. Stop app writes when taking coordinated database/data snapshots. Saved SSH ciphertext in the DB is useless without the original `COCKPIT_CONTEXT_ENCRYPTION_KEYS` keyring. Keep that keyring and `BETTER_AUTH_SECRET` in separate secure recovery custody; never attach them to an issue or commit them. Retain old key versions during rotation so older ciphertext remains decryptable.
 
+Retain auth secrets needed by older database backups. A database sealed under a different secret refuses startup; follow [password pepper recovery](./development.md#password-pepper) to restore its key or reset unusable passwords.
+
 ## Configure backups
 
 Backups default off. With no backup settings, there is no scheduled dump or required backup volume/sidecar, migrations proceed without a dump, readiness is unaffected, and every start of the image logs one notice with opt-in instructions: the entrypoint's backups check prints it for the app and for a `migrate` job alike (a source start such as `pnpm dev:server` bypasses the entrypoint and prints none) (a warning instead when a destination is configured but `BACKUP_ENABLED` is not `true`).

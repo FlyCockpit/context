@@ -26,6 +26,7 @@ A first deployment needs only `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `BETTER
 |---|---|
 | `POSTGRES_PASSWORD` | Strong unique hex password; Compose interpolates it into DATABASE_URL without URL escaping. Generate with `openssl rand -hex 32`. |
 | `BETTER_AUTH_SECRET` | At least 32 random characters; generate independently per environment and retain securely. |
+| `BETTER_AUTH_SECRET_PREVIOUS` | Optional old secret during [password pepper rotation](./development.md#password-pepper). |
 | `BETTER_AUTH_URL` | Exact HTTPS origin, with no path/query/fragment; browser, OAuth issuer and resource must agree. |
 | `ADMIN_EMAILS` | Required initial administrator email allowlist. Use your real controlled address. The first-admin signup also needs the one-time token from the boot log ([First administrator](#first-administrator-private-access-before-public-exposure)). |
 | `COCKPIT_CONTEXT_ENCRYPTION_KEYS` | Production keyring, e.g. `v1:<base64 of 32 random bytes>`; generate with `openssl rand -base64 32`. Keep separately for recovery. |

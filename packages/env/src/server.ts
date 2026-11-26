@@ -103,6 +103,23 @@ if (weakReason) {
   console.warn(msg);
 }
 
+// The previous pepper key is configured only during a secret rotation.
+if (env.BETTER_AUTH_SECRET_PREVIOUS) {
+  if (env.BETTER_AUTH_SECRET_PREVIOUS === env.BETTER_AUTH_SECRET) {
+    throw new Error(
+      "[env] BETTER_AUTH_SECRET_PREVIOUS must differ from BETTER_AUTH_SECRET; unset it or set the old secret",
+    );
+  }
+  const previousWeakReason = isWeakSecret(env.BETTER_AUTH_SECRET_PREVIOUS);
+  if (previousWeakReason) {
+    const msg =
+      `[env] BETTER_AUTH_SECRET_PREVIOUS is weak: ${previousWeakReason}. ` +
+      "Use the old BETTER_AUTH_SECRET only while rotating; see docs/development.md § Password pepper.";
+    if (env.NODE_ENV === "production") throw new Error(msg);
+    console.warn(msg);
+  }
+}
+
 // Same entropy bar as BETTER_AUTH_SECRET, but only when SSO credentials are
 // configured: SSO_CLIENT_SECRET is optional (unset = SSO inert), so an unset
 // value must not warn. A weak-but-configured secret is live the moment

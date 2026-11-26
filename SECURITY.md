@@ -21,3 +21,5 @@ Run one app replica behind HTTPS and a correctly configured trusted proxy. Keep 
 ## Repository checks
 
 The repository includes seven-day pnpm release-age/build-script controls, pinned Actions, secret scanning, dependency audit and container scanning workflows. Their coverage depends on running the configured workflows; checks are not a security guarantee. The runtime is a single non-root app image, without a standalone worker. Contributor safety rules live in [AGENTS.md](./AGENTS.md).
+
+Password hashes are sealed under a key derived from `BETTER_AUTH_SECRET`. Retain the secret separately from database backups and follow the [rotation and recovery procedure](./docs/development.md#password-pepper).

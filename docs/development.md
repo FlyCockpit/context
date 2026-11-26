@@ -44,6 +44,36 @@ A display-only mention is not an invocation. `destructive:audited` marks proven-
 
 Never paste secrets, private source, prompts, conversations or filled env files into public issues. Report suspected vulnerabilities through [SECURITY.md](../SECURITY.md). Operator configuration and first signup are in [deployment](./deploy.md); data/key custody and explicit restore confirmation are in [backup/restore](./backup-restore.md). Auth and permissions are security boundaries even in tests and examples.
 
+## Password pepper
+
+Password hashes use Better-Auth's scrypt, sealed with AES-256-GCM under a key derived from `BETTER_AUTH_SECRET` with HKDF-SHA256. A database dump, backup, or read-only SQL injection no longer yields crackable hashes without the server secret. A full server compromise with that secret is outside this protection.
+
+Stored format: `pw1:<16-hex key fingerprint>:<base64url(nonce || ciphertext || tag)>`. The fingerprint identifies the key without revealing it. The authenticated additional data (AAD) is `password-v1`. Better-Auth's password hooks receive no user id, so values are not bound to their row. A database writer can still swap two accounts' values.
+
+The server seals legacy unsealed hashes and authenticates every sealed value at startup, in one transaction under an advisory lock, before listening. Sign-in never accepts unsealed hashes. Corrupt values produce a startup warning with a count and the recovery command; startup still succeeds when no unknown keys remain. `pnpm doctor:app` reports fingerprints, counts, and structurally invalid envelopes without changing data. It does not receive the key in its database probe; cryptographic authenticity is checked at server start.
+
+To rotate the secret:
+
+1. Stop the server. Set `BETTER_AUTH_SECRET_PREVIOUS=<old>` and `BETTER_AUTH_SECRET=<new>` for the server, then restart it. Both secrets must be strong, at least 32 characters, and different. Never run instances with different `BETTER_AUTH_SECRET` configurations side by side: an old-config replica can neither verify re-wrapped hashes nor write current-key ones.
+2. Check that the log `password pepper: re-wrapped … none remain under the previous key … BETTER_AUTH_SECRET_PREVIOUS can now be removed` or `pnpm doctor:app` shows 0 remaining under the previous key. Resolve doctor's invalid-envelope warnings before relying on its fingerprint inventory. If hashes remain, keep PREVIOUS set and restart the server again. If they are corrupt, use the recovery command below.
+3. Only after 0 remain, remove `BETTER_AUTH_SECRET_PREVIOUS` everywhere and restart the server again.
+
+Rotating `BETTER_AUTH_SECRET` still signs everyone out and makes existing TOTP enrolments undecryptable and invalidates MCP agent tokens, as before. The previous key applies only to the password pepper; it does not change those behaviours.
+
+A `PasswordPepperKeyError` refuses startup when stored values name an unconfigured key. Restore the secret used to write them, as `BETTER_AUTH_SECRET` or as `BETTER_AUTH_SECRET_PREVIOUS` during rotation. The message names fingerprints, never secrets.
+
+If the key is lost, or values are corrupt or malformed, the owner stops the server and runs recovery as a one-shot from a checkout with the validated server environment and database access. It needs no listening server:
+
+```bash
+pnpm auth:pepper:reset-unusable                     # dry run: count and affected user ids
+pnpm auth:pepper:reset-unusable --confirm <count>   # exact count from the dry run
+```
+
+For production or any non-local database, add `--allow-non-local` to both commands, with the server stopped. The command uses the same local database guard as maintenance scripts by default. It replaces only unusable password values with random passwords nobody knows, sealed under the current key. It keeps credential rows, legacy hashes, and authentic current/previous values. Start the server, then tell the listed users to use the normal forgot-password email flow. SMTP must work for that flow. Without SMTP, an administrator can issue a password link for non-admin users from Admin → Users; recovering an admin requires working SMTP.
+
+**Backups:** `BETTER_AUTH_SECRET` also protects passwords. Back it up separately from the database and retain keys needed by older backups. A lost key requires the recovery procedure above for affected passwords. See [backup and restore](./backup-restore.md).
+
+
 ## Forced two-factor authentication
 
 Administrator access requires a second factor by default. Preserve FORCE_2FA_DEFAULTS, the 24-hour enrollment grace and createdAt in session projections/call sites. Do not lengthen the grace, change the absent-setting default or apply the grace to other authorization checks. MCP tokens/grants remain independently revocable credentials; their requests do not perform interactive second-factor enrollment.

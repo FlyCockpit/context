@@ -22,10 +22,14 @@ vi.mock("@cockpit-context/mailer", () => ({
   sendEmail: vi.fn(),
 }));
 
-const { auth } = await import("./index");
+const { auth, passwordPepper } = await import("./index");
 const { onUserBanned } = await import("./ban");
 
 describe("production auth wiring", () => {
+  it("uses the pepper for hashing and verifying passwords", () => {
+    expect(auth.options.emailAndPassword?.password?.hash).toBe(passwordPepper.hash);
+    expect(auth.options.emailAndPassword?.password?.verify).toBe(passwordPepper.verify);
+  });
   it("registers the banned-session guard as the first plugin", () => {
     expect(auth.options.plugins?.[0]?.id).toBe("cockpit-context-banned-session-guard");
   });

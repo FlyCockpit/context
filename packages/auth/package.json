@@ -25,6 +25,9 @@
     "./mcp-grant": {
       "default": "./src/mcp-grant.ts"
     },
+    "./password-pepper-store": {
+      "default": "./src/password-pepper-store.ts"
+    },
     "./password-policy": {
       "default": "./src/password-policy.ts"
     },

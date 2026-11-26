@@ -24,6 +24,7 @@ services:
       # Use a hex password: it is interpolated into this URL without escaping.
       DATABASE_URL: postgresql://cockpit_context:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@cockpit-context-postgres:5432/cockpit_context
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env (min 32 chars)}
+      BETTER_AUTH_SECRET_PREVIOUS: ${BETTER_AUTH_SECRET_PREVIOUS:-}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set BETTER_AUTH_URL to the public HTTPS origin}
       COCKPIT_CONTEXT_ENCRYPTION_KEYS: ${COCKPIT_CONTEXT_ENCRYPTION_KEYS:?Set COCKPIT_CONTEXT_ENCRYPTION_KEYS in .env}
       COCKPIT_CONTEXT_DATA_DIR: /data

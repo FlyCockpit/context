@@ -8,6 +8,7 @@
 #     db:migrate | db:migrate:rebase | db:worktree    (use the shadow DB; no escape hatch)
 #     db:reset:local                                  (drops this checkout's DB; no escape hatch)
 #     db:seed:e2e                                     (known-credential demo seed; no escape hatch)
+#     auth:pepper:reset-unusable                      (explicit non-local opt-in in CLI)
 #   --shadow additionally validates the shadow URL derived from DATABASE_URL
 #   (the same derivation as packages/db/prisma.config.ts: `<db>_shadow`).
 #
@@ -207,6 +208,8 @@ if [[ "$CMD" == "--self-test" ]]; then
   self_test_guard db:reset:local "postgresql://db.example.com:5432/prod" 1 "db:reset:local refuses the per-command escape" ALLOW_NONLOCAL_DB_RESET_LOCAL="$esc"
   self_test_guard db:reset:local "postgresql://db.example.com:5432/prod" 1 "db:reset:local refuses the generic escape" ASSERT_LOCAL_DB_ESCAPE="$esc"
   self_test_guard db:migrate+shadow "postgresql://db.example.com:5432/prod" 1 "shadow commands refuse the escape" ASSERT_LOCAL_DB_ESCAPE="$esc"
+  self_test_guard auth:pepper:reset-unusable "postgresql://localhost:5432/$here" 0 "pepper recovery accepts this checkout database"
+  self_test_guard auth:pepper:reset-unusable "postgresql://db.example.com:5432/$here" 1 "pepper recovery refuses non-local targets" ASSERT_LOCAL_DB_ESCAPE="$esc"
   self_test_guard db:seed:e2e "postgresql://localhost:5432/$here" 0 "db:seed:e2e accepts this checkout's DB"
   self_test_guard db:seed:e2e "postgresql://db.example.com:5432/$here" 1 "db:seed:e2e rejects a remote host"
   self_test_guard db:seed:e2e "postgresql://db.example.com:5432/prod" 1 "db:seed:e2e refuses the generic escape" ASSERT_LOCAL_DB_ESCAPE="$esc"
@@ -236,11 +239,11 @@ fi
 ESCAPABLE=0
 case "$CMD" in
   db:seed | db:studio | db:migrate:apply) ESCAPABLE=1 ;;
-  db:migrate | db:migrate:rebase | db:worktree | db:reset:local | db:seed:e2e) ESCAPABLE=0 ;;
+  db:migrate | db:migrate:rebase | db:worktree | db:reset:local | db:seed:e2e | auth:pepper:reset-unusable) ESCAPABLE=0 ;;
   *)
     echo "FATAL: usage: $0 <COMMAND_NAME> [--shadow]" >&2
     echo "       COMMAND_NAME is db:seed | db:studio | db:migrate | db:migrate:apply |" >&2
-    echo "       db:migrate:rebase | db:worktree | db:reset:local | db:seed:e2e" >&2
+    echo "       db:migrate:rebase | db:worktree | db:reset:local | db:seed:e2e | auth:pepper:reset-unusable" >&2
     exit 1
     ;;
 esac
