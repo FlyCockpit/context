@@ -28,6 +28,10 @@
       "description": "Three steps to your agent’s first answer from real source code.",
       "progress": "{{done}} of {{total}} done",
       "done": "Done",
+      "hide": "Hide",
+      "hideAriaLabel": "Hide the getting-started checklist",
+      "hidden": "Getting started is hidden.",
+      "undo": "Undo",
       "connect": {
         "title": "Connect your coding agent",
         "body": "Add Cockpit Context to Claude Code or Codex. Sign in with OAuth without copying a token.",

@@ -193,11 +193,14 @@ export default defineConfig(({ mode }) => {
       theme_color: "#0c0c0c",
       background_color: "#0c0c0c",
     },
-    // Precache the install-surface icons explicitly rather than relying on the
+    // Precache the install-surface icons and the header logo's sources
+    // (lib/app-logo.ts) explicitly rather than relying on the
     // globPatterns png/ico match, so they survive offline even if those globs
     // are narrowed later. Appended to __WB_MANIFEST (injectManifest strategy).
     includeAssets: [
+      "pwa-32x32.png",
       "pwa-64x64.png",
+      "pwa-128x128.png",
       "pwa-192x192.png",
       "pwa-512x512.png",
       "maskable-icon-512x512.png",

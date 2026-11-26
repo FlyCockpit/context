@@ -8,13 +8,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@cockpit-context/ui/components/dropdown-menu";
+import { toast } from "@cockpit-context/ui/components/sileo";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { User } from "lucide-react";
+import { LogOut, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { markExplicitSignOut } from "@/hooks/use-reload-on-identity-change";
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/i18n/config";
 import { getNavItems, toLangRoute } from "@/lib/nav-items";
+import { friendly } from "@/utils/friendly-error";
 
 /**
  * The real Base UI account menu. Lazy-loaded by `user-menu.tsx` on first
@@ -45,15 +47,25 @@ export default function UserMenuContent() {
 
   return (
     <DropdownMenu defaultOpen>
+      {/* A 44px icon below `md:`. From `md:` the name, at most 192px, shrinking
+          (to 44px) before the header controls run past the trailing line;
+          the name truncates and the full name is the title (same as
+          UserMenu's eager trigger). */}
       <DropdownMenuTrigger
-        aria-label={t("userMenu.open")}
+        // The visible name starts the accessible name (WCAG 2.5.3): voice
+        // control users say what they see.
+        aria-label={t("userMenu.openFor", { name: session.user.name })}
         title={session.user.name}
         render={
-          <Button variant="outline" size="touch" className="w-11 px-0! md:w-auto md:px-3.5!" />
+          <Button
+            variant="outline"
+            size="touch"
+            className="w-11 px-0! md:w-auto md:min-w-11 md:max-w-48 md:shrink md:px-3.5!"
+          />
         }
       >
         <User className="size-4 md:hidden" aria-hidden="true" />
-        <span className="hidden max-w-40 truncate md:inline">{session.user.name}</span>
+        <span className="hidden truncate md:block">{session.user.name}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-56 bg-card">
         <DropdownMenuGroup>
@@ -78,7 +90,6 @@ export default function UserMenuContent() {
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            inset
             variant="destructive"
             onClick={async () => {
               // Dynamic import keeps the sign-out path out of the menu chunk's
@@ -86,16 +97,27 @@ export default function UserMenuContent() {
               // is reachable for a signed-in user.
               const { authClient } = await import("@/lib/auth-client");
               const undoSignOutMark = markExplicitSignOut();
-              authClient.signOut({
-                fetchOptions: {
-                  onSuccess: () => {
-                    window.location.assign(`/${lang}/login`);
+              // Still signed in after a failure: undo the mark (so a later
+              // identity change still reloads) and say so.
+              const failed = (error: unknown) => {
+                undoSignOutMark();
+                toast.error(friendly(error, t("userMenu.signOutFailed")));
+              };
+              try {
+                const result = await authClient.signOut({
+                  fetchOptions: {
+                    onSuccess: () => {
+                      window.location.assign(`/${lang}/login`);
+                    },
                   },
-                  onError: undoSignOutMark,
-                },
-              });
+                });
+                if (result.error) failed(result.error);
+              } catch (error) {
+                failed(error);
+              }
             }}
           >
+            <LogOut className="size-4" />
             {t("userMenu.signOut")}
           </DropdownMenuItem>
         </DropdownMenuGroup>

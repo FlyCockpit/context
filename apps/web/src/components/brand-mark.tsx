@@ -1,41 +1,20 @@
-import { env } from "@cockpit-context/env/web";
 import { cn } from "@cockpit-context/ui/lib/utils";
 
-/** Decorative artwork; the app name remains the accessible text. */
-export function BrandMark({
-  className,
-  nameClassName,
-  size = "md",
-  withName = true,
-}: {
-  className?: string;
-  /** Width caps for the name (the header's AppNameLink). */
-  nameClassName?: string;
-  size?: "md" | "lg";
-  /** Off where the name is already on screen (the header above the auth screens). */
-  withName?: boolean;
-}) {
+/**
+ * The logo alone, as decoration above the auth forms (the header right above
+ * already names the app). The header's logo with the name is `AppNameLink`;
+ * both draw the generated icons from `apps/web/assets/logo.png`. The 192px
+ * install icon covers a 36px box up to 5× density. docs/ui.md § Logo slot.
+ */
+export function BrandMark({ className }: { className?: string }) {
   return (
-    <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
-      <img
-        src="/pwa-192x192.png"
-        alt=""
-        width={36}
-        height={36}
-        decoding="async"
-        className="size-9 shrink-0"
-      />
-      {withName ? (
-        <span
-          className={cn(
-            "min-w-0 truncate font-semibold tracking-tight",
-            size === "lg" ? "text-xl" : "text-lg",
-            nameClassName,
-          )}
-        >
-          {env.VITE_APP_NAME}
-        </span>
-      ) : null}
-    </span>
+    <img
+      src="/pwa-192x192.png"
+      alt=""
+      width={36}
+      height={36}
+      decoding="async"
+      className={cn("size-9 shrink-0", className)}
+    />
   );
 }

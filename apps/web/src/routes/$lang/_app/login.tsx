@@ -19,6 +19,7 @@ import {
   TwoFactorChallenge,
 } from "@/components/auth/two-factor-challenge";
 import { useAuthSession } from "@/hooks/use-auth-session";
+import { APP_HOME, appHomeHref } from "@/lib/app-home";
 import { authClient } from "@/lib/auth-client";
 import { clearServerFieldError, setServerFieldError } from "@/lib/form-server-error";
 import { decideAnonymousOnlyRouteAccess } from "@/lib/route-session-access";
@@ -266,8 +267,8 @@ function SignInForm({
         return;
       }
       toast.success(t("auth:signedInSuccess"));
-      if (redirectTo === `/${lang}/ongoing`) {
-        navigate({ to: "/$lang/ongoing", params: { lang } });
+      if (redirectTo === appHomeHref(lang)) {
+        navigate({ to: APP_HOME, params: { lang } });
       } else {
         window.location.assign(redirectTo);
       }

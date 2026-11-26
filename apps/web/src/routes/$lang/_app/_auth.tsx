@@ -8,22 +8,27 @@ import { InlineRetry } from "@/components/inline-retry";
 import { RouteContentSkeleton } from "@/components/route-content-skeleton";
 import { TwoFactorSetupRequired } from "@/components/two-factor-enrollment";
 import { decideProtectedRouteAccess } from "@/lib/route-session-access";
+import { setSessionHint } from "@/lib/session-hint";
 import { getRouteSession } from "@/server/auth-session";
 import { orpc } from "@/utils/orpc";
 import { twoFactorEnrollmentState } from "@/utils/two-factor-policy";
 
 export const Route = createFileRoute("/$lang/_app/_auth")({
   staticData: { pendingFrame: "app" },
-  beforeLoad: async ({ location, params }) => {
+  beforeLoad: async ({ location, params, context }) => {
     const decision = decideProtectedRouteAccess(await getRouteSession());
     if (decision.kind === "error") throw new Error("Route session unavailable");
     if (decision.kind === "redirect-to-login") {
+      // Keep the public pages' cookie hint in step with what this gate just
+      // learned (lib/session-hint.ts), both ways.
+      setSessionHint(context.queryClient, false);
       throw redirect({
         to: "/$lang/login",
         params: { lang: params.lang },
         search: { redirectTo: location.href },
       });
     }
+    setSessionHint(context.queryClient, true);
     return { session: decision.session };
   },
   component: AuthLayout,

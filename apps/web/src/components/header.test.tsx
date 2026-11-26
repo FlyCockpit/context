@@ -59,8 +59,28 @@ describe("AppNameLink", () => {
     expect(link).not.toContain("shrink-0");
     expect(html).toContain('title="Cockpit Context"');
     // The name truncates inside its caps, so a long name keeps the MainNav's room.
-    const name = classesOf(html, /<span class="([^"]*truncate[^"]*)">Cockpit Context<\/span>/);
+    const name = classesOf(
+      html,
+      /<span aria-hidden="true" class="([^"]*truncate[^"]*)">Cockpit Context<\/span>/,
+    );
     expect(name).toEqual(expect.arrayContaining(["max-w-40", "sm:max-w-56", "lg:max-w-80"]));
+  });
+
+  it("starts with the logo slot: a declared 32px box, generated 1x/2x/4x files, the name as alt once", () => {
+    const html = renderToStaticMarkup(<AppNameLink to="/$lang" lang="en-US" />);
+    const img = html.match(/<a [^>]*><img ([^>]*)\/>/)?.[1] ?? "";
+    expect(img).toContain('src="/pwa-32x32.png"');
+    // Width descriptors + sizes: picked by drawn size × density, so a scaled
+    // root (large screens) still gets a sharp file.
+    expect(img).toContain('srcSet="/pwa-32x32.png 32w, /pwa-64x64.png 64w, /pwa-128x128.png 128w"');
+    expect(img).toContain('sizes="48px"');
+    expect(img).toContain('width="32"');
+    expect(img).toContain('height="32"');
+    expect(img).toContain('alt="Cockpit Context"');
+    expect(img).toMatch(/class="[^"]*\bshrink-0\b/);
+    // The visible name is aria-hidden, so the accessible name is not doubled.
+    expect(html.match(/Cockpit Context</g)).toHaveLength(1);
+    expect(html).toContain('<span aria-hidden="true"');
   });
 });
 

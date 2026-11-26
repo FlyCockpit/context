@@ -44,7 +44,10 @@
     "signIn": "Iniciar sesión",
     "signOut": "Cerrar sesión",
     "signUp": "Registrarse",
-    "open": "Abrir el menú de la cuenta"
+    "open": "Abrir el menú de la cuenta",
+    "openFor": "{{name}}, menú de la cuenta",
+    "openApp": "Abrir app",
+    "signOutFailed": "No se pudo cerrar la sesión. Inténtalo de nuevo."
   },
   "skipToContent": "Saltar al contenido"
 }

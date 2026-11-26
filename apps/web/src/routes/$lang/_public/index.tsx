@@ -1,13 +1,30 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { LandingActions } from "@/components/landing-actions";
 import { PageShell } from "@/components/page-shell";
+import { APP_HOME } from "@/lib/app-home";
 import { landingEntry } from "@/lib/landing-entry";
+import { ensureSessionHint } from "@/lib/session-hint";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_public/")({
+  // A visitor who is probably signed in (a session cookie is present) goes
+  // straight to the signed-in home: the landing is for people without an
+  // account or signed out. Presence only, never an access check: a stale
+  // cookie lands on the home's `_auth` gate, which sends them to sign-in.
+  // The `_public` layout's beforeLoad already put the hint in the query
+  // cache, so this is a cache read, not a second server call; a failed hint
+  // reads as signed out and the landing shows (lib/session-hint.ts). An
+  // anonymous render stays static and cacheable; ssr-cache.ts never caches a
+  // cookie-bearing request, and only 200s, so the redirect is never replayed.
+  beforeLoad: async ({ params, context }) => {
+    const signedIn = await ensureSessionHint(context.queryClient);
+    if (signedIn) {
+      throw redirect({ to: APP_HOME, params: { lang: params.lang }, replace: true });
+    }
+  },
   component: HomePage,
 });
 

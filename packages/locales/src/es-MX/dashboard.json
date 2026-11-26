@@ -28,6 +28,10 @@
       "description": "Tres pasos para la primera respuesta de tu agente basada en código fuente real.",
       "progress": "{{done}} de {{total}} listos",
       "done": "Listo",
+      "hide": "Ocultar",
+      "hideAriaLabel": "Ocultar la lista de primeros pasos",
+      "hidden": "Primeros pasos está oculto.",
+      "undo": "Deshacer",
       "connect": {
         "title": "Conecta tu agente de programación",
         "body": "Agrega Cockpit Context a Claude Code o Codex. Usa OAuth para iniciar sesión sin copiar un token.",

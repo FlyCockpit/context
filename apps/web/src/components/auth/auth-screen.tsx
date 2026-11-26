@@ -30,7 +30,7 @@ export function AuthScreen({ children }: { children: ReactNode }) {
         className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,color-mix(in_oklch,var(--primary)_12%,transparent),transparent_60%)]"
       />
       <div className="mb-6 flex flex-col items-center gap-2 text-center max-sm:hidden">
-        <BrandMark size="lg" withName={false} />
+        <BrandMark />
         <p className="max-w-xs text-sm text-balance text-muted-foreground">
           {t("auth:screen.tagline")}
         </p>

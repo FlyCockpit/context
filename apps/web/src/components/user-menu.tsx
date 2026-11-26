@@ -3,7 +3,7 @@ import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { User } from "lucide-react";
+import { LogIn, User, UserPlus } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -31,45 +31,78 @@ export default function UserMenu() {
   const authSession = useAuthSession();
   const { data: configData, isPending: configPending } = useQuery(orpc.appConfig.queryOptions());
   const { t } = useTranslation("nav");
-  const [mounted, setMounted] = useState(false);
+  // The user the real menu was opened for. Keyed by user id (not a plain
+  // boolean) so signing out and back in as someone else — the component stays
+  // mounted in the header — returns to the closed shell instead of reusing the
+  // lazy menu, which mounts `defaultOpen`, already open for the new user.
+  const [openedFor, setOpenedFor] = useState<string | null>(null);
+  // Whether an identity was ever confirmed in this mount, so a later error
+  // shows the account control (disabled) instead of a loading skeleton.
+  const [hadIdentity, setHadIdentity] = useState(false);
+  const state = authSession.state;
+  if (state.status === "authenticated" && !hadIdentity) setHadIdentity(true);
 
-  if (authSession.state.status === "pending" || authSession.state.status === "error") {
+  if (state.status === "pending") {
     return <Skeleton className="h-11 w-24" />;
   }
 
-  if (authSession.state.status === "anonymous") {
-    // Default to NOT showing Sign up until the flag is known, so it never
-    // flashes when signup is disabled.
-    const showSignUp = !configPending && configData?.signupOpen === true;
+  // A known identity whose session check is failing (offline, server
+  // unreachable): the account control stays where it was, disabled. It is not
+  // loading, so no skeleton; and it is not signed out, so no Sign in.
+  if (state.status === "error") {
+    if (!hadIdentity) return <Skeleton className="h-11 w-24" />;
+    return (
+      <Button variant="outline" size="icon-touch" disabled aria-label={t("userMenu.open")}>
+        <User className="size-4" aria-hidden="true" />
+      </Button>
+    );
+  }
+
+  if (state.status === "anonymous") {
+    // Default to NOT showing Sign up until the flags are known, so it never
+    // flashes when sign-up is closed. The first-admin bootstrap counts: it is
+    // on only until the first account exists (appConfig), and then the
+    // operator needs this way in.
+    const showSignUp =
+      !configPending &&
+      (configData?.signupOpen === true || configData?.adminBootstrapSignupEnabled === true);
     return (
       <div className="flex items-center gap-2">
         {/* Links styled as buttons, not a <Button> inside a <Link>: nesting
-            puts two tab stops on one action and is invalid HTML. */}
-        {/* Below `sm:` only Sign in fits next to language and theme at 320px;
-            the sign-in page links to sign-up. */}
+            puts two tab stops on one action and is invalid HTML. Below `sm:`
+            both are 44px icon buttons, named by `aria-label`, so the row
+            never runs past its trailing line at 320px; the text labels show
+            from `sm:` up. */}
         {showSignUp && (
           <Link
             to="/$lang/signup"
             params={{ lang }}
             search={{ redirectTo: undefined }}
-            className={cn(buttonVariants({ size: "touch" }), "max-sm:hidden")}
+            aria-label={t("userMenu.signUp")}
+            className={cn(buttonVariants({ size: "touch" }), "w-11 px-0 sm:w-auto sm:px-3.5")}
           >
-            {t("userMenu.signUp")}
+            <UserPlus className="size-4 sm:hidden" aria-hidden="true" />
+            <span className="hidden sm:inline">{t("userMenu.signUp")}</span>
           </Link>
         )}
         <Link
           to="/$lang/login"
           params={{ lang }}
           search={{ redirectTo: undefined }}
-          className={cn(buttonVariants({ size: "touch", variant: "outline" }))}
+          aria-label={t("userMenu.signIn")}
+          className={cn(
+            buttonVariants({ size: "touch", variant: "outline" }),
+            "w-11 px-0 sm:w-auto sm:px-3.5",
+          )}
         >
-          {t("userMenu.signIn")}
+          <LogIn className="size-4 sm:hidden" aria-hidden="true" />
+          <span className="hidden sm:inline">{t("userMenu.signIn")}</span>
         </Link>
       </div>
     );
   }
 
-  const session = authSession.state.session;
+  const session = state.session;
 
   // The eager placeholder: visually identical to UserMenuContent's trigger so
   // there is no layout shift when the real control loads. `inert` while the
@@ -79,28 +112,33 @@ export default function UserMenu() {
     <Button
       variant="outline"
       size="touch"
-      aria-label={t("userMenu.open")}
+      // The visible name starts the accessible name (WCAG 2.5.3): voice
+      // control users say what they see.
+      aria-label={t("userMenu.openFor", { name: session.user.name })}
       aria-haspopup="menu"
       title={session.user.name}
-      className="w-11 px-0! md:w-auto md:px-3.5!"
+      // Same as UserMenuContent's trigger: a 44px icon below `md:`; from
+      // `md:` the name, at most 192px, shrinking (to 44px) before the header
+      // controls run past the trailing line, truncated.
+      className="w-11 px-0! md:w-auto md:min-w-11 md:max-w-48 md:shrink md:px-3.5!"
       inert={inert}
       onPointerEnter={prefetchMenu}
       onFocus={prefetchMenu}
       onClick={() => {
         prefetchMenu();
-        setMounted(true);
+        setOpenedFor(session.user.id);
       }}
     >
       <User className="size-4 md:hidden" aria-hidden="true" />
-      <span className="hidden max-w-40 truncate md:inline">{session.user.name}</span>
+      <span className="hidden truncate md:block">{session.user.name}</span>
     </Button>
   );
 
-  if (!mounted) return shell(false);
+  if (openedFor !== session.user.id) return shell(false);
 
   return (
     <Suspense fallback={shell(true)}>
-      <UserMenuContent />
+      <UserMenuContent key={session.user.id} />
     </Suspense>
   );
 }

@@ -1,4 +1,3 @@
-import type { AppRouterClient } from "@cockpit-context/api/routers/index";
 import { isAdminRole } from "@cockpit-context/auth/roles";
 import { buttonVariants } from "@cockpit-context/ui/components/button";
 import {
@@ -8,20 +7,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@cockpit-context/ui/components/card";
-import { CodeSnippet } from "@cockpit-context/ui/components/code-snippet";
-import { CopyField } from "@cockpit-context/ui/components/copy-field";
-import { toast } from "@cockpit-context/ui/components/sileo";
 import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Activity, ArrowRight, Check } from "lucide-react";
-import type { ReactNode } from "react";
+import { Activity, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   ConversationRow,
   ConversationRowsSkeleton,
 } from "@/components/conversations/conversation-row";
+import { GettingStarted } from "@/components/getting-started";
 import { InlineRetry } from "@/components/inline-retry";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
@@ -29,15 +25,12 @@ import { StatusPill } from "@/components/status-pill";
 import { useHomeStatus } from "@/hooks/use-home-status";
 import { useNow } from "@/hooks/use-now";
 import { useRunActivity } from "@/hooks/use-run-activity";
-import { claudeOAuthCommand, codexOAuthCommand } from "@/lib/access";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/ongoing")({
   staticData: { pendingShape: "list" },
   component: OngoingPage,
 });
-
-type HomeStatus = Awaited<ReturnType<AppRouterClient["home"]["status"]>>;
 
 const LINK_BUTTON = cn(buttonVariants({ variant: "outline", size: "touch" }), "gap-2");
 
@@ -84,9 +77,8 @@ function OngoingPage() {
               ) : null}
             </Card>
           ) : null}
-          {status.data.hasPackages && status.data.hasConnection ? null : (
-            <GettingStarted lang={lang} status={status.data} />
-          )}
+          {/* Renders nothing once every step is done or the user hid it. */}
+          <GettingStarted lang={lang} status={status.data} scope={session.user.id} />
           <LiveSection lang={lang} />
         </>
       )}
@@ -100,141 +92,6 @@ function OngoingSkeleton() {
       <Skeleton className="h-80 w-full rounded-xl" />
       <Skeleton className="h-28 w-full rounded-xl" />
     </div>
-  );
-}
-
-// ── Getting started ──
-
-function GettingStarted({ lang, status }: { lang: string; status: HomeStatus }) {
-  const { t } = useTranslation(["dashboard", "common"]);
-  const steps = [status.hasConnection, status.hasPackages, status.hasConversations];
-  const done = steps.filter(Boolean).length;
-  const onCopied = () => toast.success(t("common:actions.copied"));
-  const connectCommand = claudeOAuthCommand(status.mcpUrl);
-
-  return (
-    <Card>
-      <CardHeader className="flex min-w-0 flex-row flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <CardTitle id="getting-started-title" className="text-lg">
-            {t("dashboard:ongoing.start.title")}
-          </CardTitle>
-          <CardDescription className="max-w-prose text-pretty">
-            {t("dashboard:ongoing.start.description")}
-          </CardDescription>
-        </div>
-        <StatusPill tone={done > 0 ? "info" : "muted"}>
-          {t("dashboard:ongoing.start.progress", { done, total: steps.length })}
-        </StatusPill>
-      </CardHeader>
-      <CardContent>
-        <ol className="flex min-w-0 flex-col">
-          <Step
-            index={1}
-            done={status.hasConnection}
-            title={t("dashboard:ongoing.start.connect.title")}
-            body={t("dashboard:ongoing.start.connect.body")}
-          >
-            <p className="text-sm font-medium">{t("dashboard:ongoing.start.connect.claudeCode")}</p>
-            <CopyField
-              value={connectCommand}
-              copyLabel={t("dashboard:ongoing.start.connect.copy")}
-              onCopied={onCopied}
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("dashboard:ongoing.start.connect.authenticate")}
-            </p>
-            <p className="text-sm font-medium">{t("dashboard:ongoing.start.connect.codex")}</p>
-            <CodeSnippet
-              code={codexOAuthCommand(status.mcpUrl)}
-              copyLabel={t("dashboard:ongoing.start.connect.copyCodex")}
-              onCopied={onCopied}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Link to="/$lang/access/tokens" params={{ lang }} className={LINK_BUTTON}>
-                {t("dashboard:ongoing.start.connect.token")}
-                <ArrowRight aria-hidden="true" className="size-4" />
-              </Link>
-            </div>
-          </Step>
-          <Step
-            index={2}
-            done={status.hasPackages}
-            title={t("dashboard:ongoing.start.package.title")}
-            body={t("dashboard:ongoing.start.package.body")}
-          >
-            <div className="flex flex-wrap gap-2">
-              <Link to="/$lang/packages" params={{ lang }} className={LINK_BUTTON}>
-                {t("dashboard:ongoing.start.package.action")}
-                <ArrowRight aria-hidden="true" className="size-4" />
-              </Link>
-            </div>
-          </Step>
-          <Step
-            index={3}
-            done={status.hasConversations}
-            last
-            title={t("dashboard:ongoing.start.ask.title")}
-            body={t("dashboard:ongoing.start.ask.body")}
-          >
-            <CopyField
-              value={t("dashboard:ongoing.start.ask.example")}
-              copyLabel={t("dashboard:ongoing.start.ask.copy")}
-              onCopied={onCopied}
-            />
-          </Step>
-        </ol>
-      </CardContent>
-    </Card>
-  );
-}
-
-function Step({
-  index,
-  done,
-  last = false,
-  title,
-  body,
-  children,
-}: {
-  index: number;
-  done: boolean;
-  last?: boolean;
-  title: string;
-  body: string;
-  children: ReactNode;
-}) {
-  const { t } = useTranslation(["dashboard"]);
-  return (
-    <li className="relative flex min-w-0 gap-4 pb-6 last:pb-0">
-      {last ? null : (
-        <span
-          aria-hidden="true"
-          className="absolute top-9 bottom-1 left-[calc(1rem_-_1px)] w-px bg-border"
-        />
-      )}
-      <span
-        aria-hidden="true"
-        className={cn(
-          "relative grid size-8 shrink-0 place-items-center rounded-full text-sm font-semibold",
-          done
-            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-            : "border border-primary/40 bg-background text-primary-text",
-        )}
-      >
-        {done ? <Check className="size-4" /> : index}
-      </span>
-      <div className="min-w-0 flex-1 space-y-3 pt-1">
-        <div className="space-y-1">
-          <h3 className="flex flex-wrap items-center gap-2 font-medium">
-            <span className={cn(done && "text-muted-foreground")}>{title}</span>
-            {done ? <StatusPill tone="good">{t("dashboard:ongoing.start.done")}</StatusPill> : null}
-          </h3>
-          <p className="max-w-prose text-sm text-pretty text-muted-foreground">{body}</p>
-        </div>
-        {done ? null : children}
-      </div>
-    </li>
   );
 }
 

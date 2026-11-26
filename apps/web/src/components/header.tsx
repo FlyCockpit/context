@@ -3,6 +3,7 @@ import { useParams } from "@tanstack/react-router";
 
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/i18n/config";
+import { APP_HOME } from "@/lib/app-home";
 
 import { AppNameLink } from "./app-name-link";
 import { LanguageSwitcher } from "./language-switcher";
@@ -16,9 +17,9 @@ export default function Header() {
   const params = useParams({ strict: false });
   const lang = isSupportedLocale(params.lang) ? params.lang : DEFAULT_LOCALE;
   const { state } = useAuthSession();
-  // Signed in, the wordmark goes to the app's home (Ongoing); otherwise to the
-  // public landing page.
-  const home = state.status === "authenticated" ? "/$lang/ongoing" : "/$lang";
+  // Signed in, the wordmark goes to the signed-in home (APP_HOME); otherwise
+  // to the public landing page.
+  const home = state.status === "authenticated" ? APP_HOME : "/$lang";
 
   return (
     // `data-app-header`: what `pnpm check:shell-loading` measures, frame by

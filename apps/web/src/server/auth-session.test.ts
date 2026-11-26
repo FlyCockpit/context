@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveRouteSessionFromAuth, toRouteSession } from "./auth-session";
+import { hasSessionTokenCookie, resolveRouteSessionFromAuth, toRouteSession } from "./auth-session";
 
 const getSessionMock = vi.fn();
 
@@ -122,5 +122,19 @@ describe("auth route session server helpers", () => {
     await expect(resolveRouteSessionFromAuth(new Headers(), getSessionMock)).resolves.toEqual({
       status: "error",
     });
+  });
+});
+
+describe("hasSessionTokenCookie (the public pages' presence-only hint)", () => {
+  it("is true only for a non-empty Context session token cookie", () => {
+    expect(hasSessionTokenCookie("cockpit-context.session_token=abc")).toBe(true);
+    expect(hasSessionTokenCookie("a=1; __Secure-cockpit-context.session_token=abc; b=2")).toBe(
+      true,
+    );
+    expect(hasSessionTokenCookie("cockpit-context.session_token=")).toBe(false);
+    expect(hasSessionTokenCookie("cockpit-context.session_data=abc")).toBe(false);
+    expect(hasSessionTokenCookie("better-auth.session_token=abc")).toBe(false);
+    expect(hasSessionTokenCookie(null)).toBe(false);
+    expect(hasSessionTokenCookie("")).toBe(false);
   });
 });

@@ -17,6 +17,10 @@ export default defineConfig({
   headLinkOptions: { preset: "2023" },
   preset: {
     ...minimal2023Preset,
+    transparent: {
+      ...minimal2023Preset.transparent,
+      sizes: [32, ...minimal2023Preset.transparent.sizes, 128],
+    },
     maskable: { ...minimal2023Preset.maskable, padding: 0.27, resizeOptions: { background } },
     apple: { ...minimal2023Preset.apple, sizes: [] },
   },

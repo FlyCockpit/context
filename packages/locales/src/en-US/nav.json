@@ -44,7 +44,10 @@
     "signIn": "Sign in",
     "signUp": "Sign up",
     "signOut": "Sign out",
-    "open": "Open account menu"
+    "open": "Open account menu",
+    "openFor": "{{name}}, account menu",
+    "openApp": "Open app",
+    "signOutFailed": "Couldn't sign you out. Try again."
   },
   "skipToContent": "Skip to content"
 }

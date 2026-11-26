@@ -31,7 +31,11 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@/components/route-content-skeleton", () => ({
   RouteContentSkeleton: () => <p>skeleton</p>,
 }));
-vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }));
+vi.mock("@tanstack/react-query", () => ({
+  queryOptions: (options: unknown) => options,
+  useQuery: () => ({ data: undefined }),
+  useQueryClient: () => ({}),
+}));
 vi.mock("@tanstack/react-query-devtools", () => ({ ReactQueryDevtools: () => null }));
 vi.mock("@tanstack/react-router-devtools", () => ({ TanStackRouterDevtools: () => null }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));

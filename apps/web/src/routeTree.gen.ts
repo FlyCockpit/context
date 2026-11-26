@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LangRouteImport } from './routes/$lang'
 import { Route as LangAppRouteRouteImport } from './routes/$lang/_app/route'
 import { Route as LangPublicRouteRouteImport } from './routes/$lang/_public/route'
+import { Route as LangDashboardRouteImport } from './routes/$lang/dashboard'
 import { Route as LangAppAuthRouteImport } from './routes/$lang/_app/_auth'
 import { Route as LangAppAdminRouteImport } from './routes/$lang/_app/admin'
 import { Route as LangAppForgotPasswordRouteImport } from './routes/$lang/_app/forgot-password'
@@ -62,6 +63,11 @@ const LangAppRouteRoute = LangAppRouteRouteImport.update({
 } as any)
 const LangPublicRouteRoute = LangPublicRouteRouteImport.update({
   id: '/_public',
+  getParentRoute: () => LangRoute,
+} as any)
+const LangDashboardRoute = LangDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => LangRoute,
 } as any)
 const LangAppAuthRoute = LangAppAuthRouteImport.update({
@@ -237,6 +243,7 @@ const LangAppAuthSettingsSecurityRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$lang': typeof LangRouteWithChildren
+  '/$lang/dashboard': typeof LangDashboardRoute
   '/$lang/admin': typeof LangAppAdminRouteWithChildren
   '/$lang/forgot-password': typeof LangAppForgotPasswordRoute
   '/$lang/login': typeof LangAppLoginRoute
@@ -272,6 +279,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$lang': typeof LangPublicIndexRoute
+  '/$lang/dashboard': typeof LangDashboardRoute
   '/$lang/forgot-password': typeof LangAppForgotPasswordRoute
   '/$lang/login': typeof LangAppLoginRoute
   '/$lang/mcp-consent': typeof LangAppMcpConsentRoute
@@ -306,6 +314,7 @@ export interface FileRoutesById {
   '/$lang': typeof LangRouteWithChildren
   '/$lang/_app': typeof LangAppRouteRouteWithChildren
   '/$lang/_public': typeof LangPublicRouteRouteWithChildren
+  '/$lang/dashboard': typeof LangDashboardRoute
   '/$lang/_app/_auth': typeof LangAppAuthRouteWithChildren
   '/$lang/_app/admin': typeof LangAppAdminRouteWithChildren
   '/$lang/_app/forgot-password': typeof LangAppForgotPasswordRoute
@@ -344,6 +353,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/$lang'
+    | '/$lang/dashboard'
     | '/$lang/admin'
     | '/$lang/forgot-password'
     | '/$lang/login'
@@ -379,6 +389,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/$lang'
+    | '/$lang/dashboard'
     | '/$lang/forgot-password'
     | '/$lang/login'
     | '/$lang/mcp-consent'
@@ -412,6 +423,7 @@ export interface FileRouteTypes {
     | '/$lang'
     | '/$lang/_app'
     | '/$lang/_public'
+    | '/$lang/dashboard'
     | '/$lang/_app/_auth'
     | '/$lang/_app/admin'
     | '/$lang/_app/forgot-password'
@@ -479,6 +491,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/$lang'
       preLoaderRoute: typeof LangPublicRouteRouteImport
+      parentRoute: typeof LangRoute
+    }
+    '/$lang/dashboard': {
+      id: '/$lang/dashboard'
+      path: '/dashboard'
+      fullPath: '/$lang/dashboard'
+      preLoaderRoute: typeof LangDashboardRouteImport
       parentRoute: typeof LangRoute
     }
     '/$lang/_app/_auth': {
@@ -834,11 +853,13 @@ const LangPublicRouteRouteWithChildren = LangPublicRouteRoute._addFileChildren(
 interface LangRouteChildren {
   LangAppRouteRoute: typeof LangAppRouteRouteWithChildren
   LangPublicRouteRoute: typeof LangPublicRouteRouteWithChildren
+  LangDashboardRoute: typeof LangDashboardRoute
 }
 
 const LangRouteChildren: LangRouteChildren = {
   LangAppRouteRoute: LangAppRouteRouteWithChildren,
   LangPublicRouteRoute: LangPublicRouteRouteWithChildren,
+  LangDashboardRoute: LangDashboardRoute,
 }
 
 const LangRouteWithChildren = LangRoute._addFileChildren(LangRouteChildren)
