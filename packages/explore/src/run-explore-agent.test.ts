@@ -230,6 +230,31 @@ describe("runExploreAgent", () => {
     }));
     const partial = await runExploreAgent({ ...base, question: "and then?", history });
     expect(partial.answer).toBe("own partial");
+
+    // Narration beside a tool call is not an answer, nor is text before it.
+    runAgentLoop.mockImplementation(async (options) => ({
+      stopReason: "aborted",
+      messages: [
+        ...options.messages,
+        assistant("a1", "Partly: see index.js"),
+        {
+          id: "a2",
+          role: "assistant",
+          parts: [
+            { type: "text", content: "I'll read the tests." },
+            { type: "tool-call", id: "c1", name: "read", arguments: "{}", state: "done" },
+          ],
+        },
+        {
+          id: "t1",
+          role: "assistant",
+          parts: [{ type: "tool-result", toolCallId: "c1", content: "…", state: "done" }],
+        },
+      ],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    }));
+    const narrated = await runExploreAgent({ ...base, question: "and then?", history });
+    expect(narrated.answer).toBe("");
   });
 
   it("force-final runs a no-tool synthesis after max-iterations and sums usage", async () => {

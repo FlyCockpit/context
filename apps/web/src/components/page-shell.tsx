@@ -15,6 +15,16 @@ const PAGE_FRAME = "container mx-auto px-4";
  * widest page below it. docs/ui.md § Viewport scale */
 export const PAGE_COLUMN_CLASS = `${PAGE_FRAME} ${WIDTH_CLASS.wide}`;
 
+/**
+ * For a full-bleed band in the `_app` shell's top row (above `main`, so outside
+ * the AppFrame): inset its content by the sidebar's width (AppFrame's `w-16` / `w-60`)
+ * while a page draws the sidebar, so the band's page column lines up with the
+ * page's instead of centring on the window. Needs the `group/shell` ancestor.
+ * The two selectors are exclusive, so no order or specificity tie.
+ */
+export const SIDEBAR_INSET_CLASS =
+  "md:group-has-[[data-app-nav=sidebar][data-collapsed=true]]/shell:ps-16 md:group-has-[[data-app-nav=sidebar][data-collapsed=false]]/shell:ps-60";
+
 type PageShellProps = {
   width?: keyof typeof WIDTH_CLASS;
   className?: string;

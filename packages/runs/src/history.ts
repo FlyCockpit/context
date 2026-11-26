@@ -71,6 +71,15 @@ function isToolResult(part: AgentMessagePart): part is ToolResultPart {
   return part.type === "tool-result" && typeof part.toolCallId === "string";
 }
 
+/**
+ * A message's text as an answer: empty when the message also calls a tool, since
+ * text beside a tool call is narration ("I'll read the tests"), not an answer.
+ */
+export function answerText(message: AgentMessage | undefined): string {
+  if (message?.parts.some((part) => part.type === "tool-call")) return "";
+  return messageText(message);
+}
+
 /** The text of a message's text parts. */
 export function messageText(message: AgentMessage | undefined): string {
   if (!message) return "";

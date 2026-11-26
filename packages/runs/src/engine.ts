@@ -46,7 +46,7 @@ import {
   runEvents,
 } from "./events";
 import { runFailureFrom } from "./failure";
-import { historyFromTurns, messageText } from "./history";
+import { answerText, historyFromTurns } from "./history";
 import { MemoryResultStore } from "./result-store";
 import { RunScheduler } from "./scheduler";
 import { SteeringQueue } from "./steering";
@@ -1352,6 +1352,23 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           );
     /** The text of the last finished assistant turn this run saved (seeds excluded). */
     let lastAssistantText = "";
+    /**
+     * A tool call or result streamed since the last finished text turn, before
+     * its own `onTurn` (that comes once the whole dispatch is done).
+     */
+    let toolStreamed = false;
+    /**
+     * What a stopped run keeps as its answer: text written after its last tool
+     * call. A streamed tool call or result whose turn never finished is that
+     * boundary too, so earlier text (an answer before a steer) no longer
+     * counts; only text streaming after it does. Null when there is none, so
+     * the run can be asked again.
+     */
+    const stoppedAnswer = (finished = ""): string | null => {
+      const streaming = answerText(run.partials.get(run.runId));
+      if (toolStreamed) return streaming || null;
+      return finished || lastAssistantText || streaming || null;
+    };
 
     try {
       // 1. The checkout (re-created when pruned), leased before it is touched.
@@ -1495,8 +1512,13 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
             // Seeds (earlier runs' history, which ends in the previous answer)
             // are announced too but return null: only this run's own turns count.
             if (saved?.role !== "assistant") return;
-            const textNow = messageText(turn.message);
-            if (textNow) lastAssistantText = textNow;
+            // Narration beside a tool call clears it: only text after the
+            // last tool call is an answer, so a stop after it can be asked again.
+            const textNow = answerText(turn.message);
+            if (textNow || turn.message.parts.some((part) => part.type === "tool-call")) {
+              lastAssistantText = textNow;
+            }
+            if (textNow) toolStreamed = false;
             // A turn without tool calls ends the loop unless a steer is already
             // queued (the runtime takes once more and dispatches again). Closing
             // an empty queue now means a later steer is refused, not silently
@@ -1505,7 +1527,16 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
               run.steering?.closeIfEmpty();
             }
           },
-          onMessagesChange: master.onMessagesChange,
+          onMessagesChange: (messages) => {
+            const last = messages.at(-1);
+            if (
+              last?.role === "assistant" &&
+              last.parts.some((part) => part.type === "tool-call" || part.type === "tool-result")
+            ) {
+              toolStreamed = true;
+            }
+            master.onMessagesChange(messages);
+          },
           onUsage: (usage) => trackUsage(run, usage),
           onSynthesisStart: () => {
             // Nothing reads steering past this point: refuse new steers.
@@ -1529,9 +1560,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
         // included). Not `ExploreAgentError.usage`: that adds every helper,
         // and each helper run row already carries its own usage.
         if (signal.aborted) {
-          // The last finished assistant text, else the text that was streaming.
-          const partial = lastAssistantText || messageText(run.partials.get(run.runId));
-          return await endAborted(partial || null);
+          return await endAborted(stoppedAnswer());
         }
         return await finish("failed", { stopReason: "model-error", error: errorText(error) });
       } finally {
@@ -1544,11 +1573,8 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
 
       const ownUsage = result.ownUsage;
       if (signal.aborted || result.stopReason === "aborted") {
-        // "Ends stopped with whatever answer exists": the last finished
-        // assistant text, else the text that was streaming.
-        const partial =
-          result.answer || lastAssistantText || messageText(run.partials.get(run.runId));
-        return await endAborted(partial || null, ownUsage, result.iterations);
+        // "Ends stopped with whatever answer exists" (stoppedAnswer).
+        return await endAborted(stoppedAnswer(result.answer), ownUsage, result.iterations);
       }
       if (!result.answer) {
         return await finish(
@@ -1736,15 +1762,20 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           : cause === "checkout-lost"
             ? "failed"
             : "stopped"
-        : helper.error && !helper.answer
+        : !helper.answer
           ? "failed"
           : "completed";
+    // Like a main run: ending without an answer (its last turn still called a
+    // tool and the synthesis returned nothing) is a failure, never "completed".
+    const error =
+      helper.error ??
+      (status === "failed" && !cause ? "The helper stopped without writing an answer." : null);
     // A shutdown reads like boot recovery's interruption, as for the main run.
     const stopReason = status === "interrupted" ? "interrupted" : (helper.stopReason ?? null);
     await store.updateRun(helperRunId, {
       status,
       stopReason,
-      error: helper.error ? errorText(helper.error) : null,
+      error: error ? errorText(error) : null,
       answer: helper.answer || null,
       iterations: helper.iterations,
       ...usageColumns(helper.usage),
@@ -1757,7 +1788,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       status,
       stopReason,
       answer: helper.answer || null,
-      error: helper.error ?? null,
+      error,
     });
   }
 

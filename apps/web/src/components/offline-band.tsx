@@ -2,7 +2,7 @@ import { cn } from "@cockpit-context/ui/lib/utils";
 import { Wifi, WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { PAGE_COLUMN_CLASS } from "@/components/page-shell";
+import { PAGE_COLUMN_CLASS, SIDEBAR_INSET_CLASS } from "@/components/page-shell";
 import { useConnectivityNotice } from "@/hooks/use-connectivity-notice";
 
 /**
@@ -20,8 +20,14 @@ export function OfflineBand() {
   return (
     <div role="status" aria-live="polite" aria-atomic="true" data-offline-band="">
       {notice && (
-        // Full-bleed band, content in the page column (docs/ui.md § Viewport scale).
-        <div className="border-b bg-muted motion-safe:animate-in motion-safe:fade-in-0">
+        // Full-bleed band, content in the page column (docs/ui.md § Viewport scale),
+        // beside the sidebar when the page draws one.
+        <div
+          className={cn(
+            "border-b bg-muted motion-safe:animate-in motion-safe:fade-in-0",
+            SIDEBAR_INSET_CLASS,
+          )}
+        >
           <p
             className={cn(
               PAGE_COLUMN_CLASS,

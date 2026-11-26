@@ -560,7 +560,7 @@
     },
     "repositoryFailure": {
       "auth": "The git host refused access. If the repository is private, edit the package to choose an SSH key whose public half is a deploy key on the host; the next question clones it again.",
-      "notFound": "The git host couldn’t find that repository. Edit the package to fix its git URL (a private repository also looks missing without access); the next question clones it again.",
+      "notFound": "The git host couldn’t find that repository, or it’s private. Check the git URL for typos and edit the package to fix it; for a private repository, use its SSH URL with an SSH key. The next question clones it again.",
       "unreachable": "This server couldn’t reach the git host. Check the host name in the git URL, or try again later with Fetch latest.",
       "hostKey": "This git host’s SSH key isn’t confirmed. Confirm it in Access → Known hosts, then choose Fetch latest.",
       "timeout": "The download took too long. Try again later with Fetch latest; if it keeps happening, ask the admin.",

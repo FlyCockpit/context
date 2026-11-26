@@ -386,7 +386,7 @@
     "snapshotDeleteWarning": "This snapshot cannot be restored without the owner’s SSH key.",
     "repositoryFailure": {
       "auth": "The git host refused access. A private repository’s owner needs a working SSH deploy key on the package.",
-      "notFound": "The git host couldn’t find the repository. A package owner should check its git URL.",
+      "notFound": "The git host couldn’t find the repository, or it’s private. A package owner should check its git URL for typos.",
       "unreachable": "This server couldn’t reach the git host. Check the server’s DNS and outbound network.",
       "hostKey": "The git host’s SSH key isn’t confirmed. The package owner confirms it in Access → Known hosts.",
       "timeout": "The download ran out of time. A very large repository may need a longer git timeout.",

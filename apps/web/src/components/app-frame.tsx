@@ -57,6 +57,7 @@ export function AppFrame({ lang, children }: { lang: string; children: ReactNode
         data-collapsed={sidebarCollapsed ? "true" : "false"}
         className={cn(
           "hidden border-sidebar-border bg-sidebar text-sidebar-foreground md:sticky md:top-0 md:flex md:h-[100cqh] md:max-h-[100cqh] md:shrink-0 md:flex-col md:self-start md:overflow-x-hidden md:overflow-y-auto md:overscroll-contain md:border-e",
+          // Widths mirrored by SIDEBAR_INSET_CLASS (page-shell.tsx).
           sidebarCollapsed ? "w-16" : "w-60",
         )}
       >

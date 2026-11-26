@@ -168,6 +168,10 @@ const REASON_BY_CODE: Partial<Record<RepoErrorCode, RepositoryFailureReason>> = 
 /** git's own words for the common remote failures (LANG=C), most specific first. */
 const GIT_OUTPUT_REASONS: ReadonlyArray<[RegExp, RepositoryFailureReason]> = [
   [/host key verification failed/i, "hostKey"],
+  // An https host asking who we are: GitHub and GitLab answer an unknown (often
+  // mistyped) repository with 401, the same as a private one, so read it as
+  // "not found or private" rather than an access problem with a key.
+  [/could not read username for 'https?:/i, "notFound"],
   [
     /permission denied \(publickey|authentication failed|could not read (username|password)|terminal prompts disabled|access denied|returned error: 40[13]\b/i,
     "auth",

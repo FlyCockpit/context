@@ -560,7 +560,7 @@
     },
     "repositoryFailure": {
       "auth": "El host de git negó el acceso. Si el repositorio es privado, edita el paquete para elegir una llave SSH cuya parte pública sea una llave de despliegue en el host; la siguiente pregunta lo clona de nuevo.",
-      "notFound": "El host de git no encontró ese repositorio. Edita el paquete para corregir su URL de git (un repositorio privado también parece no existir sin acceso); la siguiente pregunta lo clona de nuevo.",
+      "notFound": "El host de git no encontró ese repositorio, o es privado. Revisa que la URL de git no tenga errores y edita el paquete para corregirla; si el repositorio es privado, usa su URL SSH con una llave SSH. La siguiente pregunta lo clona de nuevo.",
       "unreachable": "Este servidor no pudo conectarse al host de git. Revisa el nombre del host en la URL de git o vuelve a intentarlo más tarde con Traer lo más reciente.",
       "hostKey": "La clave SSH de este host de git no está confirmada. Confírmala en Acceso → Hosts conocidos y luego elige Traer lo más reciente.",
       "timeout": "La descarga tardó demasiado. Vuelve a intentarlo más tarde con Traer lo más reciente; si sigue pasando, avisa al administrador.",

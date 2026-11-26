@@ -849,7 +849,8 @@ function buildDelegateExploreTool(options: {
  * Pull the final assistant text out of a finished explore run. With `questionId` (the
  * id of the run's own question), only what follows that message counts: a follow-up is
  * seeded with the conversation so far, which ends in the previous run's answer, and that
- * is never this run's answer.
+ * is never this run's answer. Text written beside a tool call is narration, so a run
+ * stopped after it (nothing written after its last tool call) has no answer.
  */
 export function exploreAgentAnswer(
   result: Pick<AgentLoopResult, "messages">,
@@ -864,6 +865,9 @@ export function exploreAgentAnswer(
   for (let index = result.messages.length - 1; index >= start; index--) {
     const message = result.messages[index];
     if (message?.role !== "assistant") continue;
+    // Text beside a tool call is narration ("I'll read the tests"), not an
+    // answer; nothing written after the last tool call means no answer yet.
+    if (message.parts.some((part) => part.type === "tool-call")) return "";
     const text = message.parts
       .filter((part): part is { type: "text"; content: string } => part.type === "text")
       .map((part) => part.content)

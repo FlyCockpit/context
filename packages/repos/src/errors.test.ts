@@ -40,9 +40,14 @@ describe("repositoryFailureReason", () => {
     const git = (stderr: string) =>
       stored(new RepoError("GIT_FAILED", `git clone failed: ${stderr}`));
     expect(git("git@github.com: Permission denied (publickey).")).toBe("auth");
+    // A mistyped public https URL: GitHub/GitLab hide unknown repositories behind 401.
     expect(
       git("fatal: could not read Username for 'https://github.com': terminal prompts disabled"),
-    ).toBe("auth");
+    ).toBe("notFound");
+    expect(git("fatal: could not read Password for 'https://me@example.com': No such device")).toBe(
+      "auth",
+    );
+    expect(git("fatal: Authentication failed for 'https://example.com/a/b.git/'")).toBe("auth");
     expect(git("remote: Repository not found.\nfatal: repository '…' not found")).toBe("notFound");
     expect(git("fatal: unable to access '…': Could not resolve host: example.invalid")).toBe(
       "unreachable",

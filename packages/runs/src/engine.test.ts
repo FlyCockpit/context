@@ -991,7 +991,10 @@ describe("createRunEngine", () => {
 
     it("keeps the last finished assistant text when the agent throws after a stop", async () => {
       exploreRun.mockImplementation(async (options) => {
-        await announce(options, [[toolTurn("a1", "Finished thought."), "assistant"]]);
+        await announce(options, [
+          [toolTurn("a0", "I'll grep first."), "assistant"],
+          [text("a1", "assistant", "Finished thought."), "assistant"],
+        ]);
         options.onMessagesChange?.([text("a-live", "assistant", "Streaming thou")]);
         await new Promise<void>((resolve) =>
           options.abortSignal?.addEventListener("abort", () => resolve(), { once: true }),
@@ -1014,6 +1017,85 @@ describe("createRunEngine", () => {
       });
       expect(snapshot).toMatchObject({ status: "stopped", answer: "Finished thought." });
     });
+
+    it("counts narration beside a tool call as no answer, so the stopped run can be asked again", async () => {
+      exploreRun.mockImplementationOnce(async (options) => {
+        await announce(options, [
+          [toolTurn("a1", "I'll read the test file directly."), "assistant"],
+        ]);
+        // Streaming the next step's narration, already calling a tool.
+        options.onMessagesChange?.([toolTurn("a-live", "Now the source")]);
+        await new Promise<void>((resolve) =>
+          options.abortSignal?.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        return result(options, "", {
+          stopReason: "aborted",
+          answer: "",
+          messages: [toolTurn("a1", "I'll read the test file directly.")],
+        });
+      });
+      const engine = makeEngine();
+      const started = await engine.startConversation({
+        ownerId: OWNER,
+        packageId: "pkg1",
+        text: "List every test case",
+        origin: "web",
+      });
+      await settle();
+      await engine.stop({ ownerId: OWNER, conversationId: started.conversationId });
+      const snapshot = await engine.waitForRun({
+        ownerId: OWNER,
+        runId: started.runId,
+        timeoutMs: 1_000,
+      });
+      expect(snapshot).toMatchObject({ status: "stopped", answer: null });
+      const retried = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: started.conversationId,
+      });
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: retried.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "completed" });
+      expect(exploreRun.mock.calls.at(-1)?.[0].question).toBe("List every test case");
+    });
+
+    const liveToolCall = toolTurn("a-live", "Checking one more file");
+    // Its tool result streams as a message of its own, last in the array.
+    const liveToolResult: AgentMessage = {
+      id: "a-result",
+      role: "assistant",
+      parts: [{ type: "tool-result", toolCallId: "call-a-live", content: "…", state: "done" }],
+    };
+    it.each([
+      ["a tool call", [liveToolCall]],
+      ["a tool call and then its result", [liveToolCall, liveToolResult]],
+    ])(
+      "drops an earlier answer once %s streams, before that turn finishes",
+      async (_, streamed) => {
+        exploreRun.mockImplementationOnce(async (options) => {
+          // Answer A, then (after a steer) a dispatch still in flight.
+          await announce(options, [[text("a1", "assistant", "Answer A"), "assistant"]]);
+          options.onMessagesChange?.(streamed);
+          await new Promise<void>((resolve) =>
+            options.abortSignal?.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          // The in-flight turn never reached the result: the agent still reads A.
+          return result(options, "Answer A", { stopReason: "aborted" });
+        });
+        const engine = makeEngine();
+        const started = await engine.startConversation({
+          ownerId: OWNER,
+          packageId: "pkg1",
+          text: "q",
+          origin: "web",
+        });
+        await settle();
+        await engine.stop({ ownerId: OWNER, conversationId: started.conversationId });
+        await expect(
+          engine.waitForRun({ ownerId: OWNER, runId: started.runId, timeoutMs: 1_000 }),
+        ).resolves.toMatchObject({ status: "stopped", answer: null });
+      },
+    );
 
     it("returns false when nothing is running and refuses other users", async () => {
       const { engine, started } = await startAndFinish();
@@ -2148,6 +2230,33 @@ describe("createRunEngine", () => {
           error: null,
         },
       ]);
+    });
+
+    it("fails a helper that ended without an answer and without an error", async () => {
+      exploreRun.mockImplementation(async (options) => {
+        const hooks = await options.onHelperStart?.({ index: 0, focus: "src", question: "?" });
+        // Its last turn still called a tool and the synthesis returned nothing.
+        await options.onHelperFinish?.({
+          index: 0,
+          focus: "src",
+          question: "?",
+          helperRunId: hooks?.helperRunId,
+          model: "vendor/helper",
+          stopReason: "max-iterations",
+          forcedFinal: true,
+          answer: "",
+          usage: { inputTokens: 1, outputTokens: 1 },
+          iterations: 3,
+        });
+        return result(options, "answer");
+      });
+      await startAndFinish();
+      const helper = [...store.runs.values()].find((run) => run.kind === "helper");
+      expect(helper).toMatchObject({
+        status: "failed",
+        answer: null,
+        error: "The helper stopped without writing an answer.",
+      });
     });
 
     it("leaves a helper still executing when its main run finishes to write its own outcome", async () => {

@@ -89,7 +89,8 @@ function AppShellFrame({ children }: { children: ReactNode }) {
   return (
     <div
       className={cn(
-        "grid h-svh min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr_auto] md:grid-rows-[auto_1fr] md:pb-0",
+        // `group/shell`: the top-row bands line up with the sidebar (SIDEBAR_INSET_CLASS).
+        "group/shell grid h-svh min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr_auto] md:grid-rows-[auto_1fr] md:pb-0",
         // A hard refresh streams this frame as HTML, and the sidebar's markup
         // sits between `<main>` and the page's skeleton: on a slow network the
         // browser would paint a shell with an empty content area and no

@@ -129,7 +129,8 @@ export const pinsRouter = {
    * Put the caller's pins in this order: `ids` lists every pinned
    * conversation exactly once. CONFLICT / PINS_CHANGED when it does not
    * match the pins as they are now (pinned or unpinned elsewhere): reload
-   * and try again.
+   * and try again. Only the set is checked, so a reorder over an order that
+   * changed elsewhere wins (last write; docs/ui.md § Signed-in home).
    */
   reorder: protectedProcedure
     .input(z.object({ ids: orderedIds }))

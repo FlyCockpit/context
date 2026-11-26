@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 
-import { PAGE_COLUMN_CLASS } from "@/components/page-shell";
+import { PAGE_COLUMN_CLASS, SIDEBAR_INSET_CLASS } from "@/components/page-shell";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { orpc } from "@/utils/orpc";
 
@@ -42,7 +42,10 @@ export function AdminSetupBanner() {
     return (
       <div
         role="alert"
-        className="border-b border-yellow-300 bg-yellow-100 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
+        className={cn(
+          "border-b border-yellow-300 bg-yellow-100 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100",
+          SIDEBAR_INSET_CLASS,
+        )}
       >
         <div className={cn(PAGE_COLUMN_CLASS, "flex flex-col gap-3 sm:flex-row sm:items-start")}>
           <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -64,7 +67,10 @@ export function AdminSetupBanner() {
   return (
     <div
       role="alert"
-      className="border-b border-yellow-300 bg-yellow-100 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100"
+      className={cn(
+        "border-b border-yellow-300 bg-yellow-100 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-100",
+        SIDEBAR_INSET_CLASS,
+      )}
     >
       <div className={cn(PAGE_COLUMN_CLASS, "flex items-start gap-3")}>
         <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />

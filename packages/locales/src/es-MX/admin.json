@@ -386,7 +386,7 @@
     "snapshotDeleteWarning": "Esta instantánea no se puede restaurar sin la llave SSH de su propietario.",
     "repositoryFailure": {
       "auth": "El host de git negó el acceso. El dueño de un repositorio privado necesita una clave de despliegue SSH válida en el paquete.",
-      "notFound": "El host de git no encontró el repositorio. El dueño de un paquete debe revisar su URL de git.",
+      "notFound": "El host de git no encontró el repositorio, o es privado. El dueño de un paquete debe revisar que su URL de git no tenga errores.",
       "unreachable": "Este servidor no pudo conectarse al host de git. Revisa el DNS y la red de salida del servidor.",
       "hostKey": "La clave SSH del host de git no está confirmada. El dueño del paquete la confirma en Acceso → Hosts conocidos.",
       "timeout": "La descarga se quedó sin tiempo. Un repositorio muy grande puede necesitar un tiempo límite de git más largo.",
