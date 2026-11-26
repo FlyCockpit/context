@@ -100,7 +100,7 @@ A server answer about one field goes under that field, with the same `aria-inval
 
 ## Toasts
 
-Each toast gets its own id (`packages/ui/src/components/sileo.tsx`), so two toasts stack instead of the second replacing the first (sileo's default id is shared). The pill is one line, capped at sileo's 350px width with an ellipsised title (`globals.css`); a message over 40 characters is repeated in the description, which sileo expands under the pill. The action button's text reaches 4.5:1 on its tint (`scripts/lib/theme-contrast.test.ts`).
+Each toast gets its own id (`packages/ui/src/components/sileo.tsx`), so two toasts stack instead of the second replacing the first (sileo's default id is shared). The pill is one line, capped at sileo's 350px width with an ellipsised title (`globals.css`); a message that would be cut off is repeated in the description, which sileo expands under the pill. The facade measures the title at its real font and root size (`titleOverflowsPill`), because a short message of wide glyphs, or any message at a larger text size, can overflow while a character count says it fits. The action button's text reaches 4.5:1 on its tint (`scripts/lib/theme-contrast.test.ts`).
 
 ## Settings that are on or off
 
