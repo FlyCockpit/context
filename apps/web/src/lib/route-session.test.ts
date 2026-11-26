@@ -18,7 +18,12 @@ beforeEach(() => {
   reload.mockReset();
   server.getRouteSession.mockReset();
   vi.stubGlobal("window", { location: { reload } });
-  vi.stubGlobal("document", { documentElement: { style: { visibility: "" } } });
+  // No server-rendered app shell in this document: the hydration wait
+  // (lib/app-shell-hydration.ts, tested there) resolves at once.
+  vi.stubGlobal("document", {
+    documentElement: { style: { visibility: "" } },
+    querySelector: () => null,
+  });
 });
 afterEach(() => vi.unstubAllGlobals());
 

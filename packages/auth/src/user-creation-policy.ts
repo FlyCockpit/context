@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { Locale } from "@cockpit-context/config/locales";
 
 export type UserCreationMode = "admin-bootstrap" | "admin-invite";
 
@@ -6,6 +7,12 @@ type UserCreationContext = {
   mode: UserCreationMode;
   /** The `admin-bootstrap` request's presented token, re-verified by the hook. */
   bootstrapToken?: string;
+  /**
+   * The language the server chose for the new account (an admin invite picks
+   * the invitee's). The user-create hook seeds `User.locale` from it instead
+   * of the request header, which a server-side `auth.api.createUser` lacks.
+   */
+  locale?: Locale;
 };
 
 const userCreationModeStorage = new AsyncLocalStorage<UserCreationContext>();
@@ -127,9 +134,21 @@ export function serializeSignup<T>(fn: () => T | Promise<T>): Promise<T> {
 export function runWithAllowedUserCreation<T>(
   mode: UserCreationMode,
   fn: () => T | Promise<T>,
-  opts: { bootstrapToken?: string } = {},
+  opts: { bootstrapToken?: string; locale?: Locale } = {},
 ): T | Promise<T> {
-  return userCreationModeStorage.run({ mode, bootstrapToken: opts.bootstrapToken }, fn);
+  return userCreationModeStorage.run(
+    { mode, bootstrapToken: opts.bootstrapToken, locale: opts.locale },
+    fn,
+  );
+}
+
+/**
+ * The locale the current grant chose for the account being created, if any.
+ * Server-chosen (the invite form's language field, validated by the API), so
+ * it beats the client's locale header.
+ */
+export function getGrantedUserLocale(): Locale | undefined {
+  return userCreationModeStorage.getStore()?.locale;
 }
 
 export { cleanupBeforeUserDeletion, registerUserDeletionCleanup } from "./user-deletion-hooks.js";

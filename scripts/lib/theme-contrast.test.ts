@@ -208,14 +208,205 @@ test("a long toast title stays inside the pill and the action button text reache
   );
 });
 
-test("dropdown menus draw on an opaque popover surface", () => {
-  // A translucent menu (bg-popover/70 + blur) let a banner tint it (CTX-14).
-  const menu = readFileSync(
-    resolve(import.meta.dirname, "../../packages/ui/src/components/dropdown-menu.tsx"),
+const UI_COMPONENTS = resolve(import.meta.dirname, "../../packages/ui/src/components");
+const uiSource = (file: string) => readFileSync(resolve(UI_COMPONENTS, file), "utf-8");
+
+test("every menu and popup draws on an opaque popover surface", () => {
+  // A translucent menu (bg-popover/70 + blur) let a banner tint it (CTX-14),
+  // and select kept it after dropdown-menu was fixed. Every class string that
+  // paints a popover surface (text-popover-foreground) in every ui component
+  // is checked, so a new menu, combobox or picker is covered too.
+  const surfaces: string[] = [];
+  for (const file of readdirSync(UI_COMPONENTS)) {
+    if (!file.endsWith(".tsx") || file.endsWith(".test.tsx")) continue;
+    const text = uiSource(file);
+    for (const match of text.matchAll(/"([^"\n]*text-popover-foreground[^"\n]*)"/g)) {
+      const literal = match[1] ?? "";
+      surfaces.push(file);
+      assert.match(literal, /(?:^|\s)bg-popover(?:\s|$)/, file);
+      assert.doesNotMatch(literal, /bg-popover\/\d+|backdrop-/, file);
+    }
+    assert.doesNotMatch(text, /bg-popover\/\d+/, file);
+  }
+  // The scan cannot pass by finding nothing.
+  for (const file of ["dropdown-menu.tsx", "select.tsx", "popover.tsx", "command.tsx"]) {
+    assert.ok(surfaces.includes(file), `${file} paints a popover surface`);
+  }
+});
+
+const SURFACES = ["background", "card", "popover", "muted"] as const;
+const failures = (results: { theme: string; label: string; ratio: number }[], min: number) =>
+  results
+    .filter((r) => r.ratio < min)
+    .map((r) => `${r.theme}: ${r.label} = ${r.ratio.toFixed(2)}:1`);
+
+test("focus rings reach 3:1 on every surface and clearly differ from the resting outline", () => {
+  // The focused border (border-ring) replaces the resting --input outline, so
+  // besides 3:1 on the surface (WCAG 1.4.11) it must read as a change: >= 2:1
+  // against --input (WCAG 2.4.13 style). In dark the border also sits next to
+  // the field's own fill (bg-input/30).
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  const both = ["light", "dark"] as const;
+  const onSurfaces = measurePairs(css, [
+    ...["ring", "sidebar-ring"].flatMap((text) =>
+      [...SURFACES, "sidebar"].map((surface) => ({ text, surface, themes: both })),
+    ),
+    ...(["background", "card", "popover"] as const).map((surface) => ({
+      text: "ring",
+      surface,
+      tint: { token: "input", alpha: 0.3 },
+      themes: ["dark"] as const,
+    })),
+  ]);
+  assert.deepEqual(failures(onSurfaces, 3), []);
+  const vsOutline = measurePairs(css, [
+    { text: "ring", surface: "input", themes: both },
+    { text: "sidebar-ring", surface: "input", themes: both },
+  ]);
+  assert.deepEqual(failures(vsOutline, 2), []);
+});
+
+test("invalid borders reach 3:1 on the surface and on the dark field fill", () => {
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  const results = measurePairs(css, [
+    ...SURFACES.map((surface) => ({
+      text: "destructive",
+      surface,
+      themes: ["light", "dark"] as const,
+    })),
+    ...SURFACES.map((surface) => ({
+      text: "destructive",
+      surface,
+      tint: { token: "input", alpha: 0.3 },
+      themes: ["dark"] as const,
+    })),
+  ]);
+  assert.deepEqual(failures(results, 3), []);
+});
+
+test("controls draw opaque invalid borders and outline buttons use the field outline", () => {
+  for (const file of [
+    "input.tsx",
+    "textarea.tsx",
+    "select.tsx",
+    "button.tsx",
+    "checkbox.tsx",
+    "switch.tsx",
+  ]) {
+    assert.doesNotMatch(uiSource(file), /border-destructive\/\d+/, file);
+  }
+  // The outline button's border is its only edge (theme toggle, Sign in):
+  // --input (3:1) in both themes, never the decorative --border (1.25:1).
+  const outline = /outline:\s*"([^"]*)"/.exec(uiSource("button.tsx"))?.[1] ?? "";
+  assert.match(outline, /(?:^|\s)border-input(?:\s|$)/);
+  assert.doesNotMatch(outline, /border-border|dark:border-/);
+});
+
+test("the old focus ring and dark invalid border measure as failing, so the checks discriminate", () => {
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  // Before: --ring was --primary (light) and --primary-text (dark).
+  const old = css
+    .replace(/(:root \{[\s\S]*?)--ring: [^;]+;/, "$1--ring: var(--primary);")
+    .replace(/(\.dark \{[\s\S]*?)--ring: [^;]+;/, "$1--ring: var(--primary-text);");
+  for (const r of measurePairs(old, [
+    { text: "ring", surface: "input", themes: ["light", "dark"] },
+  ])) {
+    assert.ok(r.ratio < 2, `${r.theme}: old ${r.label} = ${r.ratio.toFixed(2)}`);
+  }
+  // Before: dark invalid borders were destructive/50, measured on the field
+  // fill (input/30) over a card.
+  const dark = new Map([...readTokenBlock(css, ":root"), ...readTokenBlock(css, ".dark")]);
+  const color = (name: string) => parseOklch(dark.get(name) ?? "");
+  const mix = (top: readonly number[], alpha: number, base: readonly number[]) =>
+    [0, 1, 2].map((i) => top[i]! * alpha + base[i]! * (1 - alpha)) as unknown as [
+      number,
+      number,
+      number,
+    ];
+  const fill = mix(color("input"), 0.3, color("card"));
+  assert.ok(contrastRatio(mix(color("destructive"), 0.5, fill), fill) < 3);
+});
+
+/** Every declaration of `prop` in rules whose selector is exactly `selector`,
+ *  with the `@media` params it sits under ("" at the top level or in @layer). */
+function findDeclarations(css: string, selector: string, prop: string) {
+  const source = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const found: { value: string; media: string }[] = [];
+  const stack: string[] = [];
+  let buffer = "";
+  const flush = (text: string) => {
+    if (stack.at(-1) !== selector) return;
+    const media =
+      [...stack]
+        .reverse()
+        .find((p) => p.startsWith("@media"))
+        ?.slice(6)
+        .trim() ?? "";
+    for (const decl of text.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)) {
+      if (decl[1] === prop) found.push({ value: decl[2]!.replace(/\s+/g, " ").trim(), media });
+    }
+  };
+  for (const char of source) {
+    if (char === "{") {
+      const cut = buffer.lastIndexOf(";") + 1;
+      flush(buffer.slice(0, cut));
+      stack.push(buffer.slice(cut).replace(/\s+/g, " ").trim());
+      buffer = "";
+    } else if (char === "}") {
+      flush(`${buffer};`);
+      stack.pop();
+      buffer = "";
+    } else {
+      buffer += char;
+    }
+  }
+  return found;
+}
+
+test("bottom toasts sit above the phone bottom nav, and above the safe area without one", () => {
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  assert.deepEqual(
+    findDeclarations(css, ':root [data-sileo-viewport][data-position^="bottom"]', "bottom"),
+    [{ value: "max(var(--bottom-nav-height), var(--safe-area-bottom))", media: "" }],
+  );
+  // 0 unless a bottom nav is on screen, which is only below md (48rem).
+  assert.deepEqual(findDeclarations(css, ":root", "--bottom-nav-height"), [
+    { value: "0px", media: "" },
+  ]);
+  assert.deepEqual(findDeclarations(css, ":root:has([data-bottom-nav])", "--bottom-nav-height"), [
+    { value: "calc(var(--bottom-nav-bar) + var(--safe-area-bottom))", media: "(width < 48rem)" },
+  ]);
+  // The nav draws its bar at --bottom-nav-bar, hides from md and pads the
+  // safe area itself, so the offset is exactly the room it takes.
+  assert.deepEqual(findDeclarations(css, ":root", "--bottom-nav-bar"), [
+    { value: "3.5rem", media: "" },
+  ]);
+  const nav = readFileSync(
+    resolve(import.meta.dirname, "../../apps/web/src/components/bottom-nav.tsx"),
     "utf-8",
   );
-  assert.ok(menu.includes(" bg-popover "));
-  assert.doesNotMatch(menu, /bg-popover\/\d+|backdrop-blur/);
+  const navClass = /const NAV_CLASS =\s*"([^"]*)"/.exec(nav)?.[1] ?? "";
+  assert.match(navClass, /(?:^|\s)md:hidden(?:\s|$)/);
+  const navs = [...nav.matchAll(/<nav\b([\s\S]*?)>\s*<div className="([^"]*)"/g)];
+  assert.equal(navs.length, 2);
+  for (const [, attributes = "", bar = ""] of navs) {
+    assert.ok(bar.split(/\s+/).includes("h-(--bottom-nav-bar)"), bar);
+    assert.match(attributes, /data-bottom-nav\b/);
+    assert.match(attributes, /className=\{NAV_CLASS\}/);
+    assert.match(attributes, /paddingBottom: "var\(--safe-area-bottom\)"/);
+  }
+});
+
+test("a toast's action button is at least 44px tall on a touch screen", () => {
+  // sileo draws it 1.75rem (28px) tall with a fixed `height`.
+  const css = readFileSync(GLOBALS_CSS, "utf-8");
+  const button = ":root [data-sileo-viewport] [data-sileo-button]";
+  assert.deepEqual(findDeclarations(css, button, "min-height"), [
+    { value: "44px", media: "(pointer: coarse)" },
+  ]);
+  assert.deepEqual(findDeclarations(css, button, "height"), [
+    { value: "auto", media: "(pointer: coarse)" },
+  ]);
 });
 
 test("an Off switch fills its track with the opaque --input, which the 3:1 checks cover", () => {

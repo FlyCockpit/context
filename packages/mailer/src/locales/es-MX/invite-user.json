@@ -1,9 +1,9 @@
 {
-  "body": "Hola {{name}}, un administrador ha creado una cuenta para ti. Usa el botón de abajo para elegir tu contraseña y después inicia sesión con este correo electrónico.",
+  "body": "Hola {{name}}, un administrador ha creado una cuenta para ti. Usa el botón de abajo para elegir tu contraseña. Eso también confirma tu correo, así que podrás iniciar sesión con él enseguida.",
   "cta": "Establecer tu contraseña",
   "emailLabel": "Correo electrónico",
   "heading": "Has sido invitado",
   "ignoreFooter": "Si no esperabas esta invitación, puedes ignorar este correo de forma segura.",
-  "linkNote": "Este enlace funciona una sola vez y expira en {{days}} días.",
+  "linkNote": "Este enlace funciona una sola vez y expira en {{days}} días. Si ya expiró, pide a tu administrador que te envíe un enlace nuevo, o usa \"¿Olvidaste tu contraseña?\" en la página de inicio de sesión.",
   "subject": "Has sido invitado"
 }

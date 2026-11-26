@@ -7,16 +7,19 @@
  * the toast theme.
  *
  *   pnpm check:layout --url http://localhost:3001
- *   CHECK_LAYOUT_PASSWORD=… pnpm check:layout --url … --login admin@example.test
+ *   pnpm check:layout --url … --login admin@example.test --password-file <file>
  *   … --no-sandbox                       Ubuntu 23.10+ (AppArmor) Chromium
  *
  * The app has no mock mode, so `--url` points at `pnpm dev` (web + server).
- * `--login` signs in with that account (the password comes from
- * CHECK_LAYOUT_PASSWORD, never the command line; an account with a second
- * factor also needs a current code in CHECK_LAYOUT_TOTP) and adds the
- * signed-in pages; without it they are skipped. Use an admin account: the admin users page is
- * the one with a sticky sub-nav, and an admin without a second factor also
- * shows the 2FA banner inside the scroller.
+ * `--login` signs in with that account, the same way as check:dialogs and
+ * check:shell-loading (`signIn` in scripts/browser-checks.config.ts: the
+ * password is the first line of `--password-file`, never a command-line
+ * value; an account with a second factor also needs a current code in
+ * `--totp-file`), and adds the signed-in pages; without it they are skipped.
+ * Use an admin account: the admin users page is the one with a sticky
+ * sub-nav, and an admin without a second factor also shows the 2FA banner
+ * inside the scroller. Each page is measured once its content has settled
+ * (`SETTLED`): no loading skeleton left and the scroller's height still.
  *
  * At 390×844, 1280×800, 1440×1600 and 390×300 (where every page scrolls), on
  * the landing page, the privacy notice, the 404, the sign-in page and (signed
@@ -38,10 +41,11 @@
  * Classic (non-overlay) scrollbars are what expose a reserved gutter; headless
  * Chromium on Linux draws them, overlay scrollbars on macOS hide the defect.
  */
-import { execFileSync, spawn } from "node:child_process";
+import { type CheckRun, sessionName, withBrowser } from "./browser-check-lib.ts";
+import { credentials, MOCK_SERVER, type Role, signIn } from "./browser-checks.config.ts";
 
 // One session per run: two checks running at once (two checkouts, two agents) must not share a browser.
-const SESSION = `check-layout-${process.pid}`;
+const SESSION = sessionName("check-layout");
 const THEME_KEY = "cockpit-context-theme";
 
 /** What the in-page probe reports. Pure data, so `judgeLayout` is testable. */
@@ -179,55 +183,35 @@ const PROBE = `(async () => {
   return JSON.stringify(out);
 })()`;
 
+/** What the app marks as still loading: a `Skeleton`, or a busy region (the route skeleton). */
+export const LOADING_MARKER = '[data-slot="skeleton"], [aria-busy="true"]';
+
 /**
- * One agent-browser command. Asynchronous, so a signal (Ctrl+C, a kill) is
- * handled between commands instead of after the whole run.
+ * Runs in the page before the probe: waits (8s at most) until the visible
+ * page scroller shows no loading marker and its content stops growing for
+ * half a second. On a real stack the footer (or a sub-nav) is there before
+ * the rows arrive, so a page measured as soon as its `ready` selector shows
+ * can grow after the probe scrolled to its end. A skeleton can hold one
+ * height for a while before the data comes, so reads while a marker is
+ * present never count as still. Returns (JSON-encoded, as every page script)
+ * "settled", or why it was not: "loading" (a marker was still there after
+ * 8s) or "changing" (the height kept moving). Self-contained: no closures.
  */
-function browser(args: string[], input?: string): Promise<string> {
-  return new Promise((done, fail) => {
-    const child = spawn("agent-browser", ["--session", SESSION, ...args], {
-      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-    });
-    let out = "";
-    let err = "";
-    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
-      out += chunk;
-    });
-    child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
-      err += chunk;
-    });
-    child.on("error", fail);
-    child.on("close", (code) =>
-      code === 0
-        ? done(out.trim())
-        : fail(new Error(`agent-browser ${args.join(" ")} exited ${code}: ${err.trim()}`)),
-    );
-    if (input !== undefined) child.stdin?.end(input);
-  });
-}
-
-function closeBrowser(): void {
-  try {
-    execFileSync("agent-browser", ["--session", SESSION, "close"], { stdio: "ignore" });
-  } catch {}
-}
-
-async function evalJson<T>(script: string): Promise<T> {
-  let value: unknown = JSON.parse(await browser(["eval", "--stdin"], script));
-  if (typeof value === "string") value = JSON.parse(value);
-  return value as T;
-}
-
-async function waitFor(url: string, ms: number): Promise<void> {
-  const until = Date.now() + ms;
-  while (Date.now() < until) {
-    try {
-      if ((await fetch(url)).ok) return;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 500));
+export const SETTLED = `(async () => {
+  const main = [...document.querySelectorAll('[data-scroll-restoration-id="app-main"]')].find((el) => el.checkVisibility());
+  if (!main) return JSON.stringify("settled");
+  let last = -1;
+  let still = 0;
+  let loading = false;
+  for (let i = 0; i < 80 && still < 5; i++) {
+    const height = main.scrollHeight;
+    loading = !!main.querySelector(${JSON.stringify(LOADING_MARKER)});
+    still = !loading && height === last ? still + 1 : 0;
+    last = loading ? -1 : height;
+    await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`the dev server did not answer ${url} within ${ms / 1000}s`);
-}
+  return JSON.stringify(still >= 5 ? "settled" : loading ? "loading" : "changing");
+})()`;
 
 interface Page {
   name: string;
@@ -235,42 +219,53 @@ interface Page {
   expect: Expect;
   /** Wait for this selector before probing. */
   ready: string;
-  signedIn?: boolean;
+  role: Role;
 }
 
+// Signed-in pages first, so a run signs in once (a --totp-file code only has
+// to be current when it starts); the anonymous pages then sign out.
 const PAGES: Page[] = [
-  {
-    name: "landing",
-    path: "/en-US",
-    expect: { footer: true },
-    ready: "footer[data-public-footer]",
-  },
-  {
-    name: "privacy",
-    path: "/en-US/privacy",
-    expect: { footer: true },
-    ready: "footer[data-public-footer]",
-  },
-  {
-    name: "404",
-    path: "/en-US/check-layout-missing",
-    expect: { footer: true },
-    ready: "footer[data-public-footer]",
-  },
-  { name: "sign-in", path: "/en-US/login", expect: { footer: false }, ready: "form" },
   {
     name: "ongoing",
     path: "/en-US/ongoing",
     expect: { footer: false },
     ready: "main h1",
-    signedIn: true,
+    role: "admin",
   },
   {
     name: "admin users",
     path: "/en-US/admin/users",
     expect: { footer: false },
     ready: "main nav.border-b",
-    signedIn: true,
+    role: "admin",
+  },
+  {
+    name: "landing",
+    path: "/en-US",
+    expect: { footer: true },
+    ready: "footer[data-public-footer]",
+    role: "anonymous",
+  },
+  {
+    name: "privacy",
+    path: "/en-US/privacy",
+    expect: { footer: true },
+    ready: "footer[data-public-footer]",
+    role: "anonymous",
+  },
+  {
+    name: "404",
+    path: "/en-US/check-layout-missing",
+    expect: { footer: true },
+    ready: "footer[data-public-footer]",
+    role: "anonymous",
+  },
+  {
+    name: "sign-in",
+    path: "/en-US/login",
+    expect: { footer: false },
+    ready: "form",
+    role: "anonymous",
   },
 ];
 const VIEWPORTS = [
@@ -293,154 +288,61 @@ const DROP_FILE = `(async () => {
   return !!pill();
 })()`;
 
-/**
- * Types a value into a React-controlled input through the native setter. The script goes over
- * stdin, so a password never appears in a process's arguments or in a failed command's message.
- */
-function fillScript(selector: string, value: string): string {
-  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`;
-}
-
-/** After the sign-in submit: "app" once the app opens, "code" at the second-factor step. */
-const SIGN_IN_STEP = `(async () => {
-  for (let i = 0; i < 60; i++) {
-    if (location.pathname.endsWith("/ongoing")) return "app";
-    if (document.getElementById("totp-code")) return "code";
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return "still on " + location.pathname + " after 30s";
-})()`;
-/** Clicks Verify once React has enabled it for the typed code (the button after the code field). */
-const VERIFY_CODE = `(async () => {
-  const button = document.getElementById("totp-code").closest("div").nextElementSibling;
-  for (let i = 0; i < 20 && button.disabled; i++) await new Promise((r) => setTimeout(r, 100));
-  button.click();
-  return true;
-})()`;
-
-async function signIn(base: string, email: string, password: string): Promise<void> {
-  await browser(["open", `${base}/en-US/login`]);
-  await browser(["wait", "input[autocomplete=current-password]"]);
-  await browser(["eval", "--stdin"], fillScript("input[type=email]", email));
-  try {
-    await browser(
-      ["eval", "--stdin"],
-      fillScript("input[autocomplete=current-password]", password),
-    );
-  } catch {
-    // agent-browser may echo the failing script; never pass its output on.
-    throw new Error("check:layout: could not type the password into the sign-in form");
-  }
-  await browser(["click", "form button[type=submit]"]);
-  // Either the app opens, or an account with a second factor gets the code step.
-  const step: unknown = JSON.parse(await browser(["eval", "--stdin"], SIGN_IN_STEP));
-  if (step === "code") {
-    const code = process.env.CHECK_LAYOUT_TOTP;
-    if (!code)
-      throw new Error(
-        "check:layout: this account has a second factor; put a current code in CHECK_LAYOUT_TOTP (or use an account still in its enrollment grace)",
-      );
-    try {
-      await browser(["eval", "--stdin"], `${fillScript("#totp-code", code)} && ${VERIFY_CODE}`);
-    } catch {
-      throw new Error("check:layout: could not submit the verification code");
-    }
-  } else if (step !== "app") {
-    throw new Error(`check:layout: sign-in did not open the app (${step})`);
-  }
-  await browser(["wait", "--url", "**/ongoing"]);
-}
-
-async function main(): Promise<number> {
-  const args = process.argv.slice(2);
-  const option = (name: string) => {
-    const index = args.indexOf(name);
-    return index >= 0 ? args[index + 1] : undefined;
-  };
-  const base = option("--url")?.replace(/\/$/, "");
-  if (!base) {
-    console.error(
-      "check:layout: pass --url <web dev server>, e.g. --url http://localhost:3001 (docs/ui.md § Shell rules)",
-    );
-    return 2;
-  }
-  const email = option("--login");
-  const password = process.env.CHECK_LAYOUT_PASSWORD;
-  if (email && !password) {
-    console.error("check:layout: --login needs the password in CHECK_LAYOUT_PASSWORD");
-    return 2;
-  }
-  const onSignal = (signal: NodeJS.Signals) => {
-    closeBrowser();
-    process.exit(signal === "SIGINT" ? 130 : 143);
-  };
-  process.once("SIGINT", onSignal);
-  process.once("SIGTERM", onSignal);
+async function measure(run: CheckRun): Promise<string[]> {
+  const { base, browser } = run;
   const failures: string[] = [];
-  try {
-    await waitFor(`${base}/en-US`, 120_000);
-    await browser([
-      "open",
-      "about:blank",
-      ...(args.includes("--no-sandbox") ? ["--args", "--no-sandbox"] : []),
-    ]);
-    await browser(["cookies", "clear"]);
-    const pages = PAGES.filter((page) => !page.signedIn || email);
-    if (pages.length < PAGES.length)
-      console.log("check:layout: no --login, so the signed-in pages are skipped");
-    const anonymous = pages.filter((page) => !page.signedIn);
-    const signedIn = pages.filter((page) => page.signedIn);
-    const measure = async (list: Page[]) => {
-      for (const [w, h] of VIEWPORTS) {
-        await browser(["set", "viewport", String(w), String(h)]);
-        for (const page of list) {
-          await browser(["open", `${base}${page.path}`]);
-          await browser(["wait", page.ready]);
-          const label = `${page.name} ${w}×${h}`;
-          const probe = await evalJson<Probe>(PROBE);
-          failures.push(...judgeLayout(label, probe, page.expect));
-          console.log(
-            `check:layout: ${label} measured (${probe.main?.scrollable ? "long" : "short"} page)`,
-          );
-        }
+  const signedIn = !!credentials(run.args);
+  const pages = PAGES.filter((page) => signedIn || page.role === "anonymous");
+  if (pages.length < PAGES.length)
+    console.log("check:layout: no --login, so the signed-in pages are skipped");
+  // Page by page, every viewport.
+  for (const page of pages) {
+    for (const [w, h] of VIEWPORTS) {
+      await browser.run(["set", "viewport", String(w), String(h)]);
+      await signIn(run, page.role);
+      await browser.run(["open", `${base}${page.path}`]);
+      await browser.run(["wait", page.ready]);
+      const label = `${page.name} ${w}×${h}`;
+      const settled = await browser.evalJson<"settled" | "loading" | "changing">(SETTLED);
+      if (settled !== "settled") {
+        failures.push(
+          settled === "loading"
+            ? `${label}: still showing a loading skeleton after 8s, so it was not measured; check that its data loads`
+            : `${label}: the content kept changing for 8s, so it was not measured`,
+        );
+        continue;
       }
-    };
-    // Signed-in pages first, while a CHECK_LAYOUT_TOTP code is still current; then sign out.
-    if (email && password && signedIn.length) {
-      await signIn(base, email, password);
-      await measure(signedIn);
-      await browser(["cookies", "clear"]);
-    }
-    await measure(anonymous);
-    // Toasts, light and dark at one width, each with the OS set to the other.
-    await browser(["set", "viewport", "1280", "800"]);
-    for (const theme of ["light", "dark"] as const) {
-      await browser(["set", "media", theme === "dark" ? "light" : "dark"]);
-      await browser(["open", `${base}/en-US`]);
-      await browser(["eval", `localStorage.setItem('${THEME_KEY}', '${theme}'); true`]);
-      await browser(["open", `${base}/en-US`]);
-      await browser(["wait", "footer[data-public-footer]"]);
-      await browser(["eval", "--stdin"], DROP_FILE);
-      await browser(["wait", "[data-sileo-viewport] [data-sileo-pill]"]);
-      await browser(["wait", "800"]);
-      failures.push(
-        ...judgeLayout(`toast ${theme}`, await evalJson<Probe>(PROBE), {
-          footer: true,
-          toast: theme,
-        }),
+      const probe = await browser.evalJson<Probe>(PROBE);
+      failures.push(...judgeLayout(label, probe, page.expect));
+      console.log(
+        `check:layout: ${label} measured (${probe.main?.scrollable ? "long" : "short"} page)`,
       );
-      console.log(`check:layout: toast ${theme} measured`);
     }
-  } finally {
-    closeBrowser();
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
   }
-  for (const failure of failures) console.error(`check:layout: ${failure}`);
-  console.log(
-    failures.length ? `check:layout: ${failures.length} failure(s)` : "check:layout: passed",
-  );
-  return failures.length ? 1 : 0;
+  // Toasts, light and dark at one width, each with the OS set to the other.
+  await signIn(run, "anonymous");
+  await browser.run(["set", "viewport", "1280", "800"]);
+  for (const theme of ["light", "dark"] as const) {
+    await browser.run(["set", "media", theme === "dark" ? "light" : "dark"]);
+    await browser.run(["open", `${base}/en-US`]);
+    await browser.run(["eval", `localStorage.setItem('${THEME_KEY}', '${theme}'); true`]);
+    await browser.run(["open", `${base}/en-US`]);
+    await browser.run(["wait", "footer[data-public-footer]"]);
+    await browser.run(["eval", "--stdin"], DROP_FILE);
+    await browser.run(["wait", "[data-sileo-viewport] [data-sileo-pill]"]);
+    await browser.run(["wait", "800"]);
+    failures.push(
+      ...judgeLayout(`toast ${theme}`, await browser.evalJson<Probe>(PROBE), {
+        footer: true,
+        toast: theme,
+      }),
+    );
+    console.log(`check:layout: toast ${theme} measured`);
+  }
+  return failures;
 }
 
-if (import.meta.filename === process.argv[1]) process.exitCode = await main();
+if (import.meta.filename === process.argv[1])
+  process.exitCode = await withBrowser("check:layout", SESSION, measure, {
+    mockServer: MOCK_SERVER,
+  });

@@ -24,17 +24,23 @@
  *   between the first paint and the loaded page;
  * - a painted frame is in the other theme;
  * - the first paint is not the content skeleton (a blank or spinner frame);
- * - cumulative layout shift exceeds 0.05.
+ * - cumulative layout shift exceeds 0.05: on a page whose content does not fit
+ *   the viewport, a shift whose every moved box is the public footer pushed
+ *   below the first screen does not count (a long list pushing the footer
+ *   below the fold moves nothing the reader sees);
+ * - the loaded content fits the viewport but the page's public footer
+ *   (`[data-public-footer]`, where it has one) is not in it.
+ * The same rules as tunnel's reload-shell check (crates/web/checks/reload-shell-judge.mjs).
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type CheckRun, withBrowser } from "./browser-check-lib.ts";
-import { MOCK_SERVER, SHELL_PAGES, signIn } from "./browser-checks.config.ts";
+import { byRole, type CheckRun, sessionName, withBrowser } from "./browser-check-lib.ts";
+import { MOCK_SERVER, SHELL_PAGES, type ShellPage, signIn } from "./browser-checks.config.ts";
 
 // One session per run, so runs in other checkouts on this machine are untouched.
-const SESSION = `check-shell-loading-${process.pid}`;
+const SESSION = sessionName("check-shell-loading");
 const MAX_CLS = 0.05;
 
 type Box = [left: number, top: number, width: number, height: number];
@@ -56,11 +62,87 @@ export interface ShellFrame {
   instead?: string;
 }
 
+/** The loaded page: a frame plus what the footer rule needs, measured once. */
+export interface LoadedFrame extends ShellFrame {
+  /** The public footer (`[data-public-footer]`), or null: the app shell has none. */
+  footer: Box | null;
+  vh: number;
+  /**
+   * Where the content ends: the lowest visible box without children in `<main>`
+   * (the footer's excluded), plus the bottom padding of the boxes around it.
+   */
+  contentEnd: number;
+}
+
+/** A layout-shift entry; `below`: it only pushed the footer below the first screen. */
+export interface Shift {
+  v: number;
+  below: boolean;
+}
+
+/**
+ * A moved box of a layout-shift entry, as the page saw it when the entry
+ * arrived: `top` is its live top (null when no longer in the page), `rect`
+ * the entry's `currentRect` (clipped to the viewport).
+ */
+export interface ShiftSource {
+  footer: boolean;
+  top: number | null;
+  rect: { top: number; width: number; height: number };
+}
+
+/**
+ * Whether a layout-shift entry only pushed the footer below the first screen:
+ * every moved box is the footer, and its live position is at or below the
+ * fold. A footer that went up (no live position, or above the fold) counts,
+ * as does any other moved box. Runs in the page too (INIT_SCRIPT embeds its
+ * source): plain JavaScript once the types are stripped, no closures.
+ */
+export function footerPushedBelow(sources: ShiftSource[], vh: number): boolean {
+  return (
+    sources.length > 0 &&
+    sources.every(
+      (s) =>
+        s.footer &&
+        s.top !== null &&
+        s.top >= vh &&
+        (!(s.rect.width || s.rect.height) || s.rect.top >= vh),
+    )
+  );
+}
+
+/**
+ * Whether the loaded content fits the first screen with its footer. Measured
+ * from where the content ends, so a page held taller than its content (a
+ * min-height) still counts as fitting.
+ */
+export function fits(final: LoadedFrame): boolean {
+  return final.contentEnd + (final.footer?.[3] ?? 0) <= final.vh + 1;
+}
+
 export interface ShellRecording {
   frames: ShellFrame[];
   /** The loaded page, measured after the content arrived. */
-  final: ShellFrame;
-  cls: number;
+  final: LoadedFrame;
+  shifts: Shift[];
+}
+
+/**
+ * The layout shift that counts (`cls`), what was below the fold of a long page
+ * (`belowFold`: shifts that only pushed the footer out of the first screen of a
+ * page that does not fit), and all of it (`all`: what a browser reports as CLS).
+ */
+export function shiftScore(
+  shifts: Shift[],
+  final: LoadedFrame,
+): { cls: number; belowFold: number; all: number } {
+  const long = !fits(final);
+  const sum = (list: Shift[]) => Math.round(list.reduce((n, s) => n + s.v, 0) * 1000) / 1000;
+  return {
+    cls: sum(shifts.filter((s) => !(long && s.below))),
+    belowFold: sum(shifts.filter((s) => long && s.below)),
+    all: sum(shifts),
+  };
 }
 
 function moved(a: Box | null, b: Box | null): boolean {
@@ -131,8 +213,15 @@ export function judgeShellLoading(
     bad.push(
       `${label}: a frame ${Math.round(wrongTheme.t)}ms into the load is ${wrongTheme.dark ? "dark" : "light"}, the stored theme is ${expectDark ? "dark" : "light"}`,
     );
-  if (recording.cls > MAX_CLS)
-    bad.push(`${label}: cumulative layout shift ${recording.cls.toFixed(3)} exceeds ${MAX_CLS}`);
+  const { cls } = shiftScore(recording.shifts, final);
+  if (cls > MAX_CLS)
+    bad.push(`${label}: cumulative layout shift ${cls.toFixed(3)} exceeds ${MAX_CLS}`);
+  // A page whose content fits the viewport ends with its public footer on screen.
+  const { footer, vh } = final;
+  if (footer && fits(final) && !(footer[1] >= 0 && footer[1] + footer[3] <= vh + 1))
+    bad.push(
+      `${label}: the content fits the viewport, but the footer (${show(footer)}) is not in it`,
+    );
   return bad;
 }
 
@@ -149,6 +238,37 @@ export const INIT_SCRIPT = `(() => {
   // and shows the fallback beside it, so the first match may have no box.
   // A box alone is not enough: visibility:hidden keeps the box.
   const seen = (selector) => [...document.querySelectorAll(selector)].find((el) => box(el) && getComputedStyle(el).visibility === "visible") || null;
+  // The lowest visible content in the page scroller outside the footer: a
+  // childless box, or a run of text beside child elements (a paragraph with
+  // an early link), plus the bottom padding of the boxes around it (up to the
+  // scroller, whose own padding is not content). The scroller, not
+  // #main-content: the public shell (the one with the footer) has no
+  // AppFrame column.
+  const textBox = (node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getBoundingClientRect();
+  };
+  const contentEnd = (main) => {
+    let end = 0;
+    let padFrom = null;
+    if (main) for (const el of main.querySelectorAll("*")) {
+      if (el.closest("[data-public-footer]") || getComputedStyle(el).visibility !== "visible") continue;
+      // A childless box includes its own padding; text inside a box with
+      // children sits above that box's padding. Only whether a text run is
+      // blank is read here, never the text itself.
+      const boxes = el.children.length
+        ? [...el.childNodes].filter((n) => n.nodeType === 3 && /\\S/.test(n.nodeValue)).map((n) => [textBox(n), el])
+        : [[el.getBoundingClientRect(), el.parentElement]];
+      for (const [r, from] of boxes)
+        if ((r.width || r.height) && r.bottom > end) {
+          end = r.bottom;
+          padFrom = from;
+        }
+    }
+    for (let el = padFrom; el && el !== main; el = el.parentElement) end += parseFloat(getComputedStyle(el).paddingBottom) || 0;
+    return Math.round(end);
+  };
   const snap = () => {
     const body = document.body;
     const painted = !!body && [...body.querySelectorAll("*")].some((el) => {
@@ -173,11 +293,27 @@ export const INIT_SCRIPT = `(() => {
   };
   const frames = [];
   window.__shellFrames = frames;
-  window.__shellSnap = snap;
-  window.__shellCls = 0;
+  // The loaded page, with what the footer rule needs (too slow for every frame).
+  window.__shellLoaded = () => {
+    const main = seen('[data-scroll-restoration-id="app-main"]');
+    return { ...snap(), footer: box(seen("[data-public-footer]")), vh: window.innerHeight, contentEnd: contentEnd(main) };
+  };
+  const shifts = [];
+  window.__shellShifts = shifts;
+  const footerPushedBelow = ${footerPushedBelow.toString()};
   try {
     new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) if (!entry.hadRecentInput) window.__shellCls += entry.value;
+      for (const entry of list.getEntries()) {
+        if (entry.hadRecentInput) continue;
+        // Read when the entry arrives: where each moved box is now. A box
+        // inside the footer moves with it, so it counts as the footer.
+        const sources = (entry.sources || []).map((s) => {
+          const live = s.node && s.node.nodeType === 1 && s.node.isConnected ? s.node : null;
+          const rect = s.currentRect;
+          return { footer: !!live && !!live.closest("[data-public-footer]"), top: live ? live.getBoundingClientRect().top : null, rect: { top: rect.top, width: rect.width, height: rect.height } };
+        });
+        shifts.push({ v: entry.value, below: footerPushedBelow(sources, window.innerHeight) });
+      }
     }).observe({ type: "layout-shift", buffered: true });
   } catch {}
   const tick = () => {
@@ -187,9 +323,10 @@ export const INIT_SCRIPT = `(() => {
   requestAnimationFrame(tick);
 })();`;
 
-const READ = `(() => {
+/** Ends the recording and returns it (a `ShellRecording` as JSON). */
+export const READ = `(() => {
   window.__shellDone = true;
-  return JSON.stringify({ frames: window.__shellFrames || [], final: window.__shellSnap(), cls: Math.round((window.__shellCls || 0) * 1000) / 1000 });
+  return JSON.stringify({ frames: window.__shellFrames || [], final: window.__shellLoaded(), shifts: window.__shellShifts || [] });
 })()`;
 
 /**
@@ -253,7 +390,7 @@ async function throttle(run: CheckRun): Promise<() => void> {
  * Until the page's loaded-only marker is there and no skeleton is left in
  * `<main>` (60s at most), then one more second for late layout.
  */
-async function waitLoaded({ browser }: CheckRun, ready: string): Promise<void> {
+async function waitLoaded({ browser }: CheckRun, { ready, needs }: ShellPage): Promise<void> {
   const loaded = `!!document.querySelector(${JSON.stringify(ready)}) && !document.querySelector('#main-content [data-slot="skeleton"], #main-content [data-route-skeleton]')`;
   const until = Date.now() + 60_000;
   while (Date.now() < until) {
@@ -263,7 +400,9 @@ async function waitLoaded({ browser }: CheckRun, ready: string): Promise<void> {
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`still loading after 60s (waiting for ${ready} and no skeleton)`);
+  throw new Error(
+    `still loading after 60s (waiting for ${ready} and no skeleton)${needs ? `; this page needs ${needs}` : ""}`,
+  );
 }
 
 const VIEWPORTS = [
@@ -271,39 +410,55 @@ const VIEWPORTS = [
   [390, 844],
 ] as const;
 
-async function measure(run: CheckRun): Promise<string[]> {
+/** One page: warm it, then hard-reload it throttled and judge the recording. */
+async function reload(run: CheckRun, page: ShellPage, label: string): Promise<string[]> {
   const { base, browser } = run;
+  // Slow responses (2s per call) keep the auth check and the page's data
+  // pending long enough to be recorded.
+  await signIn(run, page.role);
+  await browser.run(["eval", "localStorage.setItem('cockpit-context-theme', 'dark'); true"]);
+  // Warm the dev server's module graph, so the measured load is the app's,
+  // not Vite's first transform.
+  await browser.run(["open", `${base}${page.path}`]);
+  try {
+    await browser.run(["wait", page.ready]);
+  } catch {
+    throw new Error(
+      `${page.ready} never appeared${page.needs ? `; this page needs ${page.needs}` : ""}`,
+    );
+  }
+  await signIn(run, page.role, { slow: true });
+  await browser.run(["eval", "localStorage.setItem('cockpit-context-theme', 'dark'); true"]);
+  const release = await throttle(run);
+  try {
+    await browser.run(["open", `${base}${page.path}`]);
+    await waitLoaded(run, page);
+    const recording = await browser.evalJson<ShellRecording>(READ);
+    const firstPaint = recording.frames.find((frame) => frame.painted);
+    const score = shiftScore(recording.shifts, recording.final);
+    console.log(
+      `check:shell-loading: ${label}: ${recording.frames.length} frames, first paint at ${Math.round(firstPaint?.t ?? 0)}ms, CLS ${score.cls}${score.belowFold ? ` (+${score.belowFold} below the fold)` : ""}`,
+    );
+    return judgeShellLoading(label, recording, true);
+  } finally {
+    release();
+  }
+}
+
+async function measure(run: CheckRun): Promise<string[]> {
+  const { browser } = run;
   const failures: string[] = [];
   // Stored dark, OS light: the first frame must already follow the stored choice.
   await browser.run(["set", "media", "light"]);
   for (const [w, h] of VIEWPORTS) {
     await browser.run(["set", "viewport", String(w), String(h)]);
-    for (const page of SHELL_PAGES) {
+    // Grouped by role, so a real stack signs in once per role and viewport.
+    for (const page of byRole(SHELL_PAGES)) {
       const label = `${page.name} ${w}×${h}`;
-      // Slow responses (2s per call) keep the auth check and the page's data
-      // pending long enough to be recorded.
-      await signIn(run, page.role);
-      await browser.run(["eval", "localStorage.setItem('cockpit-context-theme', 'dark'); true"]);
-      // Warm the dev server's module graph, so the measured load is the app's,
-      // not Vite's first transform.
-      await browser.run(["open", `${base}${page.path}`]);
-      await browser.run(["wait", page.ready]);
-      await signIn(run, page.role, { slow: true });
-      await browser.run(["eval", "localStorage.setItem('cockpit-context-theme', 'dark'); true"]);
-      const release = await throttle(run);
       try {
-        await browser.run(["open", `${base}${page.path}`]);
-        await waitLoaded(run, page.ready);
-        const recording = await browser.evalJson<ShellRecording>(READ);
-        failures.push(...judgeShellLoading(label, recording, true));
-        const firstPaint = recording.frames.find((frame) => frame.painted);
-        console.log(
-          `check:shell-loading: ${label}: ${recording.frames.length} frames, first paint at ${Math.round(firstPaint?.t ?? 0)}ms, CLS ${recording.cls}`,
-        );
+        failures.push(...(await reload(run, page, label)));
       } catch (error) {
         failures.push(`${label}: did not load: ${(error as Error).message.split("\n")[0]}`);
-      } finally {
-        release();
       }
     }
   }

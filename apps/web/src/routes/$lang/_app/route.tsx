@@ -13,8 +13,10 @@ import { RouteContentSkeleton } from "@/components/route-content-skeleton";
 import { SkipLink } from "@/components/skip-link";
 import { useDocumentLang } from "@/hooks/use-document-lang";
 import { useMobileKeyboard } from "@/hooks/use-mobile-keyboard";
+import { useMountEffect } from "@/hooks/use-mount-effect";
 import { useReloadOnIdentityChange } from "@/hooks/use-reload-on-identity-change";
 import { useUserLocaleSync } from "@/hooks/use-user-locale-sync";
+import { markAppShellHydrated } from "@/lib/app-shell-hydration";
 import { MAIN_SCROLLER_ID } from "@/lib/main-scroller";
 
 export const Route = createFileRoute("/$lang/_app")({
@@ -86,6 +88,9 @@ function AppShellPending() {
  */
 function AppShellFrame({ children }: { children: ReactNode }) {
   const mobileKeyboardOpen = useMobileKeyboard();
+  // The first effect of a hydrated (or client-rendered) frame: from here on a
+  // route guard may change the URL (lib/app-shell-hydration.ts).
+  useMountEffect(markAppShellHydrated);
   return (
     <div
       className={cn(
@@ -97,13 +102,16 @@ function AppShellFrame({ children }: { children: ReactNode }) {
         // BottomNav. The frame stays invisible (no layout change) until its
         // last child has arrived, so the first frame is the whole shell.
         "[&:not(:has(>[data-shell-end]))]:invisible",
-        !mobileKeyboardOpen && "pb-[calc(3.5rem_+_var(--safe-area-bottom))]",
+        !mobileKeyboardOpen && "pb-[calc(var(--bottom-nav-bar)_+_var(--safe-area-bottom))]",
       )}
       style={{
         paddingTop: "var(--safe-area-top)",
         paddingLeft: "var(--safe-area-left)",
         paddingRight: "var(--safe-area-right)",
       }}
+      // APP_SHELL_ATTRIBUTE: what a guard looks for to know a server-rendered
+      // shell may still be hydrating.
+      data-app-shell=""
     >
       <div>
         <SkipLink />

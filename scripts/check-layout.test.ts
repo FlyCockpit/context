@@ -1,7 +1,9 @@
 /** Fixtures for the pure judge in scripts/check-layout.ts: node --test scripts/check-layout.test.ts */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { judgeLayout, type Probe } from "./check-layout.ts";
+
+import { parseEvalOutput } from "./browser-check-lib.ts";
+import { judgeLayout, LOADING_MARKER, type Probe, SETTLED } from "./check-layout.ts";
 
 const good: Probe = {
   vw: 1280,
@@ -155,5 +157,102 @@ describe("judgeLayout", () => {
       judgeLayout("toast light", { ...good, toast }, { footer: false, toast: "light" }).join(""),
       /stored light theme lost to the OS/,
     );
+  });
+});
+
+describe("parseEvalOutput", () => {
+  it("parses a JSON-encoded page result once more and keeps other values", () => {
+    assert.deepEqual(parseEvalOutput(JSON.stringify(JSON.stringify({ a: 1 }))), { a: 1 });
+    assert.equal(parseEvalOutput(JSON.stringify(JSON.stringify("settled"))), "settled");
+    assert.equal(parseEvalOutput("true"), true);
+  });
+
+  it("rejects a bare string result, so page scripts must JSON-encode strings", () => {
+    assert.throws(() => parseEvalOutput(JSON.stringify("settled")), SyntaxError);
+  });
+});
+
+describe("SETTLED", () => {
+  /**
+   * Runs the page script against a fake visible page scroller whose height
+   * follows `heights`, then stays at the last. `skeleton[i]` says whether read
+   * i still finds a loading marker (the last value holds after the list ends).
+   */
+  const settle = async (heights: number[] | null, skeleton: boolean[] = [false]) => {
+    let reads = 0;
+    const selectors: string[] = [];
+    const scrollerQueries: string[] = [];
+    const main = {
+      checkVisibility: () => true,
+      get scrollHeight() {
+        reads++;
+        return heights ? (heights[Math.min(reads - 1, heights.length - 1)] ?? 0) : 0;
+      },
+      querySelector: (selector: string) => {
+        selectors.push(selector);
+        return skeleton[Math.min(reads - 1, skeleton.length - 1)] ? {} : null;
+      },
+    };
+    // A suspended route can leave a hidden scroller before the visible one.
+    const hidden = { checkVisibility: () => false, scrollHeight: 0, querySelector: () => ({}) };
+    // The page script reads the globals `document` and `setTimeout`; parameters
+    // stand in for them, and the timer fires at once, so the 8s limit costs no real time.
+    const run = new Function("document", "setTimeout", `return ${SETTLED};`) as (
+      doc: unknown,
+      timer: (done: () => void) => void,
+    ) => Promise<string>;
+    const doc = {
+      querySelectorAll: (selector: string) => {
+        scrollerQueries.push(selector);
+        return heights ? [hidden, main] : [];
+      },
+    };
+    const value = await run(doc, (done) => done());
+    // Through the same adapter as a real run: agent-browser prints the value as JSON.
+    const settled = parseEvalOutput(JSON.stringify(value));
+    return { settled, reads, selectors, scrollerQueries };
+  };
+
+  it("watches the page scroller, which both shells have", async () => {
+    const { scrollerQueries } = await settle([681]);
+    assert.deepEqual(scrollerQueries, ['[data-scroll-restoration-id="app-main"]']);
+  });
+
+  it("waits until the content stops growing (rows arrive after the footer)", async () => {
+    const { settled, reads } = await settle([681, 681, 986, 1200]);
+    assert.equal(settled, "settled");
+    // Three changes, then five unchanged reads in a row.
+    assert.equal(reads, 9);
+  });
+
+  it("does not settle on a skeleton that holds one height before the data arrives", async () => {
+    // A skeleton at 681px for 10 reads (stable for well over five), then the rows.
+    const heights = [...Array(10).fill(681), 1200];
+    const skeleton = [...Array(10).fill(true), false];
+    const { settled, reads, selectors } = await settle(heights, skeleton);
+    assert.equal(settled, "settled");
+    // Ten skeleton reads count for nothing; then the loaded height, then five unchanged reads.
+    assert.equal(reads, 16);
+    assert.equal(selectors[0], LOADING_MARKER);
+  });
+
+  it("looks for the app's skeleton and busy markers", () => {
+    assert.match(LOADING_MARKER, /\[data-slot="skeleton"\]/);
+    assert.match(LOADING_MARKER, /\[aria-busy="true"\]/);
+  });
+
+  it("reports a page still loading after 8s, distinct from one that keeps changing", async () => {
+    const loading = await settle([681], [true]);
+    assert.equal(loading.settled, "loading");
+    assert.equal(loading.reads, 80);
+    const growing = Array.from({ length: 100 }, (_, i) => 500 + i * 10);
+    const changing = await settle(growing);
+    assert.equal(changing.settled, "changing");
+    assert.equal(changing.reads, 80);
+  });
+
+  it("does not wait on a page without the app's scroller", async () => {
+    const { settled, reads } = await settle(null);
+    assert.deepEqual({ settled, reads }, { settled: "settled", reads: 0 });
   });
 });

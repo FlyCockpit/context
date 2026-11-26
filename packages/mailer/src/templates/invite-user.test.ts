@@ -22,6 +22,10 @@ describe("renderInviteUser", () => {
     expect(html).toContain("Email"); // label
     expect(html).toContain("Set your password"); // CTA
     expect(html).toContain("This link works once and expires in 7 days.");
+    // One mail does it all: the link also confirms the address, and an
+    // expired link has a next step that needs no admin.
+    expect(html).toContain("confirms your email address");
+    expect(html).toContain("Forgot password?");
   });
 
   it("carries a link, never a password", () => {
@@ -44,6 +48,8 @@ describe("renderInviteUser", () => {
     // The en-US CTA literal should not survive (would indicate fallback to
     // en-US per-key, i.e. unpopulated bundle).
     expect(html).not.toContain("Set your password");
+    expect(html).toContain("confirma tu correo");
+    expect(html).toContain("¿Olvidaste tu contraseña?");
   });
 
   it("falls back to en-US for an unsupported locale", () => {

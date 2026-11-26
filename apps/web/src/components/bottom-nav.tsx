@@ -81,7 +81,7 @@ export default function BottomNav({ hidden }: { hidden?: boolean }) {
         className={NAV_CLASS}
         style={{ paddingBottom: "var(--safe-area-bottom)" }}
       >
-        <div className="flex h-14 items-center justify-around">
+        <div className="flex h-(--bottom-nav-bar) items-center justify-around">
           {Array.from({ length: 5 }).map((_, index) => (
             <Skeleton key={index} className="h-10 w-14 rounded-md" />
           ))}
@@ -97,7 +97,7 @@ export default function BottomNav({ hidden }: { hidden?: boolean }) {
       className={NAV_CLASS}
       style={{ paddingBottom: "var(--safe-area-bottom)" }}
     >
-      <div className="flex h-14 items-center justify-around">
+      <div className="flex h-(--bottom-nav-bar) items-center justify-around">
         {tabs.map((item) => {
           const label = t(item.labelKey);
           const badge = badgeOf(item.id);

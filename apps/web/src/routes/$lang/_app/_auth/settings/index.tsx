@@ -94,8 +94,9 @@ function ProfileSettings() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle role="heading" aria-level={2}>
-            {t("settings:profile.title")}
+          {/* Card titles are the sections' h2s, under the layout's h1. */}
+          <CardTitle>
+            <h2>{t("settings:profile.title")}</h2>
           </CardTitle>
           <CardDescription>{t("settings:profile.description")}</CardDescription>
         </CardHeader>
@@ -153,9 +154,11 @@ function ProfileSettings() {
         // Saved at once, so it sits outside the profile form and its Save button.
         <Card>
           <CardHeader>
-            <CardTitle role="heading" aria-level={2} className="flex items-center gap-2">
-              <Mail className="size-5" aria-hidden="true" />
-              {t("settings:emailAlerts.title")}
+            <CardTitle>
+              <h2 className="flex items-center gap-2">
+                <Mail className="size-5" aria-hidden="true" />
+                {t("settings:emailAlerts.title")}
+              </h2>
             </CardTitle>
             <CardDescription>{t("settings:emailAlerts.description")}</CardDescription>
           </CardHeader>
@@ -184,8 +187,8 @@ function ProfileSettings() {
 
       <Card>
         <CardHeader>
-          <CardTitle role="heading" aria-level={2}>
-            {t("privacy:settingsTitle")}
+          <CardTitle>
+            <h2>{t("privacy:settingsTitle")}</h2>
           </CardTitle>
           <CardDescription>{t("privacy:settingsDescription")}</CardDescription>
         </CardHeader>

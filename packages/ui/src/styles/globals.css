@@ -56,10 +56,13 @@
      non-text UI: >= 3:1 on background, card, popover and muted (WCAG 1.4.11,
      lib/theme-contrast.test.ts). --border stays decorative and light. */
   --input: oklch(0.62 0.012 214.3);
-  /* Focus indicators. A focus ring is non-text UI, so it needs 3:1 against
-     what it sits on (WCAG 1.4.11); the old neutral grey read at about 2:1.
-     The brand blue clears 5:1 on white, and dark mode uses --primary-text. */
-  --ring: var(--primary);
+  /* Focus indicators (the 2px ring and the focused border). Non-text UI, so
+     >= 3:1 on every surface (WCAG 1.4.11), and >= 2:1 against the resting
+     --input outline so a focused field is clearly not the resting one (WCAG
+     2.4.13 style; --primary itself read 1.61:1 against --input). A darker step
+     of the brand ramp: 8.3:1 on white, 2.3:1 against --input; dark mode uses
+     its own --primary-700 (scripts/lib/theme-contrast.test.ts). */
+  --ring: var(--primary-700);
   --grey-50: oklch(0.985 0.002 228);
   --grey-100: oklch(0.96 0.004 228);
   --grey-200: oklch(0.92 0.005 228);
@@ -139,7 +142,9 @@
   --state-loading-bg: color-mix(in oklch, var(--muted-foreground) 15%, transparent);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(0.56 0.012 220);
-  --ring: var(--primary-text);
+  /* --primary-text (0.72) read 1.89:1 against --input; this step is 2.04:1
+     against it and 5.37:1 on the field fill over a card. */
+  --ring: var(--primary-700);
   --grey-50: oklch(0.25 0.004 228);
   --grey-100: oklch(0.3 0.006 228);
   --grey-200: oklch(0.35 0.008 228);
@@ -318,6 +323,17 @@
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --safe-area-left: env(safe-area-inset-left, 0px);
     --safe-area-right: env(safe-area-inset-right, 0px);
+    /* The phone bottom nav's bar (apps/web bottom-nav.tsx draws itself at this
+       height) and the room it takes at the bottom of the screen: 0 while no
+       bottom nav is on screen (desktop, public pages, software keyboard open).
+       Fixed bottom surfaces (toasts) sit above it. */
+    --bottom-nav-bar: 3.5rem;
+    --bottom-nav-height: 0px;
+  }
+  @media (width < 48rem) {
+    :root:has([data-bottom-nav]) {
+      --bottom-nav-height: calc(var(--bottom-nav-bar) + var(--safe-area-bottom));
+    }
   }
 }
 
@@ -461,6 +477,22 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Toasts stay bottom-center on every screen, and on phones they sit above
+   the bottom nav instead of covering it (--bottom-nav-height), or above the
+   home indicator where there is no nav. One more attribute than sileo's
+   `[data-sileo-viewport][data-position^="bottom"] { bottom: 0 }`. */
+:root [data-sileo-viewport][data-position^="bottom"] {
+  bottom: max(var(--bottom-nav-height), var(--safe-area-bottom));
+}
+/* sileo draws the action ("Undo", "Try again") 28px tall. On a touch screen
+   it is at least 44px (docs/ui.md); the expanded body re-measures itself, so
+   the taller button fits. */
+@media (pointer: coarse) {
+  :root [data-sileo-viewport] [data-sileo-button] {
+    height: auto;
+    min-height: 44px;
+  }
 }
 :root [data-sileo-viewport] [data-sileo-button][data-state] {
   --sileo-btn-color: var(--popover-foreground);

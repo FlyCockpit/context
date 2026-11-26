@@ -12,7 +12,11 @@ import {
   registerUserDeletionCleanup,
   runWithAllowedUserCreation,
 } from "@cockpit-context/auth/user-creation-policy";
-import { DEFAULT_LOCALE, isSupportedLocale } from "@cockpit-context/config/locales";
+import {
+  DEFAULT_LOCALE,
+  isSupportedLocale,
+  SUPPORTED_LOCALES,
+} from "@cockpit-context/config/locales";
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { env } from "@cockpit-context/env/server";
 import {
@@ -215,9 +219,20 @@ export const usersRouter = {
         email: z.string().email().toLowerCase(),
         name: z.string().trim().min(1).max(100),
         role: assignableRoleSchema.default("user"),
+        // The invitee's language: the invite email, the set-password page it
+        // links to and every later email use it, and it is saved as their
+        // `User.locale` (they can change it in settings). The admin UI
+        // defaults it to the admin's own language.
+        locale: z.enum(SUPPORTED_LOCALES),
       }),
     )
     .handler(async ({ input }) => {
+      // The account starts unverified, and the invite email is the only mail:
+      // createUser sends no verification mail, and sign-in's resend
+      // (`sendOnSignIn`) needs the correct password, which nobody has. Using
+      // the emailed link proves the inbox and verifies the address then
+      // (@cockpit-context/auth/invite-verification), so an invite to a
+      // mistyped address never yields a verified account.
       const initialPassword = generateUnusablePassword();
 
       // `auth.api.createUser` is the only admin-plugin endpoint that accepts
@@ -226,29 +241,25 @@ export const usersRouter = {
       // uniqueness, and writes through the Prisma adapter so it stays in
       // sync with any custom databaseHooks (e.g. ADMIN_EMAILS auto-promote).
       let userId: string;
-      let recipientLocale: string;
+      const recipientLocale = input.locale;
       try {
-        const created = await runWithAllowedUserCreation("admin-invite", () =>
-          auth.api.createUser({
-            body: {
-              email: input.email,
-              password: initialPassword,
-              name: input.name,
-              role: input.role,
-            },
-          }),
+        // The grant's locale seeds `User.locale` in the user-create hook
+        // (packages/auth): a server-side createUser carries no locale header.
+        const created = await runWithAllowedUserCreation(
+          "admin-invite",
+          () =>
+            auth.api.createUser({
+              body: {
+                email: input.email,
+                password: initialPassword,
+                name: input.name,
+                role: input.role,
+              },
+            }),
+          { locale: input.locale },
         );
         userId = created.user.id;
         invalidateSignupAvailabilityCache();
-        // The User row was just created with the Prisma `@default("en-US")`
-        // for `locale`. Read it back so a future change to the default (or a
-        // hook that overrides it) flows through to the email render without
-        // additional plumbing here.
-        const fresh = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { locale: true },
-        });
-        recipientLocale = fresh?.locale ?? "en-US";
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to invite user";
         if (/already exists|already in use|duplicate/i.test(message)) {

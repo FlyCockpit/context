@@ -5,7 +5,9 @@
  * dev server started on a free port (or a running app passed with `--url`),
  * and the mock session cookie. What differs per app (how to sign in, which
  * dialogs and pages to measure) lives in `browser-checks.config.ts`; this
- * file stays identical to the template's. Not part of CI: it needs
+ * file follows the template's, except for the app's names, the sign-in
+ * landing page, and no cookie consent or seeded TOTP secret (this app has
+ * neither). Not part of CI: it needs
  * agent-browser and its Chromium.
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -13,6 +15,31 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
+
+/**
+ * Reads `agent-browser eval` output. It prints the script's value as JSON, and
+ * page scripts return `JSON.stringify(...)`, so a string value is parsed once
+ * more. A page script must therefore never return a bare string: wrap it in
+ * `JSON.stringify` like every other result.
+ */
+export function parseEvalOutput(out: string): unknown {
+  const value: unknown = JSON.parse(out);
+  return typeof value === "string" ? JSON.parse(value) : value;
+}
+
+/**
+ * The agent-browser session of one check run: `<prefix><check>-<pid>`. The
+ * process id keeps two runs at once (two checkouts, two agents) out of each
+ * other's browser; `BROWSER_CHECK_SESSION_PREFIX` (optional) lets a harness
+ * tell its runs' sessions apart from everyone else's.
+ */
+export function sessionName(
+  check: string,
+  prefix = process.env.BROWSER_CHECK_SESSION_PREFIX ?? "",
+  pid = process.pid,
+): string {
+  return `${prefix}${check}-${pid}`;
+}
 
 interface Browser {
   /** One agent-browser command; resolves with its trimmed stdout. */
@@ -51,9 +78,7 @@ function agentBrowser(session: string): Browser {
   return {
     run,
     async evalJson<T>(script: string): Promise<T> {
-      let value: unknown = JSON.parse(await run(["eval", "--stdin"], script));
-      if (typeof value === "string") value = JSON.parse(value);
-      return value as T;
+      return parseEvalOutput(await run(["eval", "--stdin"], script)) as T;
     },
     close() {
       try {
@@ -199,6 +224,10 @@ export async function withBrowser(
       ...(args.includes("--no-sandbox") ? ["--args", "--no-sandbox"] : []),
     ]);
     failures = await body({ base, browser, args });
+  } catch (error) {
+    // A missing precondition (no running app, a seeded row that is not there,
+    // no password file) ends the run with what to do, not a stack trace.
+    failures = [`stopped: ${(error as Error).message.split("\n")[0]}`];
   } finally {
     browser.close();
     stopServer();
@@ -238,4 +267,142 @@ export async function mockSession(
     "eval",
     "localStorage.setItem('cockpit-context.consent.v1', JSON.stringify({ v: 1, analytics: false, decidedAt: Date.now() })); true",
   ]);
+}
+
+/**
+ * The cases grouped by role (the listed order within each role, the roles in
+ * order of first appearance), so a real stack signs in once per role, not
+ * once per case.
+ */
+export function byRole<T extends { role: string }>(cases: T[]): T[] {
+  const roles = [...new Set(cases.map((item) => item.role))];
+  return roles.flatMap((role) => cases.filter((item) => item.role === role));
+}
+
+/** CDP's errors for an evaluation cut off by a page load (not a closed browser or session). */
+const PAGE_NAVIGATED =
+  /Inspected target navigated|Execution context was destroyed|Cannot find context with specified id/;
+
+type Run = (args: string[], input?: string) => Promise<string>;
+const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+
+/**
+ * Polls `probe` (a page expression that is a string once there, else null) with
+ * one short evaluation at a time, every 500ms for 20s at most. Never one long
+ * in-page loop: a sign-in that ends in a full page load (`window.location.assign`
+ * after the second factor, two-factor-challenge.tsx) aborts any evaluation
+ * still running in the old page ("Inspected target navigated or closed"), so a
+ * navigation only means "look again". Resolves with the probe's string, or
+ * `still on <path> after 20s`; rejects at once on any other failure (a closed
+ * browser), and with the navigation error if the page was still navigating at
+ * the end.
+ */
+export async function pollPage(run: Run, probe: string, pause = sleep): Promise<string> {
+  let last = "an unknown page";
+  let navigating: unknown;
+  for (let i = 0; i < 40; i++) {
+    try {
+      const step: unknown = JSON.parse(await run(["eval", probe]));
+      if (typeof step === "string") return step;
+      last = JSON.parse(await run(["eval", "location.pathname"])) as string;
+      navigating = undefined;
+    } catch (error) {
+      if (!PAGE_NAVIGATED.test(String(error))) throw error;
+      navigating = error;
+    }
+    await pause(500);
+  }
+  // Still mid-navigation after 20s: that error says more than the last page seen.
+  if (navigating) throw navigating;
+  return `still on ${last} after 20s`;
+}
+
+/** Types a value into a React-controlled input through the native setter. */
+function fillScript(selector: string, value: string): string {
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`;
+}
+
+const PASSWORD = "input[autocomplete=current-password]";
+
+/** The sign-in form once React has hydrated it ("ready"); a submit before that reloads the page. */
+const FORM_HYDRATED = `(() => { const form = document.querySelector(${JSON.stringify(PASSWORD)})?.form; return form && Object.keys(form).some((key) => key.startsWith("__reactProps")) ? "ready" : null; })()`;
+
+/**
+ * Clicks Verify (the button after the code field) once React has enabled it
+ * for the typed code. A navigation can interrupt the very evaluation that
+ * clicked, and `pollPage` then runs this again on the next page: already on
+ * `landing` means the click went through.
+ */
+function verifyCode(landing: string): string {
+  return `(() => { if (location.pathname === ${JSON.stringify(landing)}) return "app"; const button = document.getElementById("totp-code")?.closest("div")?.nextElementSibling; if (!button || button.disabled) return null; button.click(); return "clicked"; })()`;
+}
+
+export interface Account {
+  email: string;
+  password: string;
+  /** A current one-time code, for an account with a second factor. */
+  totp?: () => string;
+}
+
+/**
+ * Signs in through the app's own sign-in form (a running stack, not mock
+ * mode). It asks for `landing` as the `redirectTo`, so the sign-in ends
+ * there; every wait after the submit is a `pollPage`, which survives the full
+ * page load the second-factor step ends in. The password and the code go to
+ * the page over stdin, so they never appear in a process's arguments or in a
+ * failure message.
+ */
+export async function formSignIn(
+  { base, browser }: Pick<CheckRun, "base" | "browser">,
+  account: Account,
+  landing = "/en-US/ongoing",
+  pause = sleep,
+): Promise<void> {
+  const run: Run = (args, input) => browser.run(args, input);
+  const at = `location.pathname === ${JSON.stringify(landing)} ? "app" : null`;
+  await run(["open", `${base}/en-US/login?redirectTo=${encodeURIComponent(landing)}`]);
+  // A dev server's first load can outlast agent-browser's 25s limit for one wait.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await run(["wait", PASSWORD]);
+      break;
+    } catch (error) {
+      if (attempt === 4) throw error;
+    }
+  }
+  if ((await pollPage(run, FORM_HYDRATED, pause)) !== "ready")
+    throw new Error("the sign-in form did not hydrate within 20s");
+  await run(["eval", "--stdin"], fillScript("input[type=email]", account.email));
+  try {
+    await run(["eval", "--stdin"], fillScript(PASSWORD, account.password));
+  } catch {
+    // agent-browser may echo the failing script; never pass its output on.
+    throw new Error("could not type the password into the sign-in form");
+  }
+  // Submitted in the page, not clicked: a click lands on whatever covers the button.
+  await run([
+    "eval",
+    `document.querySelector(${JSON.stringify(PASSWORD)}).form.requestSubmit(); true`,
+  ]);
+  const step = await pollPage(
+    run,
+    `location.pathname === ${JSON.stringify(landing)} ? "app" : document.getElementById("totp-code") ? "code" : null`,
+    pause,
+  );
+  if (step === "code") {
+    if (!account.totp) throw new Error(`${account.email} has a second factor and no code source`);
+    try {
+      await run(["eval", "--stdin"], fillScript("#totp-code", account.totp()));
+    } catch {
+      throw new Error("could not type the verification code");
+    }
+    const verify = await pollPage(run, verifyCode(landing), pause);
+    if (verify !== "clicked" && verify !== "app")
+      throw new Error("the Verify button did not enable for the typed code");
+    const done = await pollPage(run, at, pause);
+    if (done !== "app")
+      throw new Error(`the verification code was not accepted (${done}); is it still current?`);
+  } else if (step !== "app") {
+    throw new Error(`sign-in did not open the app (${step}); check the account's password`);
+  }
 }

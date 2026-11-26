@@ -15,6 +15,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
  */
 const fixture = vi.hoisted(() => ({
   config: undefined as Record<string, unknown> | undefined,
+  configError: false,
+  search: {} as Record<string, unknown>,
   signInEmail: vi.fn(),
   signUpEmail: vi.fn(),
   toastError: vi.fn(),
@@ -49,7 +51,7 @@ vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({
     options,
     useParams: () => ({ lang: "en-US" }),
-    useSearch: () => ({}),
+    useSearch: () => fixture.search,
   }),
   // Route components are code-split, so renders wait for the split chunk.
   lazyRouteComponent: (importer: () => Promise<Record<string, unknown>>, name = "default") =>
@@ -63,7 +65,12 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: fixture.config, isPending: false, isError: false, refetch: vi.fn() }),
+  useQuery: () => ({
+    data: fixture.config,
+    isPending: false,
+    isError: fixture.configError,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("@/utils/orpc", () => ({
   orpc: {
@@ -82,6 +89,10 @@ vi.mock("@/server/auth-session", () => ({
 
 const { Route: LoginRoute } = await import("@/routes/$lang/_app/login");
 const { Route: SignupRoute } = await import("@/routes/$lang/_app/signup");
+const { Route: ForgotPasswordRoute } = await import("@/routes/$lang/_app/forgot-password");
+const { Route: ResetPasswordRoute } = await import("@/routes/$lang/_app/reset-password");
+const { Route: VerifyEmailRoute } = await import("@/routes/$lang/_app/verify-email");
+const { TwoFactorSetupRequired } = await import("@/components/two-factor-enrollment");
 
 const i18n = createInstance();
 beforeAll(async () => {
@@ -94,6 +105,8 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   fixture.config = undefined;
+  fixture.configError = false;
+  fixture.search = {};
   fixture.form = null;
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -103,6 +116,7 @@ const base = { forceSso: false, ssoEnabled: false, emailConfigured: true, adminS
 const OPEN = { ...base, signupOpen: true, adminBootstrapSignupEnabled: false };
 const CLOSED = { ...base, signupOpen: false, adminBootstrapSignupEnabled: false };
 const FORCE_SSO = { ...OPEN, forceSso: true, ssoEnabled: true, ssoProviderName: "Okta" };
+const BOOTSTRAP = { ...base, signupOpen: false, adminBootstrapSignupEnabled: true };
 
 type Route = { options: { component: ComponentType } };
 
@@ -220,5 +234,46 @@ describe("/signup submit", () => {
     await submit(SignupRoute, value);
     expect(fieldError("email")).toBeUndefined();
     expect(fixture.toastError).toHaveBeenCalled();
+  });
+});
+
+/** The text of every h1 in the markup; no ARIA stand-ins for a heading. */
+function h1s(html: string): string[] {
+  expect(html).not.toContain('role="heading"');
+  return [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/g)].map(([, inner = ""]) =>
+    inner.replace(/<[^>]*>/g, ""),
+  );
+}
+
+describe("one h1 per auth page: the card's title", () => {
+  it.each([
+    ["sign-in", LoginRoute, OPEN, {}, enAuth.login.signinTitle],
+    ["sign-up, open", SignupRoute, OPEN, {}, enAuth.login.createAccount],
+    ["sign-up, bootstrap", SignupRoute, BOOTSTRAP, {}, enAuth.adminSetup.bootstrapTitle],
+    ["sign-up, closed", SignupRoute, CLOSED, {}, enAuth.signup.closedTitle],
+    ["forgot password", ForgotPasswordRoute, OPEN, {}, enAuth.forgotPassword.title],
+    ["reset password", ResetPasswordRoute, OPEN, { token: "t" }, enAuth.resetPassword.title],
+    ["reset password, bad link", ResetPasswordRoute, OPEN, {}, enAuth.resetPassword.invalidTitle],
+    ["verify email", VerifyEmailRoute, OPEN, {}, enAuth.verifyEmail.pendingTitle],
+  ])("%s", async (_name, route, config, search, title) => {
+    fixture.config = config;
+    fixture.search = search;
+    expect(h1s(await render(route))).toEqual([title]);
+  });
+
+  it("unable to connect", async () => {
+    fixture.configError = true;
+    expect(h1s(await render(LoginRoute))).toEqual([enAuth.login.unableToConnect]);
+  });
+
+  it("the forced two-factor setup screen, which replaces the page", async () => {
+    fixture.config = OPEN;
+    const { prelude } = await prerender(
+      <I18nextProvider i18n={i18n}>
+        <TwoFactorSetupRequired />
+      </I18nextProvider>,
+    );
+    const html = await new Response(prelude).text();
+    expect(h1s(html)).toEqual([enAuth.twoFactor.requiredTitle]);
   });
 });

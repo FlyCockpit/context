@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { APP_LOCALE_HEADER } from "@cockpit-context/config/locales";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin } from "better-auth/plugins";
@@ -200,6 +201,47 @@ describe("sign-up with SMTP", () => {
     await expect(
       auth.api.signInEmail({ body: { email: "new@example.com", password: PASSWORD } }),
     ).rejects.toMatchObject({ body: { code: "EMAIL_NOT_VERIFIED" } });
+  });
+
+  // users.invite creates the account server-side under the "admin-invite"
+  // grant. The invitee's language comes from the grant (there is no request
+  // header), and nothing mails a "verify your email" link: the emailed
+  // set-password link is the only mail, and spending it verifies the address
+  // (./invite-verification.ts).
+  it("creates an invited user in the invite's language, unverified, with no verification mail", async () => {
+    const { auth, db, sendVerificationEmail } = buildAuth({
+      emailConfigured: true,
+      signupOpen: false,
+      usersExist: true,
+    });
+    await runWithAllowedUserCreation(
+      "admin-invite",
+      () =>
+        auth.api.createUser({
+          body: { email: "invitee@example.com", password: PASSWORD, name: "Invitee", role: "user" },
+        }),
+      { locale: "es-MX" },
+    );
+    expect(
+      db.user.find((u) => (u as { email: string }).email === "invitee@example.com"),
+    ).toMatchObject({ locale: "es-MX", emailVerified: false, role: "user" });
+    expect(sendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it("seeds a self sign-up's locale from the client's header", async () => {
+    const { auth, db, sendVerificationEmail } = buildAuth({
+      emailConfigured: true,
+      signupOpen: true,
+      usersExist: true,
+    });
+    await auth.api.signUpEmail({
+      body: { email: "self@example.com", password: PASSWORD, name: "Self" },
+      headers: new Headers({ [APP_LOCALE_HEADER]: "es-MX" }),
+    });
+    expect(
+      db.user.find((u) => (u as { email: string }).email === "self@example.com"),
+    ).toMatchObject({ locale: "es-MX" });
+    expect(sendVerificationEmail).toHaveBeenCalledOnce();
   });
 
   it("bootstraps the administrator: a listed address with the token becomes an (unverified) admin", async () => {

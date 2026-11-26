@@ -64,6 +64,14 @@ vi.mock("@cockpit-context/auth", () => {
   };
 });
 
+// The real grant runs (so the stubbed createUser still executes inside it); the
+// spy lets a test read the grant's mode and locale.
+vi.mock("@cockpit-context/auth/user-creation-policy", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@cockpit-context/auth/user-creation-policy")>();
+  return { ...actual, runWithAllowedUserCreation: vi.fn(actual.runWithAllowedUserCreation) };
+});
+
 // Mock @cockpit-context/mailer so invites don't try to open SMTP. Tests assert on the
 // call shape via the mock instead. `renderInviteUser` is stubbed to return a
 // stable subject/html so the router can pass them straight through to
@@ -89,6 +97,9 @@ const { env } = await import("@cockpit-context/env/server");
 const { isEmailConfigured, renderInviteUser, renderResetPassword, sendEmail } = await import(
   "@cockpit-context/mailer"
 );
+
+const { runWithAllowedUserCreation } = await import("@cockpit-context/auth/user-creation-policy");
+const runWithAllowedUserCreationSpy = runWithAllowedUserCreation as unknown as MockInstance;
 
 const db = prisma as unknown as {
   user: {
@@ -215,12 +226,12 @@ describe("usersRouter", () => {
       const client = createRouterClient(usersRouter, {
         context: buildContext({ user: { role: "user" } }),
       });
-      await expect(client.invite({ email: "x@example.com", name: "X" })).rejects.toSatisfy(
-        (e: ORPCError) => {
-          expect(e.code).toBe("NOT_FOUND");
-          return true;
-        },
-      );
+      await expect(
+        client.invite({ email: "x@example.com", name: "X", locale: "en-US" }),
+      ).rejects.toSatisfy((e: ORPCError) => {
+        expect(e.code).toBe("NOT_FOUND");
+        return true;
+      });
       expect(authApi.api.createUser).not.toHaveBeenCalled();
     });
   });
@@ -347,6 +358,7 @@ describe("usersRouter", () => {
         email: "NEW@example.com",
         name: "New User",
         role: "user",
+        locale: "en-US",
       });
 
       expect(res.userId).toBe("new-user-id");
@@ -408,7 +420,11 @@ describe("usersRouter", () => {
       db.verification.create.mockRejectedValueOnce(new Error("db down"));
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      const res = await client.invite({ email: "new@example.com", name: "New User" });
+      const res = await client.invite({
+        email: "new@example.com",
+        name: "New User",
+        locale: "en-US",
+      });
 
       expect(res.emailSent).toBe(true);
       expect(res).not.toHaveProperty("setPasswordUrl");
@@ -419,7 +435,11 @@ describe("usersRouter", () => {
       isEmailConfiguredMock.mockReturnValue(false);
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      const res = await client.invite({ email: "new@example.com", name: "New User" });
+      const res = await client.invite({
+        email: "new@example.com",
+        name: "New User",
+        locale: "en-US",
+      });
 
       expect(sendEmailMock).not.toHaveBeenCalled();
       expect(res.emailSent).toBe(false);
@@ -441,6 +461,7 @@ describe("usersRouter", () => {
       const res = await client.invite({
         email: "new@example.com",
         name: "New User",
+        locale: "en-US",
       });
 
       expect(res.emailSent).toBe(false);
@@ -451,17 +472,55 @@ describe("usersRouter", () => {
 
     it("links to the web origin and the invitee's locale", async () => {
       authApi.api.createUser.mockResolvedValue({ user: { id: "new-user-id" } });
-      db.user.findUnique.mockResolvedValue({ locale: "es-MX" });
       isEmailConfiguredMock.mockReturnValue(false);
       mutableEnv.CORS_ORIGIN = "https://app.example.com";
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      const res = await client.invite({ email: "new@example.com", name: "New User" });
+      const res = await client.invite({
+        email: "new@example.com",
+        name: "New User",
+        locale: "es-MX",
+      });
 
       expect(res).toHaveProperty(
         "setPasswordUrl",
         `https://app.example.com/es-MX/reset-password?token=${mintedToken()}&invite=1`,
       );
+    });
+
+    it("creates the account under the invite grant, in the chosen language", async () => {
+      authApi.api.createUser.mockResolvedValue({ user: { id: "new-user-id" } });
+      sendEmailMock.mockResolvedValue(undefined);
+
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      await client.invite({ email: "new@example.com", name: "New User", locale: "es-MX" });
+
+      // The grant carries the language into the user-create hook, which saves
+      // it as `User.locale` in the same insert (packages/auth).
+      expect(runWithAllowedUserCreationSpy).toHaveBeenCalledWith(
+        "admin-invite",
+        expect.any(Function),
+        { locale: "es-MX" },
+      );
+      expect(renderInviteUserMock).toHaveBeenCalledWith(
+        expect.objectContaining({ locale: "es-MX" }),
+      );
+    });
+
+    it("refuses an unsupported language before creating anything", async () => {
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      await expect(
+        client.invite({
+          email: "new@example.com",
+          name: "New User",
+          // @ts-expect-error -- not one of SUPPORTED_LOCALES
+          locale: "fr-FR",
+        }),
+      ).rejects.toSatisfy((e: ORPCError) => {
+        expect(e.code).toBe("BAD_REQUEST");
+        return true;
+      });
+      expect(authApi.api.createUser).not.toHaveBeenCalled();
     });
 
     it("keeps the seven-day lifetime whatever the reset-token setting is", async () => {
@@ -473,7 +532,11 @@ describe("usersRouter", () => {
       const before = Date.now();
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      const res = await client.invite({ email: "new@example.com", name: "New User" });
+      const res = await client.invite({
+        email: "new@example.com",
+        name: "New User",
+        locale: "en-US",
+      });
 
       const ttl = res.setPasswordExpiresAt.getTime() - before;
       expect(ttl).toBeGreaterThan(SEVEN_DAYS_MS - 10_000);
@@ -485,13 +548,13 @@ describe("usersRouter", () => {
       createVerificationValue.mockRejectedValue(new Error("db down"));
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      await expect(client.invite({ email: "new@example.com", name: "New User" })).rejects.toSatisfy(
-        (e: ORPCError) => {
-          expect(e.code).toBe("INTERNAL_SERVER_ERROR");
-          expect(e.message).toMatch(/delete the user and invite them again/i);
-          return true;
-        },
-      );
+      await expect(
+        client.invite({ email: "new@example.com", name: "New User", locale: "en-US" }),
+      ).rejects.toSatisfy((e: ORPCError) => {
+        expect(e.code).toBe("INTERNAL_SERVER_ERROR");
+        expect(e.message).toMatch(/delete the user and invite them again/i);
+        return true;
+      });
       expect(sendEmailMock).not.toHaveBeenCalled();
     });
 
@@ -499,12 +562,12 @@ describe("usersRouter", () => {
       authApi.api.createUser.mockRejectedValue(new Error("User already exists"));
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      await expect(client.invite({ email: "dup@example.com", name: "Dup" })).rejects.toSatisfy(
-        (e: ORPCError) => {
-          expect(e.code).toBe("CONFLICT");
-          return true;
-        },
-      );
+      await expect(
+        client.invite({ email: "dup@example.com", name: "Dup", locale: "en-US" }),
+      ).rejects.toSatisfy((e: ORPCError) => {
+        expect(e.code).toBe("CONFLICT");
+        return true;
+      });
       expect(sendEmailMock).not.toHaveBeenCalled();
     });
 
@@ -514,13 +577,13 @@ describe("usersRouter", () => {
       );
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      await expect(client.invite({ email: "new@example.com", name: "New User" })).rejects.toSatisfy(
-        (e: ORPCError) => {
-          expect(e.code).toBe("BAD_REQUEST");
-          expect(e.message).toMatch(/account creation is disabled/i);
-          return true;
-        },
-      );
+      await expect(
+        client.invite({ email: "new@example.com", name: "New User", locale: "en-US" }),
+      ).rejects.toSatisfy((e: ORPCError) => {
+        expect(e.code).toBe("BAD_REQUEST");
+        expect(e.message).toMatch(/account creation is disabled/i);
+        return true;
+      });
       expect(sendEmailMock).not.toHaveBeenCalled();
     });
   });

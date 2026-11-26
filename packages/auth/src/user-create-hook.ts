@@ -4,6 +4,7 @@ import {
   decideUserCreation,
   getAllowedUserCreationMode,
   getBootstrapTokenCandidate,
+  getGrantedUserLocale,
 } from "./user-creation-policy.js";
 
 /** The endpoint context Better-Auth hands a database hook (absent for internal writes). */
@@ -67,7 +68,9 @@ export function createUserCreateBeforeHook(deps: UserCreateHookDeps) {
     if (!decision.allowed) {
       throw new Error(decision.reason);
     }
-    const locale = resolveSignupLocale(context?.headers);
+    // An admin invite chooses the invitee's language; a sign-up uses the
+    // locale the client is rendering.
+    const locale = getGrantedUserLocale() ?? resolveSignupLocale(context?.headers);
     return {
       data: {
         ...user,

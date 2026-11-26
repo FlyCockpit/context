@@ -41,13 +41,15 @@ function SecuritySettings() {
       <PasswordSection />
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {has2FA ? (
-              <ShieldCheck className="size-5 text-green-500" />
-            ) : (
-              <ShieldOff className="size-5 text-muted-foreground" />
-            )}
-            {t("security.twoFactorTitle")}
+          <CardTitle>
+            <h2 className="flex items-center gap-2">
+              {has2FA ? (
+                <ShieldCheck aria-hidden="true" className="size-5 text-green-500" />
+              ) : (
+                <ShieldOff aria-hidden="true" className="size-5 text-muted-foreground" />
+              )}
+              {t("security.twoFactorTitle")}
+            </h2>
           </CardTitle>
           <CardDescription>
             {has2FA ? t("security.enabledDescription") : t("security.disabledDescription")}
@@ -76,7 +78,9 @@ function PasswordSection() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("settings:security.passwordTitle")}</CardTitle>
+          <CardTitle>
+            <h2>{t("settings:security.passwordTitle")}</h2>
+          </CardTitle>
           <CardDescription>{t("settings:security.passwordLoadError")}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -177,9 +181,11 @@ function ChangePasswordCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <KeyRound aria-hidden="true" className="size-5 text-muted-foreground" />
-          {t("settings:security.passwordTitle")}
+        <CardTitle>
+          <h2 className="flex items-center gap-2">
+            <KeyRound aria-hidden="true" className="size-5 text-muted-foreground" />
+            {t("settings:security.passwordTitle")}
+          </h2>
         </CardTitle>
         <CardDescription>{t("settings:security.passwordDescription")}</CardDescription>
       </CardHeader>

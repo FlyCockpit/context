@@ -5,6 +5,7 @@ import {
   decideUserCreation,
   FIRST_ACCOUNT_REQUIRES_BOOTSTRAP_MESSAGE,
   getAllowedUserCreationMode,
+  getGrantedUserLocale,
   runWithAllowedUserCreation,
   SIGNUP_DISABLED_MESSAGE,
   type UserCreationMode,
@@ -25,6 +26,24 @@ describe("user creation policy context", () => {
 
   it("keeps the stable message the admin-invite error translation matches on", () => {
     expect(SIGNUP_DISABLED_MESSAGE).toMatch(/sign-?up.*disabled/i);
+  });
+});
+
+describe("granted locale", () => {
+  it("carries the server-chosen locale only inside its grant", async () => {
+    expect(getGrantedUserLocale()).toBeUndefined();
+    await runWithAllowedUserCreation(
+      "admin-invite",
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(getGrantedUserLocale()).toBe("es-MX");
+      },
+      { locale: "es-MX" },
+    );
+    await runWithAllowedUserCreation("admin-bootstrap", () => {
+      expect(getGrantedUserLocale()).toBeUndefined();
+    });
+    expect(getGrantedUserLocale()).toBeUndefined();
   });
 });
 
