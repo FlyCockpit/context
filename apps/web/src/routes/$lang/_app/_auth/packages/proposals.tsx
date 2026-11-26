@@ -4,6 +4,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@cockpit-context/ui/components/dialog";
@@ -30,6 +31,7 @@ import type { Proposal } from "@/lib/packages";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/packages/proposals")({
+  staticData: { pendingShape: "list" },
   component: ProposalsPage,
 });
 
@@ -348,7 +350,7 @@ function RejectForm({
           />
         )}
       </form.Field>
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <DialogFooter>
         <Button type="button" variant="ghost" size="touch" onClick={onCancel} disabled={pending}>
           {t("common:actions.cancel")}
         </Button>
@@ -368,7 +370,7 @@ function RejectForm({
             </Button>
           )}
         </form.Subscribe>
-      </div>
+      </DialogFooter>
     </form>
   );
 }

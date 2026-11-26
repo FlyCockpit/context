@@ -4,6 +4,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@cockpit-context/ui/components/dialog";
@@ -28,8 +29,7 @@ const PRIVATE_KEY_MAX = 16_384;
 const PASSPHRASE_MAX_BYTES = 1_023;
 const utf8 = new TextEncoder();
 
-const DIALOG_CLASS =
-  "flex max-h-[calc(100dvh-2rem)] flex-col overflow-x-hidden overflow-y-auto sm:max-w-lg";
+const DIALOG_CLASS = "sm:max-w-lg";
 
 function useInvalidateKeys() {
   const queryClient = useQueryClient();
@@ -364,7 +364,7 @@ function FormActions({
 }) {
   const { t } = useTranslation(["common"]);
   return (
-    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+    <DialogFooter>
       <Button
         type="button"
         variant="outline"
@@ -377,7 +377,7 @@ function FormActions({
       <Button type="submit" size="touch" disabled={isSubmitting}>
         {isSubmitting ? pendingLabel : submitLabel}
       </Button>
-    </div>
+    </DialogFooter>
   );
 }
 

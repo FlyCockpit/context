@@ -35,9 +35,12 @@ export function AppFrame({ lang, children }: { lang: string; children: ReactNode
   const sidebarCollapsed = useUiPreferences((prefs) => prefs.sidebarCollapsed);
   const toggleSidebar = useUiPreferences((prefs) => prefs.toggleSidebar);
   const homeStatus = useHomeStatus();
+  // Only signed-in layouts (and their loading state) draw this frame, so a
+  // session still loading is a signed-in one: the links are there from the
+  // first frame (the role-gated Admin link joins once the role is known).
   const items = getNavItems({
     placement: "sidebar",
-    isAuthenticated: Boolean(session),
+    isAuthenticated: Boolean(session) || state.status === "pending",
     role: session?.user.role,
   });
   const groups = (["main", "footer"] as const).map((id) => ({

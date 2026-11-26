@@ -1,5 +1,6 @@
 import { Button } from "@cockpit-context/ui/components/button";
 import { CopyField } from "@cockpit-context/ui/components/copy-field";
+import { DialogFooter } from "@cockpit-context/ui/components/dialog";
 import { toast } from "@cockpit-context/ui/components/sileo";
 import { TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
@@ -47,9 +48,12 @@ export function SecretReveal({
         onCopyError={() => toast.error(t("errors:couldNotCopy"))}
       />
       {children}
-      <Button type="button" size="touch" onClick={onDone}>
-        {t("dashboard:access.secret.done")}
-      </Button>
+      {/* Sticky in the dialog body: "Done" never scrolls out of view. */}
+      <DialogFooter className="mt-0">
+        <Button type="button" size="touch" onClick={onDone}>
+          {t("dashboard:access.secret.done")}
+        </Button>
+      </DialogFooter>
     </div>
   );
 }

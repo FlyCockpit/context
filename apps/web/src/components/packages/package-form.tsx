@@ -1,9 +1,12 @@
 import type { AppRouterClient } from "@cockpit-context/api/routers/index";
 import { Button, buttonVariants } from "@cockpit-context/ui/components/button";
 import { Checkbox } from "@cockpit-context/ui/components/checkbox";
-import { SelectItem } from "@cockpit-context/ui/components/select";
+import { DialogFooter } from "@cockpit-context/ui/components/dialog";
+import { AdvancedSection } from "@cockpit-context/ui/components/form-page";
+import { SheetBody, SheetFooter } from "@cockpit-context/ui/components/sheet";
 import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { SelectField, TextareaField, TextField } from "@cockpit-context/ui/components/text-field";
+import { focusFirstInvalidField } from "@cockpit-context/ui/lib/focus-first-invalid";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useForm, useStore } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -11,8 +14,7 @@ import { Link } from "@tanstack/react-router";
 import { ExternalLink, Search } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import { useTranslation } from "react-i18next";
-
-import { AdvancedSection, focusFirstInvalid } from "@/components/form-surface";
+import { setServerFieldError } from "@/lib/form-server-error";
 import {
   buildPackageFormSchema,
   ECOSYSTEMS,
@@ -53,8 +55,7 @@ export function PackageForm({
   submitLabel,
   pendingLabel,
   intro,
-  bodyClassName,
-  footerClassName,
+  surface,
 }: {
   mode: PackageFormMode;
   lang: string;
@@ -65,11 +66,16 @@ export function PackageForm({
   pendingLabel: string;
   /** Shown above the fields (the proposal's reason when approving). */
   intro?: ReactNode;
-  bodyClassName?: string;
-  footerClassName?: string;
+  /**
+   * Where the form sits: a wide sheet (the fields scroll in `SheetBody`, the
+   * actions are pinned in `SheetFooter`) or a dialog (sticky `DialogFooter`).
+   */
+  surface: "sheet" | "dialog";
 }) {
   const { t } = useTranslation(["dashboard", "common"]);
   const formRef = useRef<HTMLFormElement>(null);
+  const Body = surface === "sheet" ? SheetBody : "div";
+  const Footer = surface === "sheet" ? SheetFooter : DialogFooter;
   const form = useForm({
     defaultValues: initialValues,
     validators: {
@@ -90,11 +96,7 @@ export function PackageForm({
         // The mutation's global error toast already told the user; the form
         // stays open with their input.
         showRefusalAtField(error, formRef.current, (name, message) =>
-          form.setFieldMeta(name, (meta) => ({
-            ...meta,
-            isTouched: true,
-            errorMap: { ...meta.errorMap, onSubmit: message },
-          })),
+          setServerFieldError(form, name, message),
         );
       }
     },
@@ -104,9 +106,6 @@ export function PackageForm({
   const saveKey = useStore(form.store, (state) => state.values.saveKey);
   const ecosystem = useStore(form.store, (state) => state.values.ecosystem);
   const name = useStore(form.store, (state) => state.values.name.trim());
-  const ecosystemLabels = Object.fromEntries(
-    ECOSYSTEMS.map((value) => [value, t(`dashboard:packages.ecosystems.${value}`)]),
-  );
   const advancedValues = {
     displayName: useStore(form.store, (state) => state.values.displayName.trim()),
     subdirectory: useStore(form.store, (state) => state.values.subdirectory.trim()),
@@ -135,8 +134,9 @@ export function PackageForm({
       ? t("dashboard:packages.form.summary.notesSet")
       : t("dashboard:packages.form.summary.noNotes"),
   ].join(" · ");
+  // AdvancedSection lays its children out in two columns from `lg:`.
   const advanced = (
-    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+    <>
       <form.Field name="displayName">
         {(field) => (
           <TextField
@@ -203,7 +203,7 @@ export function PackageForm({
           />
         )}
       </form.Field>
-    </div>
+    </>
   );
 
   return (
@@ -213,13 +213,15 @@ export function PackageForm({
         event.preventDefault();
         event.stopPropagation();
         void form.handleSubmit().then(() => {
-          if (!form.state.isValid) focusFirstInvalid(formRef.current);
+          if (!form.state.isValid) focusFirstInvalidField(formRef.current);
         });
       }}
       ref={formRef}
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      // In a dialog the body and the sticky footer are siblings of a column:
+      // the gap is the space DialogFooter's `-mt-2` expects above it.
+      className={cn("flex min-h-0 min-w-0 flex-1 flex-col", surface === "dialog" && "gap-4")}
     >
-      <div className={cn("min-w-0 space-y-4", bodyClassName)}>
+      <Body className="min-w-0 space-y-4">
         {intro}
         {mode === "create" ? (
           <div className="min-w-0 space-y-3">
@@ -229,14 +231,11 @@ export function PackageForm({
                   <SelectField
                     field={field}
                     label={t("dashboard:packages.form.ecosystem")}
-                    items={ecosystemLabels}
-                  >
-                    {ECOSYSTEMS.map((value) => (
-                      <SelectItem key={value} value={value} className="min-h-[44px]">
-                        {ecosystemLabels[value]}
-                      </SelectItem>
-                    ))}
-                  </SelectField>
+                    options={ECOSYSTEMS.map((value) => ({
+                      value,
+                      label: t(`dashboard:packages.ecosystems.${value}`),
+                    }))}
+                  />
                 )}
               </form.Field>
               <form.Field name="name">
@@ -300,18 +299,11 @@ export function PackageForm({
                   <SelectField
                     field={field}
                     label={t("dashboard:packages.snapshot.keyChoice")}
-                    items={{
-                      saved: t("dashboard:packages.snapshot.saved"),
-                      once: t("dashboard:packages.snapshot.once"),
-                    }}
-                  >
-                    <SelectItem value="saved" className="min-h-[44px]">
-                      {t("dashboard:packages.snapshot.saved")}
-                    </SelectItem>
-                    <SelectItem value="once" className="min-h-[44px]">
-                      {t("dashboard:packages.snapshot.once")}
-                    </SelectItem>
-                  </SelectField>
+                    options={[
+                      { value: "saved", label: t("dashboard:packages.snapshot.saved") },
+                      { value: "once", label: t("dashboard:packages.snapshot.once") },
+                    ]}
+                  />
                 )}
               </form.Field>
             ) : null}
@@ -383,14 +375,9 @@ export function PackageForm({
             {advanced}
           </AdvancedSection>
         )}
-      </div>
+      </Body>
 
-      <div
-        className={cn(
-          "flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-end",
-          footerClassName,
-        )}
-      >
+      <Footer>
         <form.Subscribe selector={(state) => state.isSubmitting}>
           {(isSubmitting) => (
             <Button
@@ -405,7 +392,7 @@ export function PackageForm({
           )}
         </form.Subscribe>
         {/* Enabled while invalid: a click lands on the first error, even one
-            inside the collapsed Advanced section (focusFirstInvalid). */}
+            inside the collapsed Advanced section (focusFirstInvalidField). */}
         <form.Subscribe selector={(state) => state.isSubmitting}>
           {(isSubmitting) => (
             <Button type="submit" size="touch" disabled={isSubmitting}>
@@ -413,7 +400,7 @@ export function PackageForm({
             </Button>
           )}
         </form.Subscribe>
-      </div>
+      </Footer>
     </form>
   );
 }
@@ -432,7 +419,7 @@ export function showRefusalAtField(
   const name = packageFieldForReason(errorReason(error));
   if (!name || !root?.querySelector(`[id$="-${name}"]`)) return false;
   setFieldError(name, friendly(error));
-  focusFirstInvalid(root);
+  focusFirstInvalidField(root);
   return true;
 }
 
@@ -629,23 +616,16 @@ function SshKeyPicker({ field, lang }: { field: FieldLike; lang: string }) {
       field={field}
       label={t("dashboard:packages.form.sshKey")}
       placeholder={t("dashboard:packages.form.sshKeyPlaceholder")}
-      items={Object.fromEntries(items.map((key) => [key.id, key.name]))}
+      options={items.map((key) => ({
+        value: key.id,
+        label: key.name,
+        description: <span className="font-mono text-xs">{key.fingerprint}</span>,
+      }))}
       description={
         <>
           {t("dashboard:packages.form.sshKeyHint")} {manageLink}
         </>
       }
-    >
-      {items.map((key) => (
-        <SelectItem key={key.id} value={key.id} className="min-h-[44px]">
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate">{key.name}</span>
-            <span className="truncate font-mono text-xs text-muted-foreground">
-              {key.fingerprint}
-            </span>
-          </span>
-        </SelectItem>
-      ))}
-    </SelectField>
+    />
   );
 }

@@ -21,6 +21,7 @@ import { BACK_LINK_CLASS } from "@/components/page-shell";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/admin/seed")({
+  staticData: { pendingShape: "form" },
   component: AdminSeed,
 });
 

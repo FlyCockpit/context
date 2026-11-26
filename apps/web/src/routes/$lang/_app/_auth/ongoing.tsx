@@ -33,6 +33,7 @@ import { claudeOAuthCommand, codexOAuthCommand } from "@/lib/access";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/ongoing")({
+  staticData: { pendingShape: "list" },
   component: OngoingPage,
 });
 

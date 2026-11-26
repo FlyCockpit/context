@@ -4,6 +4,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@cockpit-context/ui/components/dialog";
@@ -21,8 +22,7 @@ import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { type HostScan, hostLabel, parseScanTarget } from "@/lib/access";
 import { orpc } from "@/utils/orpc";
 
-const DIALOG_CLASS =
-  "flex max-h-[calc(100dvh-2rem)] flex-col overflow-x-hidden overflow-y-auto sm:max-w-lg";
+const DIALOG_CLASS = "sm:max-w-lg";
 
 /**
  * Create → Dialog: scan a host, compare its fingerprints, trust the ones
@@ -193,7 +193,7 @@ function ScanForm({
       </div>
       <form.Subscribe selector={(state) => state.isSubmitting}>
         {(isSubmitting) => (
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <DialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -208,7 +208,7 @@ function ScanForm({
                 ? t("dashboard:access.knownHosts.scan.pending")
                 : t("dashboard:access.knownHosts.scan.submit")}
             </Button>
-          </div>
+          </DialogFooter>
         )}
       </form.Subscribe>
     </form>
@@ -310,7 +310,7 @@ function ReviewKeys({
           );
         })}
       </fieldset>
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <DialogFooter>
         <Button type="button" variant="outline" size="touch" onClick={onBack} disabled={busy}>
           {t("common:actions.back")}
         </Button>
@@ -326,7 +326,7 @@ function ReviewKeys({
               ? t("dashboard:access.knownHosts.review.submitNone")
               : t("dashboard:access.knownHosts.review.submit", { count: selected.size })}
         </Button>
-      </div>
+      </DialogFooter>
     </div>
   );
 }

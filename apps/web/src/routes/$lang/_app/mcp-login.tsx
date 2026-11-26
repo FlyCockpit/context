@@ -9,6 +9,7 @@ import { McpLoginPage } from "@/components/mcp/mcp-login-page";
  * reads the RAW `window.location.search` (TanStack re-serializes search).
  */
 export const Route = createFileRoute("/$lang/_app/mcp-login")({
+  staticData: { pendingShape: "form", pendingWidth: "narrow" },
   validateSearch: (search: Record<string, unknown>) => search,
   component: McpLoginRoute,
 });

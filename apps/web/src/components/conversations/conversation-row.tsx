@@ -43,6 +43,8 @@ export function ConversationRow({
     <Link
       to="/$lang/conversations/$conversationId"
       params={{ lang, conversationId: item.id }}
+      // A stable handle for the browser checks: a finished conversation offers Delete.
+      data-live={live ? "" : undefined}
       className="flex min-w-0 items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
       <span aria-hidden="true" className="relative mt-1.5 flex size-2.5 shrink-0">

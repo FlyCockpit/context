@@ -21,7 +21,12 @@ export default function Header() {
   const home = state.status === "authenticated" ? "/$lang/ongoing" : "/$lang";
 
   return (
-    <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    // `data-app-header`: what `pnpm check:shell-loading` measures, frame by
+    // frame, from the first paint of a hard refresh to the loaded page.
+    <header
+      data-app-header=""
+      className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+    >
       <div className="flex min-h-14 min-w-0 flex-row items-center gap-4 px-4 py-2">
         {/* The first thing in the row to give way (see AppNameLink). */}
         <AppNameLink to={home} lang={lang} />

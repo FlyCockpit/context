@@ -1,11 +1,11 @@
 import { isAdminRole } from "@cockpit-context/auth/roles";
-import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { TwoFactorNudge } from "@/components/admin/two-factor-nudge";
 import { AppFrame } from "@/components/app-frame";
 import { InlineRetry } from "@/components/inline-retry";
+import { RouteContentSkeleton } from "@/components/route-content-skeleton";
 import { TwoFactorSetupRequired } from "@/components/two-factor-enrollment";
 import { decideProtectedRouteAccess } from "@/lib/route-session-access";
 import { getRouteSession } from "@/server/auth-session";
@@ -13,6 +13,7 @@ import { orpc } from "@/utils/orpc";
 import { twoFactorEnrollmentState } from "@/utils/two-factor-policy";
 
 export const Route = createFileRoute("/$lang/_app/_auth")({
+  staticData: { pendingFrame: "app" },
   beforeLoad: async ({ location, params }) => {
     const decision = decideProtectedRouteAccess(await getRouteSession());
     if (decision.kind === "error") throw new Error("Route session unavailable");
@@ -40,18 +41,9 @@ function AuthLayout() {
   const { t } = useTranslation(["common", "dashboard"]);
 
   if (isPending) {
-    return (
-      <AppFrame lang={lang}>
-        <div className="container mx-auto max-w-5xl space-y-4 px-4 py-8">
-          <Skeleton className="h-8 w-48" />
-          <Skeleton className="h-5 w-64" />
-          <div className="mt-8 space-y-3">
-            <Skeleton className="h-32 w-full rounded-lg" />
-            <Skeleton className="h-32 w-full rounded-lg" />
-          </div>
-        </div>
-      </AppFrame>
-    );
+    // The sidebar and a skeleton in the shape of the page being opened (the
+    // skeleton draws this layout's `app` frame itself).
+    return <RouteContentSkeleton />;
   }
 
   if (isError) {

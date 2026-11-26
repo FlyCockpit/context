@@ -1,5 +1,10 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema-jsonc.json",
+  "ignoreIssues": {
+    // Shared with the template and kept identical to it: its mock-mode helper
+    // (mockSession) has no caller in an app without mock mode.
+    "scripts/browser-check-lib.ts": ["exports"]
+  },
   "workspaces": {
     ".": {
       "entry": [
@@ -24,8 +29,10 @@
       "ignoreBinaries": [
         // Global local-dev CLI. Intentionally not listed in package.json.
         "portless",
-        // Browser CLI driven by scripts/check-layout.ts (`pnpm check:layout`),
-        // a local-only check: installed globally, not a dependency.
+        // Browser CLI driven by scripts/check-layout.ts (`pnpm check:layout`) and
+        // scripts/browser-check-lib.ts (`pnpm check:dialogs`,
+        // `pnpm check:shell-loading`), local-only checks: installed globally,
+        // not a dependency.
         "agent-browser",
         // OS binary from Debian's openssh-client, apt-installed in the image
         // and spawned by scripts/check-runtime-tools.mjs. knip 6.42 started

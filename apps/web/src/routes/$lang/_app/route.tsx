@@ -1,14 +1,15 @@
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
-import { useCallback } from "react";
+import { type ReactNode, useCallback } from "react";
 import { AdminSetupBanner } from "@/components/admin-setup-banner";
 import BottomNav from "@/components/bottom-nav";
 import Header from "@/components/header";
 import { OfflineBand } from "@/components/offline-band";
 import PullToRefresh from "@/components/pull-to-refresh";
+import { RouteContentSkeleton } from "@/components/route-content-skeleton";
 import { SkipLink } from "@/components/skip-link";
 import { useDocumentLang } from "@/hooks/use-document-lang";
 import { useMobileKeyboard } from "@/hooks/use-mobile-keyboard";
@@ -21,6 +22,14 @@ export const Route = createFileRoute("/$lang/_app")({
   // navigation side effects. Keep this branch client-rendered while public
   // pages remain SSR-capable under `/$lang/_public`.
   ssr: false,
+  // What a hard refresh paints first. With `ssr: false` the server renders
+  // this route's pending component in place of the layout, and the client
+  // shows it again until the layout can mount (hydration, the auth check).
+  // So it is the real shell (header, sidebar, bottom nav) around a skeleton
+  // of the page's content area only: no frame without the nav, and no layout
+  // jump when the page arrives; `pnpm check:shell-loading` measures it.
+  // See docs/ui.md § Loading states that look like the app
+  pendingComponent: AppShellPending,
   component: AppShellLayout,
 });
 
@@ -30,52 +39,27 @@ function AppShellLayout() {
   useReloadOnIdentityChange();
   useDocumentLang();
   useUserLocaleSync();
-  const mobileKeyboardOpen = useMobileKeyboard();
   const queryClient = useQueryClient();
 
   // Every signed-in page gets pull-to-refresh: mark all cached data stale and
   // refetch what is on screen. A page opts out with
   // `data-pull-to-refresh="off"` (see docs/development.md).
   const handleRefresh = useCallback(() => queryClient.invalidateQueries(), [queryClient]);
+  // The first load of a page waits on the `_auth` / admin session check. A
+  // pending route shows nothing until the router's `pendingMs` (1s) has passed,
+  // and on a hard refresh there is no previous page to keep on screen, so the
+  // shell would show an empty content area, then the skeleton. Until that
+  // first load resolves, the outlet is the page's skeleton; later navigations
+  // keep the current page on screen as usual.
+  const firstLoadDone = useRouterState({ select: (state) => state.resolvedLocation !== undefined });
 
   return (
     <>
-      <div
-        className={cn(
-          "grid h-svh min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr_auto] md:grid-rows-[auto_1fr] md:pb-0",
-          !mobileKeyboardOpen && "pb-[calc(3.5rem_+_var(--safe-area-bottom))]",
-        )}
-        style={{
-          paddingTop: "var(--safe-area-top)",
-          paddingLeft: "var(--safe-area-left)",
-          paddingRight: "var(--safe-area-right)",
-        }}
-      >
-        <div>
-          <SkipLink />
-          <Header />
-          <AdminSetupBanner />
-          {/* In the top row, above the scroller: it never covers the page or
-              the BottomNav. */}
-          <OfflineBand />
-        </div>
-        {/* The page scroller. `[container-type:size]` lets the AppFrame sidebar
-            stick at the scroller's height (`100cqh`); it also makes `main` the
-            containing block of fixed descendants, so overlays portal out (Base
-            UI does) and fixed chrome (BottomNav) stays outside. No
-            `scrollbar-gutter: stable`: the banners and sticky sub-navs inside
-            the scroller are full-bleed. This shell has no footer: phones get
-            the BottomNav. See docs/ui.md § Shell rules */}
-        <main
-          data-scroll-restoration-id={MAIN_SCROLLER_ID}
-          className="relative min-h-0 min-w-0 overflow-y-auto overflow-x-clip overscroll-contain [container-type:size]"
-        >
-          <PullToRefresh onRefresh={handleRefresh}>
-            <Outlet />
-          </PullToRefresh>
-        </main>
-        <BottomNav hidden={mobileKeyboardOpen} />
-      </div>
+      <AppShellFrame>
+        <PullToRefresh onRefresh={handleRefresh}>
+          {firstLoadDone ? <Outlet /> : <RouteContentSkeleton />}
+        </PullToRefresh>
+      </AppShellFrame>
       {import.meta.env.DEV && (
         <>
           <TanStackRouterDevtools position="bottom-left" />
@@ -83,5 +67,66 @@ function AppShellLayout() {
         </>
       )}
     </>
+  );
+}
+
+/** The shell around the loading page: same frame, content skeleton only. */
+function AppShellPending() {
+  return (
+    <AppShellFrame>
+      <RouteContentSkeleton />
+    </AppShellFrame>
+  );
+}
+
+/**
+ * The app frame, shared by the layout and its pending state so the two are
+ * the same boxes: the header and the bottom nav never move when the page
+ * replaces its skeleton.
+ */
+function AppShellFrame({ children }: { children: ReactNode }) {
+  const mobileKeyboardOpen = useMobileKeyboard();
+  return (
+    <div
+      className={cn(
+        "grid h-svh min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr_auto] md:grid-rows-[auto_1fr] md:pb-0",
+        // A hard refresh streams this frame as HTML, and the sidebar's markup
+        // sits between `<main>` and the page's skeleton: on a slow network the
+        // browser would paint a shell with an empty content area and no
+        // BottomNav. The frame stays invisible (no layout change) until its
+        // last child has arrived, so the first frame is the whole shell.
+        "[&:not(:has(>[data-shell-end]))]:invisible",
+        !mobileKeyboardOpen && "pb-[calc(3.5rem_+_var(--safe-area-bottom))]",
+      )}
+      style={{
+        paddingTop: "var(--safe-area-top)",
+        paddingLeft: "var(--safe-area-left)",
+        paddingRight: "var(--safe-area-right)",
+      }}
+    >
+      <div>
+        <SkipLink />
+        <Header />
+        <AdminSetupBanner />
+        {/* In the top row, above the scroller: it never covers the page or
+            the BottomNav. */}
+        <OfflineBand />
+      </div>
+      {/* The page scroller. `[container-type:size]` lets the AppFrame sidebar
+          stick at the scroller's height (`100cqh`); it also makes `main` the
+          containing block of fixed descendants, so overlays portal out (Base
+          UI does) and fixed chrome (BottomNav) stays outside. No
+          `scrollbar-gutter: stable`: the banners and sticky sub-navs inside
+          the scroller are full-bleed. This shell has no footer: phones get
+          the BottomNav. See docs/ui.md § Shell rules */}
+      <main
+        data-scroll-restoration-id={MAIN_SCROLLER_ID}
+        className="relative min-h-0 min-w-0 overflow-y-auto overflow-x-clip overscroll-contain [container-type:size]"
+      >
+        {children}
+      </main>
+      <BottomNav hidden={mobileKeyboardOpen} />
+      <span data-shell-end="" hidden />
+    </div>
   );
 }

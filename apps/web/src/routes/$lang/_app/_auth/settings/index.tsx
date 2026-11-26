@@ -24,6 +24,7 @@ import { friendly } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/settings/")({
+  staticData: { pendingShape: "form" },
   component: ProfileSettings,
 });
 

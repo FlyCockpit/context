@@ -28,6 +28,7 @@ import { errorCode, errorReason, friendly } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/conversations/$conversationId")({
+  staticData: { pendingShape: "detail" },
   component: ConversationPage,
 });
 

@@ -77,3 +77,19 @@ it("keeps AlertDialogCancel at least 44px while preserving caller classes", () =
   expect(classes).toEqual(expect.arrayContaining(["min-h-11", "min-w-11", "w-full"]));
   expect(element.props.children).toBe("Cancel");
 });
+
+describe("wide sheet safe areas", () => {
+  it("keeps a full-screen phone sheet and its close button clear of the notch", () => {
+    const root = SheetContent({ closeLabel: "Close", size: "wide", children: "Body" });
+    if (!isValidElement<{ children: ReactNode }>(root)) throw new Error("Missing portal");
+    const popup = Children.toArray(root.props.children).find(
+      (child) =>
+        isValidElement<{ "data-slot"?: string }>(child) &&
+        child.props["data-slot"] === "sheet-content",
+    );
+    if (!isValidElement<{ className: string }>(popup)) throw new Error("Missing popup");
+    expect(popup.props.className).toContain("data-[size=wide]:pt-(--safe-area-top)");
+    const close = closeButton(SheetContent, "sheet").className.split(" ");
+    expect(close).toContain("in-data-[size=wide]:top-[calc(var(--safe-area-top)+0.25rem)]");
+  });
+});

@@ -8,6 +8,7 @@ import { BackupStatusCard } from "@/components/admin/backup-status-card";
 import { PageHeader, PageShell } from "@/components/page-shell";
 
 export const Route = createFileRoute("/$lang/_app/admin/")({
+  staticData: { pendingShape: "dashboard", pendingWidth: "wide" },
   component: AdminOverview,
 });
 

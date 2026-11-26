@@ -3,6 +3,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@cockpit-context/ui/components/dialog";
@@ -64,10 +65,7 @@ export function AskDialog({
   const { t } = useTranslation(["dashboard", "common"]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        closeLabel={t("common:actions.close")}
-        className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-x-hidden overflow-y-auto sm:max-w-lg"
-      >
+      <DialogContent closeLabel={t("common:actions.close")} className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("dashboard:ask.title", { identifier: pkg.identifier })}</DialogTitle>
           <DialogDescription>{t("dashboard:ask.description")}</DialogDescription>
@@ -245,7 +243,7 @@ function AskForm({
       {/* Before the first message (docs/product.md). */}
       <p className="text-xs text-muted-foreground">{t("dashboard:ask.aiDisclosure")}</p>
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <DialogFooter>
         <form.Subscribe selector={(state) => state.isSubmitting}>
           {(isSubmitting) => (
             <Button
@@ -268,7 +266,7 @@ function AskForm({
             </Button>
           )}
         </form.Subscribe>
-      </div>
+      </DialogFooter>
     </form>
   );
 }

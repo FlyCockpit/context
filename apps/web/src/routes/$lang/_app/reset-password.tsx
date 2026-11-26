@@ -20,6 +20,7 @@ import { friendly, isRateLimit } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/reset-password")({
+  staticData: { pendingShape: "form", pendingWidth: "narrow" },
   validateSearch: parseResetPasswordSearch,
   beforeLoad: async ({ context, params }) => {
     const decision = decideAnonymousOnlyRouteAccess(await getRouteSession());

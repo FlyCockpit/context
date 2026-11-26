@@ -41,6 +41,7 @@ function render(mode: "create" | "approve" | "edit", values = emptyPackageForm()
   return renderToStaticMarkup(
     <PackageForm
       mode={mode}
+      surface="sheet"
       lang="en-US"
       initialValues={values}
       onSubmit={async () => undefined}
@@ -123,7 +124,8 @@ describe("showRefusalAtField", () => {
       target,
       element: {
         querySelector: vi.fn((selector: string) =>
-          present && (selector === '[id$="-gitUrl"]' || selector === '[aria-invalid="true"]')
+          present &&
+          (selector === '[id$="-gitUrl"]' || selector === '[aria-invalid="true"]:not(:disabled)')
             ? target
             : null,
         ),

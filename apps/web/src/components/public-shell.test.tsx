@@ -11,6 +11,8 @@ import { describe, expect, it, vi } from "vitest";
  * `pnpm check:layout`. Route components are code-split (`lazyRouteComponent`),
  * so route renders wait for the split chunk (`prerender`).
  */
+const routerState = vi.hoisted(() => ({ resolved: true }));
+
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({ options }),
   lazyRouteComponent: (importer: () => Promise<Record<string, unknown>>, name = "default") =>
@@ -19,6 +21,15 @@ vi.mock("@tanstack/react-router", () => ({
   Outlet: () => <p>outlet</p>,
   redirect: () => undefined,
   useParams: () => "en-US",
+  // `routerState.resolved`: whether the router's first load has resolved.
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: { resolvedLocation: object | undefined }) => unknown;
+  }) => select({ resolvedLocation: routerState.resolved ? {} : undefined }),
+}));
+vi.mock("@/components/route-content-skeleton", () => ({
+  RouteContentSkeleton: () => <p>skeleton</p>,
 }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }));
 vi.mock("@tanstack/react-query-devtools", () => ({ ReactQueryDevtools: () => null }));
@@ -134,5 +145,28 @@ describe("full-bleed rules inside the scroller", () => {
 
   it("the app shell has no footer (BottomNav on phones)", async () => {
     expect(await render(AppRoute)).not.toContain("<footer");
+  });
+});
+
+describe("app shell first load", () => {
+  it("shows the page's skeleton in the shell until the first load resolves, then the page", async () => {
+    routerState.resolved = false;
+    try {
+      const loading = await render(AppRoute);
+      mainTag(loading);
+      expect(loading).toContain("<p>skeleton</p>");
+      expect(loading).not.toContain("<p>outlet</p>");
+    } finally {
+      routerState.resolved = true;
+    }
+    const loaded = await render(AppRoute);
+    expect(loaded).toContain("<p>outlet</p>");
+    expect(loaded).not.toContain("<p>skeleton</p>");
+  });
+
+  it("keeps a half-streamed frame invisible: the sentinel is the frame's last child", async () => {
+    const html = await render(AppRoute);
+    expect(html).toContain("[&amp;:not(:has(&gt;[data-shell-end]))]:invisible");
+    expect(html).toMatch(/<span data-shell-end="" hidden=""><\/span><\/div>/);
   });
 });

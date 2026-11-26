@@ -6,6 +6,7 @@ import { PageHeader, PageShell, type SectionTab, SectionTabs } from "@/component
 import { accessNavItems, toLangRoute } from "@/lib/nav-items";
 
 export const Route = createFileRoute("/$lang/_app/_auth/access")({
+  staticData: { pendingFrame: "sections" },
   component: AccessLayout,
   // The layout already renders the page h1, so the not-found message nests.
   notFoundComponent: () => <NotFoundState nested />,

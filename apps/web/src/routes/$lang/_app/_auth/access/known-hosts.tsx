@@ -22,6 +22,7 @@ import { hostLabel, type KnownHost, parseKnownHostsSearch } from "@/lib/access";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/access/known-hosts")({
+  staticData: { pendingShape: "list" },
   // `?host=…&port=…` opens the scan prefilled (a clone failure links here).
   validateSearch: parseKnownHostsSearch,
   component: AccessKnownHostsPage,

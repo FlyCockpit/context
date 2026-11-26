@@ -1,14 +1,5 @@
 import { Button } from "@cockpit-context/ui/components/button";
 import { Card, CardContent } from "@cockpit-context/ui/components/card";
-import { CodeSnippet } from "@cockpit-context/ui/components/code-snippet";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@cockpit-context/ui/components/dialog";
 import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -17,6 +8,7 @@ import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { JobErrorSheet } from "@/components/admin/job-error-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { LoadMore } from "@/components/load-more";
 import { PageHeader, PageShell } from "@/components/page-shell";
@@ -36,6 +28,7 @@ import {
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/admin/jobs")({
+  staticData: { pendingShape: "list", pendingWidth: "wide" },
   component: AdminJobs,
 });
 
@@ -44,7 +37,8 @@ const PAGE_LIMIT = 50;
 /**
  * The background job table (docs/product.md): recent jobs,
  * filterable by status, with retry for a failed one. Payloads never reach
- * this page; the error text is operator detail shown in a dialog.
+ * this page; the error text is operator detail shown in a wide side sheet
+ * (a stack trace runs long: it scrolls in the sheet body, not in a dialog).
  */
 function AdminJobs() {
   const { t } = useTranslation(["admin"]);
@@ -158,7 +152,7 @@ function AdminJobs() {
         </CardContent>
       </Card>
 
-      <JobErrorDialog
+      <JobErrorSheet
         job={viewing}
         retrying={viewing !== null && retryingId === viewing.id}
         onOpenChange={(open) => (open ? null : setViewing(null))}
@@ -233,56 +227,6 @@ function JobRow({
         </div>
       </td>
     </tr>
-  );
-}
-
-function JobErrorDialog({
-  job,
-  retrying,
-  onOpenChange,
-  onRetry,
-}: {
-  job: AdminJob | null;
-  retrying: boolean;
-  onOpenChange: (open: boolean) => void;
-  onRetry: (job: AdminJob) => void;
-}) {
-  const { t } = useTranslation(["admin", "common"]);
-  return (
-    <Dialog open={job !== null} onOpenChange={onOpenChange}>
-      <DialogContent closeLabel={t("common:actions.close")} className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{t("admin:jobs.errorTitle")}</DialogTitle>
-          <DialogDescription>
-            {job
-              ? t("admin:jobs.errorDescription", {
-                  type: job.type,
-                  attempts: job.attempts,
-                  max: job.maxAttempts,
-                })
-              : null}
-          </DialogDescription>
-        </DialogHeader>
-        {job?.lastError ? (
-          <CodeSnippet
-            code={job.lastError}
-            copyLabel={t("admin:jobs.copyError")}
-            preClassName="max-h-80"
-          />
-        ) : null}
-        <DialogFooter>
-          <Button variant="ghost" size="touch" onClick={() => onOpenChange(false)}>
-            {t("common:actions.close")}
-          </Button>
-          {job?.status === "failed" ? (
-            <Button size="touch" disabled={retrying} onClick={() => onRetry(job)}>
-              <RotateCcw aria-hidden="true" className="size-4" />
-              {retrying ? t("admin:jobs.retrying") : t("admin:jobs.retry")}
-            </Button>
-          ) : null}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

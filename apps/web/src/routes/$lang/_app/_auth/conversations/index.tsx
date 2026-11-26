@@ -23,6 +23,7 @@ import { dedupeConversations } from "@/lib/conversations";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/conversations/")({
+  staticData: { pendingShape: "list" },
   component: ConversationsPage,
 });
 

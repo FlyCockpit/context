@@ -32,6 +32,7 @@ import type { SshKey } from "@/lib/access";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/access/ssh-keys")({
+  staticData: { pendingShape: "list" },
   component: AccessSshKeysPage,
 });
 

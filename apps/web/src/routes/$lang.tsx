@@ -4,6 +4,10 @@ import { PublicNotFoundPage } from "@/components/public-shell";
 import { loadLocaleInto } from "@/i18n";
 import { isSupportedLocale, type Locale } from "@/i18n/config";
 import { decideLocaleRedirect } from "@/i18n/redirect-to-default";
+import { withTimeout } from "@/lib/with-timeout";
+
+/** A locale bundle that has not arrived by then is treated as failed (fallback strings). */
+const LOCALE_LOAD_TIMEOUT_MS = 15_000;
 
 /**
  * Locale-prefix layout. Every URL in the app lives under `/$lang/...` —
@@ -27,6 +31,12 @@ export const Route = createFileRoute("/$lang")({
   // its own notFoundComponent (Settings and Access do), so the admin gate's
   // hidden 404 looks exactly like an unknown URL (docs/ui.md § Shell rules).
   notFoundComponent: PublicNotFoundPage,
+  // Switching to a locale whose bundle is not loaded yet waits here, above
+  // both shells. Keep the current page on screen until it arrives instead of
+  // swapping in a pending view that has no shell around it. The load itself
+  // gives up after LOCALE_LOAD_TIMEOUT_MS (fallback strings), well before this
+  // (finite: a timer of Infinity fires at once).
+  pendingMs: 60_000,
   beforeLoad: async ({ params, location, context }) => {
     const instruction = decideLocaleRedirect({ params, location });
     if (instruction) throw redirect(instruction);
@@ -43,7 +53,11 @@ export const Route = createFileRoute("/$lang")({
     // `locale` key on every language change, so no separate effect is needed.
     if (isSupportedLocale(params.lang)) {
       try {
-        await loadLocaleInto(context.i18n, params.lang);
+        await withTimeout(
+          loadLocaleInto(context.i18n, params.lang),
+          LOCALE_LOAD_TIMEOUT_MS,
+          `locale ${params.lang}`,
+        );
       } catch (error) {
         // Recoverable — same policy as client.tsx and the `languageChanged`
         // handler: a failed locale-chunk fetch (plausible during a PWA

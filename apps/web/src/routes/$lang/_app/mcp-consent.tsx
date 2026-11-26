@@ -12,6 +12,7 @@ import { getRouteSession } from "@/server/auth-session";
  * router would re-serialize it and break the signature).
  */
 export const Route = createFileRoute("/$lang/_app/mcp-consent")({
+  staticData: { pendingShape: "form", pendingWidth: "narrow" },
   validateSearch: (search: Record<string, unknown>) => search,
   beforeLoad: async ({ params }) => {
     const decision = decideProtectedRouteAccess(await getRouteSession());

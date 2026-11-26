@@ -38,6 +38,7 @@ import { describeResolvedFrom, formatBytes, shortSha } from "@/lib/packages";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/admin/storage")({
+  staticData: { pendingShape: "list", pendingWidth: "wide" },
   component: AdminStorage,
 });
 

@@ -44,6 +44,7 @@ import { describeResolvedFrom, ECOSYSTEMS, type PackageListItem } from "@/lib/pa
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/packages/")({
+  staticData: { pendingShape: "list" },
   component: PackagesPage,
 });
 
@@ -295,6 +296,8 @@ function PackageRow({
       <Link
         to="/$lang/packages/$packageId"
         params={{ lang, packageId: pkg.id }}
+        // A stable handle for the browser checks (ids differ per database).
+        data-identifier={pkg.identifier}
         className="flex min-w-0 flex-1 items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         <EcosystemIcon ecosystem={pkg.ecosystem} />

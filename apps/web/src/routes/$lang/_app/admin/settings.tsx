@@ -29,6 +29,7 @@ import { formatSeconds, type RuntimeConfig } from "@/lib/admin";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/admin/settings")({
+  staticData: { pendingShape: "form", pendingWidth: "narrow" },
   component: AdminSettings,
 });
 

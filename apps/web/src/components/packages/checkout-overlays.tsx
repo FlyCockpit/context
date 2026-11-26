@@ -11,7 +11,10 @@ import {
 import { Button } from "@cockpit-context/ui/components/button";
 import {
   Sheet,
+  SheetBody,
+  SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@cockpit-context/ui/components/sheet";
@@ -25,11 +28,6 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
-import {
-  FORM_SHEET_BODY_CLASS,
-  FORM_SHEET_FOOTER_CLASS,
-  FormSheetContent,
-} from "@/components/form-surface";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { SegmentedControl } from "@/components/segmented-control";
 import { type CheckoutRow, describeResolvedFrom, shortSha } from "@/lib/packages";
@@ -80,7 +78,7 @@ export function SummarySheet({
   const { t } = useTranslation(["dashboard", "common"]);
   return (
     <Sheet open={checkout !== null} onOpenChange={onOpenChange}>
-      <FormSheetContent closeLabel={t("common:actions.close")}>
+      <SheetContent size="wide" closeLabel={t("common:actions.close")}>
         <SheetHeader className="pe-12">
           <SheetTitle>
             {t("dashboard:checkouts.summary.title", {
@@ -100,7 +98,7 @@ export function SummarySheet({
             canRegenerate={canRegenerate(checkout)}
           />
         ) : null}
-      </FormSheetContent>
+      </SheetContent>
     </Sheet>
   );
 }
@@ -126,7 +124,7 @@ function SummarySheetBody({
   const showingOwn = override !== null && tab === "yours";
   return (
     <>
-      <div className={`${FORM_SHEET_BODY_CLASS} space-y-3`}>
+      <SheetBody className="space-y-3">
         {override ? (
           <SegmentedControl
             value={tab}
@@ -156,10 +154,8 @@ function SummarySheetBody({
             {t("dashboard:checkouts.summary.regenerateNote")}
           </p>
         )}
-      </div>
-      <div
-        className={`${FORM_SHEET_FOOTER_CLASS} flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end`}
-      >
+      </SheetBody>
+      <SheetFooter className="sm:flex-wrap">
         <Button variant="ghost" size="touch" onClick={onClose}>
           {t("common:actions.close")}
         </Button>
@@ -180,7 +176,7 @@ function SummarySheetBody({
             ? t("dashboard:checkouts.summary.editOwn")
             : t("dashboard:checkouts.summary.edit")}
         </Button>
-      </div>
+      </SheetFooter>
     </>
   );
 }
@@ -233,7 +229,7 @@ export function EditSummarySheet({
       open={checkout !== null}
       onOpenChange={(next) => (save.isPending ? null : onOpenChange(next))}
     >
-      <FormSheetContent closeLabel={t("common:actions.close")}>
+      <SheetContent size="wide" closeLabel={t("common:actions.close")}>
         <SheetHeader>
           <SheetTitle>
             {t("dashboard:checkouts.summary.editTitle", {
@@ -256,7 +252,7 @@ export function EditSummarySheet({
             }}
           />
         ) : null}
-      </FormSheetContent>
+      </SheetContent>
     </Sheet>
   );
 }
@@ -286,7 +282,7 @@ function SummaryForm({
       }}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <div className={FORM_SHEET_BODY_CLASS}>
+      <SheetBody>
         <form.Field name="summary">
           {(field) => (
             <TextareaField
@@ -300,10 +296,8 @@ function SummaryForm({
             />
           )}
         </form.Field>
-      </div>
-      <div
-        className={`${FORM_SHEET_FOOTER_CLASS} flex flex-col-reverse gap-2 sm:flex-row sm:justify-end`}
-      >
+      </SheetBody>
+      <SheetFooter>
         <form.Subscribe selector={(state) => state.isSubmitting}>
           {(isSubmitting) => (
             <Button
@@ -326,7 +320,7 @@ function SummaryForm({
             </Button>
           )}
         </form.Subscribe>
-      </div>
+      </SheetFooter>
     </form>
   );
 }

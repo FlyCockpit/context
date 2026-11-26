@@ -76,7 +76,11 @@ export default function BottomNav({ hidden }: { hidden?: boolean }) {
 
   if (authSession.state.status === "pending" || authSession.state.status === "error") {
     return (
-      <nav className={NAV_CLASS} style={{ paddingBottom: "var(--safe-area-bottom)" }}>
+      <nav
+        data-bottom-nav=""
+        className={NAV_CLASS}
+        style={{ paddingBottom: "var(--safe-area-bottom)" }}
+      >
         <div className="flex h-14 items-center justify-around">
           {Array.from({ length: 5 }).map((_, index) => (
             <Skeleton key={index} className="h-10 w-14 rounded-md" />
@@ -88,6 +92,7 @@ export default function BottomNav({ hidden }: { hidden?: boolean }) {
 
   return (
     <nav
+      data-bottom-nav=""
       aria-label={t("mainNav.ariaLabel")}
       className={NAV_CLASS}
       style={{ paddingBottom: "var(--safe-area-bottom)" }}

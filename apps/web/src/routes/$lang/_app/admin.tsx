@@ -1,5 +1,4 @@
 import { SelectorRow } from "@cockpit-context/ui/components/selector-row";
-import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, Outlet } from "@tanstack/react-router";
@@ -8,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { TwoFactorNudge } from "@/components/admin/two-factor-nudge";
 import { AppFrame } from "@/components/app-frame";
 import { InlineRetry } from "@/components/inline-retry";
+import { RouteContentSkeleton } from "@/components/route-content-skeleton";
 import { TwoFactorSetupRequired } from "@/components/two-factor-enrollment";
 import { decideAdminRouteAccess } from "@/lib/route-session-access";
 import { getRouteSession } from "@/server/auth-session";
@@ -15,6 +15,7 @@ import { orpc } from "@/utils/orpc";
 import { twoFactorEnrollmentState } from "@/utils/two-factor-policy";
 
 export const Route = createFileRoute("/$lang/_app/admin")({
+  staticData: { pendingFrame: "admin" },
   beforeLoad: async () => {
     const decision = decideAdminRouteAccess(await getRouteSession());
     if (decision.kind === "error") throw new Error("Route session unavailable");
@@ -33,12 +34,9 @@ function AdminLayout() {
   const { session } = Route.useRouteContext();
   const { t } = useTranslation("dashboard");
   const settings = useQuery(orpc.settings.getAll.queryOptions());
-  if (settings.isPending)
-    return (
-      <AppFrame lang={lang}>
-        <Skeleton className="m-4 h-40" />
-      </AppFrame>
-    );
+  // The sidebar, the admin strip and the page's skeleton (drawn from this
+  // layout's `admin` frame).
+  if (settings.isPending) return <RouteContentSkeleton />;
   if (settings.isError)
     return (
       <AppFrame lang={lang}>

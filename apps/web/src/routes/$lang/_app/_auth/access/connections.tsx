@@ -38,6 +38,7 @@ import {
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/access/connections")({
+  staticData: { pendingShape: "list" },
   component: AccessConnectionsPage,
 });
 

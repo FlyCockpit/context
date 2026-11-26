@@ -27,6 +27,7 @@ import { friendly, isRateLimit } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/settings/security")({
+  staticData: { pendingShape: "form" },
   component: SecuritySettings,
 });
 

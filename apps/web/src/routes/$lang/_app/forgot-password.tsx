@@ -20,6 +20,7 @@ import { orpc } from "@/utils/orpc";
 import { safeRedirectTo } from "@/utils/safe-redirect";
 
 export const Route = createFileRoute("/$lang/_app/forgot-password")({
+  staticData: { pendingShape: "form", pendingWidth: "narrow" },
   validateSearch: (search: Record<string, unknown>) => ({
     redirectTo: typeof search.redirectTo === "string" ? search.redirectTo : undefined,
   }),

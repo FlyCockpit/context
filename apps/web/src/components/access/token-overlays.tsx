@@ -5,14 +5,17 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@cockpit-context/ui/components/dialog";
 import { Label } from "@cockpit-context/ui/components/label";
 import {
   Sheet,
+  SheetBody,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@cockpit-context/ui/components/sheet";
@@ -47,8 +50,7 @@ import { orpc } from "@/utils/orpc";
 /** Matches the server's `shortText` cap. */
 const NAME_MAX = 120;
 
-const DIALOG_CLASS =
-  "flex max-h-[calc(100dvh-2rem)] flex-col overflow-x-hidden overflow-y-auto sm:max-w-lg";
+const DIALOG_CLASS = "sm:max-w-lg";
 
 /**
  * Create → Dialog (docs/development.md): the form, then the token exactly
@@ -215,7 +217,7 @@ function CreateTokenForm({
       </form.Subscribe>
       <form.Subscribe selector={(state) => state.isSubmitting}>
         {(isSubmitting) => (
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <DialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -230,7 +232,7 @@ function CreateTokenForm({
                 ? t("dashboard:access.tokens.create.pending")
                 : t("dashboard:access.tokens.create.submit")}
             </Button>
-          </div>
+          </DialogFooter>
         )}
       </form.Subscribe>
     </form>
@@ -285,8 +287,8 @@ function TokenSetup({ secret, onDone }: { secret: string; onDone: () => void }) 
               <CodeSnippet
                 code={codexTokenCommand(mcpUrl, secret)}
                 copyLabel={t("dashboard:access.tokens.created.copyCodex")}
-                // Long commands wrap instead of hiding under the copy button on phones.
-                preClassName="whitespace-pre-wrap break-all"
+                // Long commands wrap instead of scrolling out of sight on phones.
+                wrap
                 onCopied={onCopied}
                 onCopyError={onCopyError}
               />
@@ -299,8 +301,8 @@ function TokenSetup({ secret, onDone }: { secret: string; onDone: () => void }) 
               <CodeSnippet
                 code={mcpJsonConfig(mcpUrl, secret)}
                 copyLabel={t("dashboard:access.tokens.created.copyJson")}
-                // Long commands wrap instead of hiding under the copy button on phones.
-                preClassName="whitespace-pre-wrap break-all"
+                // Long commands wrap instead of scrolling out of sight on phones.
+                wrap
                 onCopied={onCopied}
                 onCopyError={onCopyError}
               />
@@ -408,7 +410,7 @@ function RenameForm({
         void form.handleSubmit();
       }}
     >
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-2">
+      <SheetBody>
         <form.Field name="name">
           {(field) => (
             <TextField
@@ -420,12 +422,12 @@ function RenameForm({
             />
           )}
         </form.Field>
-      </div>
+      </SheetBody>
       <form.Subscribe
         selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting })}
       >
         {({ canSubmit, isSubmitting }) => (
-          <div className="flex flex-col-reverse gap-2 border-t p-4 sm:flex-row sm:justify-end">
+          <SheetFooter>
             <Button
               type="button"
               variant="outline"
@@ -438,7 +440,7 @@ function RenameForm({
             <Button type="submit" size="touch" disabled={!canSubmit || isSubmitting}>
               {isSubmitting ? t("common:actions.saving") : t("common:actions.saveChanges")}
             </Button>
-          </div>
+          </SheetFooter>
         )}
       </form.Subscribe>
     </form>

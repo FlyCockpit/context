@@ -78,6 +78,7 @@ import {
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/packages/$packageId")({
+  staticData: { pendingShape: "detail" },
   component: PackageDetailPage,
 });
 

@@ -34,6 +34,7 @@ import { type ConnectionFlags, type McpToken, normalizeFlags } from "@/lib/acces
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/$lang/_app/_auth/access/tokens")({
+  staticData: { pendingShape: "list" },
   component: AccessTokensPage,
 });
 

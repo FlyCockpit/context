@@ -44,6 +44,7 @@ import { orpc } from "@/utils/orpc";
  * and an anonymous-only redirect would break the second case.
  */
 export const Route = createFileRoute("/$lang/_app/verify-email")({
+  staticData: { pendingShape: "form", pendingWidth: "narrow" },
   // Defined in `lib/verify-email-search.ts` so it can be tested against the
   // router's real search parser — see that file for why the marker check has to
   // be permissive.
