@@ -127,6 +127,12 @@ export interface UsageTap {
   /** Attempts of this dispatch that got a successful response: the provider may bill each. */
   answered: () => number;
   /**
+   * Attempts of this dispatch stopped while their request was in flight, before any
+   * response arrived (a stop or a deadline). The provider may already be generating,
+   * so each may be billed; none can report usage.
+   */
+  abandoned: () => number;
+  /**
    * The most recent attempt's generation id, if it has one not handed out yet: the id
    * that belongs with the usage that attempt reports, whether it finished or failed.
    */
@@ -138,6 +144,7 @@ export interface UsageTap {
 export const createUsageTap = (): UsageTap => {
   let latest: RawUsage | undefined;
   let answered = 0;
+  let abandoned = 0;
   let attempts = 0;
   /** Ids not handed out yet, by attempt number. */
   const pendingIds = new Map<number, string>();
@@ -148,7 +155,16 @@ export const createUsageTap = (): UsageTap => {
     latest = undefined;
     attempts += 1;
     const attempt = attempts;
-    const response = await next(input, init);
+    let response: Response;
+    try {
+      response = await next(input, init);
+    } catch (error) {
+      const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+      if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+        abandoned += 1;
+      }
+      throw error;
+    }
     if (response.ok) answered += 1;
     // Only an answered attempt can be billed, so only it gets an id.
     let needsId = response.ok;
@@ -188,6 +204,7 @@ export const createUsageTap = (): UsageTap => {
     wrap,
     latest: () => latest,
     answered: () => answered,
+    abandoned: () => abandoned,
     takeLatestGenerationId,
     takeGenerationIds,
   };

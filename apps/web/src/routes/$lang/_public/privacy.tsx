@@ -8,6 +8,7 @@ import { PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
 import {
   conversationRetentionCopy,
+  DEFAULT_RETENTION_DAYS,
   PRIVACY_SECTIONS,
   type PrivacySection,
 } from "@/lib/privacy-notice";
@@ -89,9 +90,13 @@ function ConfiguredRetention({ itemBase }: { itemBase: string }) {
     <QueryBoundary
       query={config}
       skeleton={
-        <div aria-hidden="true" className="flex flex-col gap-1.5 pt-1">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-2/3" />
+        // Sized by the default period's sentence, hidden under the skeleton, so the
+        // notice keeps its height at every width when the setting arrives.
+        <div aria-hidden="true" className="relative">
+          <span className="invisible">
+            {t(`${itemBase}.detailAfterDays`, { count: DEFAULT_RETENTION_DAYS })}
+          </span>
+          <Skeleton className="absolute inset-0" />
         </div>
       }
       errorMessage={t(`${itemBase}.loadFailed`)}

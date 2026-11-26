@@ -19,9 +19,10 @@ const ROOT = path.resolve(import.meta.dirname, "../fixtures/sample-pkg");
 describe("generateCheckoutSummary", () => {
   beforeEach(() => {
     runAgentLoop.mockReset();
-    runAgentLoop.mockResolvedValue({
+    runAgentLoop.mockImplementation(async (options) => ({
       stopReason: "completed",
       messages: [
+        ...options.messages,
         {
           id: "a1",
           role: "assistant",
@@ -29,7 +30,7 @@ describe("generateCheckoutSummary", () => {
         },
       ],
       usage: { inputTokens: 5, outputTokens: 3, costUsd: 0.002 },
-    });
+    }));
   });
 
   it("runs one reduced-budget explore pass without delegation and returns the summary", async () => {

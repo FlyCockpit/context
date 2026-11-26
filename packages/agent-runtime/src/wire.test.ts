@@ -441,6 +441,52 @@ describe("on the wire: failed attempts", () => {
     expect([...(result.usage.generationIds ?? [])].sort()).toEqual(["gen-a", "gen-b"]);
   });
 
+  it("counts a request stopped before the provider responded as unpriced, never as $0", async () => {
+    // The stop lands while the first request still waits for its response headers.
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      (input: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          setTimeout(() => controller.abort(new Error("stopped")), 10);
+        }),
+    );
+    const { result, reports } = await run("chat-completions", { abortSignal: controller.signal });
+    expect(result.stopReason).toBe("aborted");
+    expect(reports).toEqual([expect.objectContaining({ inputTokens: 0, unpricedCalls: 1 })]);
+    expect(reports[0]?.costUsd).toBeUndefined();
+  });
+
+  it("counts a stalled attempt that never responded as unpriced, next to the retry's cost", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", (input: unknown, init?: RequestInit) => {
+      calls += 1;
+      if (calls > 1) return Promise.resolve(answer("chat-completions", "gen-b"));
+      // The first attempt hangs before its headers until the stall timer aborts it.
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const { result, reports } = await run("chat-completions", {
+      model: {
+        api: "chat-completions",
+        model: "openai/test",
+        apiKey: "test-key",
+        baseUrl: "https://gateway.test/api/v1",
+        stallTimeoutMs: 30,
+      },
+    });
+    expect(result.stopReason).toBe("completed");
+    expect(calls).toBe(2);
+    expect(reports).toEqual([
+      expect.objectContaining({ costUsd: 0.000125 }),
+      expect.objectContaining({ unpricedCalls: 1 }),
+    ]);
+  });
+
   it("records no id for a refused request", async () => {
     stubFetch([
       () =>

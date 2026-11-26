@@ -110,6 +110,28 @@ describe("createUsageTap", () => {
     await tap.wrap(async () => sse([]))("x");
     expect(tap.answered()).toBe(2);
   });
+
+  it("counts an attempt stopped before its response arrived as abandoned, not answered", async () => {
+    const tap = createUsageTap();
+    const controller = new AbortController();
+    const pending = tap.wrap(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    )("x", { signal: controller.signal });
+    controller.abort(new Error("stopped"));
+    await expect(pending).rejects.toThrow("stopped");
+    expect(tap.abandoned()).toBe(1);
+    expect(tap.answered()).toBe(0);
+    // A request that never got through (refused connection) is not billed.
+    await expect(
+      tap.wrap(async () => {
+        throw new TypeError("fetch failed");
+      })("x"),
+    ).rejects.toThrow("fetch failed");
+    expect(tap.abandoned()).toBe(1);
+  });
 });
 
 describe("extractPayloadId", () => {

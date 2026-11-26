@@ -438,7 +438,8 @@ export const executeTanstackLoop = async (
       /**
        * Once the dispatch is over: count the failed attempts' reported usage, then every
        * other attempt the provider answered whose usage never arrived (it failed or was
-       * stopped mid-stream, was retried, or reported none). Those may still be billed:
+       * stopped mid-stream, was retried, or reported none), and every attempt stopped
+       * while its request was still waiting for the response. Those may still be billed:
        * each counts as unpriced, so the cost reads as unknown, never as $0. Their tokens
        * are unknown, so none are added.
        */
@@ -449,7 +450,7 @@ export const executeTanstackLoop = async (
         for (const failed of failedAttempts.splice(0)) {
           await countUsage(failed.usage, failed.model, failed.wire, failed.generationId);
         }
-        const unreported = usageTap.answered() - attemptsWithUsage;
+        const unreported = usageTap.answered() + usageTap.abandoned() - attemptsWithUsage;
         if (unreported <= 0) return;
         usage.unpricedCalls = (usage.unpricedCalls ?? 0) + unreported;
         if (usage.model === undefined) usage.model = getServingModelId();

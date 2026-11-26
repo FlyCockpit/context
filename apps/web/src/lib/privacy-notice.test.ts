@@ -1,3 +1,4 @@
+import { serverVars } from "@cockpit-context/env/vars/server";
 import enPrivacy from "@cockpit-context/locales/src/en-US/privacy.json";
 import esPrivacy from "@cockpit-context/locales/src/es-MX/privacy.json";
 import { createInstance } from "i18next";
@@ -5,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   conversationRetentionCopy,
+  DEFAULT_RETENTION_DAYS,
   PRIVACY_SECTIONS,
   privacyNoticeKeys,
 } from "@/lib/privacy-notice";
@@ -154,5 +156,13 @@ describe("conversationRetentionCopy", () => {
     for (const locale of ["en-US", "es-MX"] as const) {
       expect(await render(locale, 0)).not.toMatch(/\d+ (days|días)/);
     }
+  });
+});
+
+describe("DEFAULT_RETENTION_DAYS", () => {
+  it("is the server's own default, so the loading state is the loaded sentence's size", () => {
+    expect(serverVars.COCKPIT_CONTEXT_CONVERSATION_RETENTION_DAYS.parse(undefined)).toBe(
+      DEFAULT_RETENTION_DAYS,
+    );
   });
 });

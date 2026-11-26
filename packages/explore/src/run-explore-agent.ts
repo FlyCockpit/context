@@ -634,12 +634,14 @@ export async function runExploreAgent(options: ExploreAgentOptions): Promise<Exp
     trailer: FORCE_FINAL_SYSTEM_NOTE,
   });
 
+  // Unique, never derived from the history: agent-runtime dedupes turn
+  // announcements by message id, so a colliding id would never be announced.
+  // The answer is read from after it, never from the history.
+  const questionId = `explore-user-${randomUUID()}`;
   const messages: AgentMessage[] = [
     ...(options.history ?? []),
     {
-      // Unique, never derived from the history: agent-runtime dedupes turn
-      // announcements by message id, so a colliding id would never be announced.
-      id: `explore-user-${randomUUID()}`,
+      id: questionId,
       role: "user",
       parts: [{ type: "text", content: options.question.trim() }],
     },
@@ -687,7 +689,7 @@ export async function runExploreAgent(options: ExploreAgentOptions): Promise<Exp
   await settleHelpers();
   return {
     ...outcome.result,
-    answer: exploreAgentAnswer(outcome.result),
+    answer: exploreAgentAnswer(outcome.result, questionId),
     usage: sumUsage(outcome.usage, helperUsage()),
     ownUsage: outcome.usage,
     iterations: outcome.iterations,
@@ -843,9 +845,23 @@ function buildDelegateExploreTool(options: {
   });
 }
 
-/** Pull the final assistant text out of a finished explore run. */
-export function exploreAgentAnswer(result: Pick<AgentLoopResult, "messages">): string {
-  for (let index = result.messages.length - 1; index >= 0; index--) {
+/**
+ * Pull the final assistant text out of a finished explore run. With `questionId` (the
+ * id of the run's own question), only what follows that message counts: a follow-up is
+ * seeded with the conversation so far, which ends in the previous run's answer, and that
+ * is never this run's answer.
+ */
+export function exploreAgentAnswer(
+  result: Pick<AgentLoopResult, "messages">,
+  questionId?: string,
+): string {
+  let start = 0;
+  if (questionId !== undefined) {
+    const question = result.messages.findIndex((message) => message.id === questionId);
+    if (question < 0) return "";
+    start = question + 1;
+  }
+  for (let index = result.messages.length - 1; index >= start; index--) {
     const message = result.messages[index];
     if (message?.role !== "assistant") continue;
     const text = message.parts

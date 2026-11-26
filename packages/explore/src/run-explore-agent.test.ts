@@ -67,8 +67,8 @@ const base = {
 describe("runExploreAgent", () => {
   beforeEach(() => {
     runAgentLoop.mockReset();
-    runAgentLoop.mockResolvedValue(
-      completed([assistant("a1", "Call `greet(name)` — src/greet.ts:2")]),
+    runAgentLoop.mockImplementation(async (options) =>
+      completed([...options.messages, assistant("a1", "Call `greet(name)` — src/greet.ts:2")]),
     );
   });
 
@@ -208,19 +208,40 @@ describe("runExploreAgent", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it("never answers a stopped follow-up with the previous run's answer", async () => {
+    const history: AgentMessage[] = [
+      { id: "h1", role: "user", parts: [{ type: "text", content: "first" }] },
+      assistant("h2", "first answer"),
+    ];
+    // Stopped before this run wrote anything: the runtime hands its seeds back.
+    runAgentLoop.mockImplementation(async (options) => ({
+      stopReason: "aborted",
+      messages: options.messages,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    }));
+    const stopped = await runExploreAgent({ ...base, question: "and then?", history });
+    expect(stopped.answer).toBe("");
+
+    // Its own text, when it wrote some before the stop.
+    runAgentLoop.mockImplementation(async (options) => ({
+      stopReason: "aborted",
+      messages: [...options.messages, assistant("a1", "own partial")],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    }));
+    const partial = await runExploreAgent({ ...base, question: "and then?", history });
+    expect(partial.answer).toBe("own partial");
+  });
+
   it("force-final runs a no-tool synthesis after max-iterations and sums usage", async () => {
     runAgentLoop
-      .mockResolvedValueOnce({
+      .mockImplementationOnce(async (options) => ({
         stopReason: "max-iterations",
-        messages: [assistant("a1", "Still looking at builders…")],
+        messages: [...options.messages, assistant("a1", "Still looking at builders…")],
         usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.02 },
-      })
-      .mockResolvedValueOnce(
+      }))
+      .mockImplementationOnce(async (options) =>
         completed(
-          [
-            assistant("a1", "Still looking at builders…"),
-            assistant("a2", "Use AgentBuilder::new(model).tool(t).build()"),
-          ],
+          [...options.messages, assistant("a2", "Use AgentBuilder::new(model).tool(t).build()")],
           { inputTokens: 3, outputTokens: 4, costUsd: 0.01 },
         ),
       );
@@ -439,7 +460,10 @@ describe("delegate_explore helpers", () => {
       const report = await delegate?.execute(delegate.inputSchema.parse({ agents }), signal);
       reports.push(String(report));
       await options.onUsage?.({ inputTokens: 100, outputTokens: 10, costUsd: 0.1 });
-      return completed([assistant("m", "master answer")], { inputTokens: 0, outputTokens: 0 });
+      return completed([...options.messages, assistant("m", "master answer")], {
+        inputTokens: 0,
+        outputTokens: 0,
+      });
     });
     return { reports, peak: () => peak };
   }

@@ -42,6 +42,13 @@ const RETENTION_DETAIL_KEYS = [
 ] as const;
 
 /**
+ * The conversation retention a server has when its operator set none
+ * (COCKPIT_CONTEXT_CONVERSATION_RETENTION_DAYS' default). Its sentence sizes the
+ * notice's loading state, so a default server's notice keeps its height.
+ */
+export const DEFAULT_RETENTION_DAYS = 90;
+
+/**
  * Which retention sentence the notice shows for the configured number of
  * days: the plural "deleted after N days" copy, or "kept until you delete
  * them" when automatic deletion is off (`0`).
