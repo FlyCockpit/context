@@ -8,6 +8,7 @@ vi.mock("@/hooks/use-connectivity-notice", () => ({ useConnectivityNotice: () =>
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 const { OfflineBand } = await import("./offline-band");
+const { PAGE_COLUMN_CLASS } = await import("./page-shell");
 
 function render(notice: ConnectivityNotice): string {
   state.notice = notice;
@@ -25,6 +26,12 @@ describe("OfflineBand", () => {
     expect(html).toContain('role="status"');
     expect(html).toContain("offline.band");
     expect(html).not.toContain("offline.backOnline");
+  });
+
+  it("spans the window but keeps its message in the page column (4K)", () => {
+    const html = render("offline");
+    expect(html).toMatch(/^<div role="status"[^>]*><div class="border-b bg-muted/);
+    for (const cls of PAGE_COLUMN_CLASS.split(" ")) expect(html).toContain(cls);
   });
 
   it("confirms back online", () => {

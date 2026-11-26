@@ -1,6 +1,8 @@
+import { cn } from "@cockpit-context/ui/lib/utils";
 import { Wifi, WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { PAGE_COLUMN_CLASS } from "@/components/page-shell";
 import { useConnectivityNotice } from "@/hooks/use-connectivity-notice";
 
 /**
@@ -18,16 +20,24 @@ export function OfflineBand() {
   return (
     <div role="status" aria-live="polite" aria-atomic="true" data-offline-band="">
       {notice && (
-        <p className="flex min-w-0 items-center gap-2 border-b bg-muted px-4 py-1.5 text-sm text-foreground motion-safe:animate-in motion-safe:fade-in-0">
-          {notice === "offline" ? (
-            <WifiOff aria-hidden="true" className="size-4 shrink-0 text-state-warning" />
-          ) : (
-            <Wifi aria-hidden="true" className="size-4 shrink-0 text-state-success" />
-          )}
-          <span className="min-w-0">
-            {notice === "offline" ? t("offline.band") : t("offline.backOnline")}
-          </span>
-        </p>
+        // Full-bleed band, content in the page column (docs/ui.md § Viewport scale).
+        <div className="border-b bg-muted motion-safe:animate-in motion-safe:fade-in-0">
+          <p
+            className={cn(
+              PAGE_COLUMN_CLASS,
+              "flex min-w-0 items-center gap-2 py-1.5 text-sm text-foreground",
+            )}
+          >
+            {notice === "offline" ? (
+              <WifiOff aria-hidden="true" className="size-4 shrink-0 text-state-warning" />
+            ) : (
+              <Wifi aria-hidden="true" className="size-4 shrink-0 text-state-success" />
+            )}
+            <span className="min-w-0">
+              {notice === "offline" ? t("offline.band") : t("offline.backOnline")}
+            </span>
+          </p>
+        </div>
       )}
     </div>
   );
