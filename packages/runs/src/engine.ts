@@ -1210,6 +1210,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       status: "queued",
       model: models.model,
       focus: null,
+      helperIndex: null,
       startedAt: null,
       ...(input.replacesRunId ? { replacesRunId: input.replacesRunId } : {}),
     });
@@ -1615,6 +1616,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       status: "running",
       model: context.helperModel,
       focus: helper.focus.slice(0, 500),
+      helperIndex: helper.index,
       startedAt: now(),
     });
     // Live until `finishHelper` attempts its terminal write.
@@ -1893,6 +1895,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       status: "queued",
       model: models.model,
       focus: null,
+      helperIndex: null,
       startedAt: null,
     });
     return register(

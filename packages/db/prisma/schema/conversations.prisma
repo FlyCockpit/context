@@ -120,6 +120,10 @@ model AgentRun {
   model             String?
   /// HELPER runs: the focus the main agent delegated.
   focus             String?
+  /// HELPER runs: 0-based, the position of its brief among every brief its main
+  /// run delegated, in call order (the transcript orders and numbers helper
+  /// panels by it; parallel helpers share a createdAt).
+  helperIndex       Int?
   /// The agent loop's stop reason (`completed`, `max-iterations`, `timeout`, …).
   stopReason        String?
   error             String?

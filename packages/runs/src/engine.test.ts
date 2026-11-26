@@ -1187,7 +1187,8 @@ describe("createRunEngine", () => {
   describe("helper runs", () => {
     it("persists each helper as a child run with its own turns and usage", async () => {
       exploreRun.mockImplementation(async (options) => {
-        const hooks = await options.onHelperStart?.({ index: 0, focus: "src/cli", question: "?" });
+        // The third brief: its place is saved, so a reload numbers it as the call did.
+        const hooks = await options.onHelperStart?.({ index: 2, focus: "src/cli", question: "?" });
         await hooks?.onTurn?.({
           seq: 0,
           role: "user",
@@ -1200,7 +1201,7 @@ describe("createRunEngine", () => {
         });
         hooks?.onUsage?.({ inputTokens: 3, outputTokens: 1 });
         await options.onHelperFinish?.({
-          index: 0,
+          index: 2,
           focus: "src/cli",
           question: "?",
           helperRunId: hooks?.helperRunId,
@@ -1219,6 +1220,7 @@ describe("createRunEngine", () => {
         parentRunId: started.runId,
         conversationId: started.conversationId,
         focus: "src/cli",
+        helperIndex: 2,
         status: "completed",
         answer: "- cli.ts:3",
         costUsdMicros: 1_000,
@@ -1795,6 +1797,7 @@ describe("createRunEngine", () => {
         status: "running",
         model: "m",
         focus: null,
+        helperIndex: null,
         startedAt: new Date(),
       });
       const queued = await store.createRun({
@@ -1807,6 +1810,7 @@ describe("createRunEngine", () => {
         status: "queued",
         model: "m",
         focus: null,
+        helperIndex: null,
         startedAt: null,
       });
       await store.acquireLease(running.id, checkoutId, new Date(Date.now() + 60_000));
@@ -1824,6 +1828,7 @@ describe("createRunEngine", () => {
         status: "running",
         model: "m",
         focus: null,
+        helperIndex: null,
         startedAt: new Date(),
       });
 
@@ -3529,6 +3534,7 @@ describe("web conversations resolve inside their first run", () => {
         status: "running",
         model: "m",
         focus: "x",
+        helperIndex: 0,
         startedAt: new Date(),
       });
       store.runs.get(orphanHelper.id)!.createdAtDate = new Date(Date.now() - 10 * 60_000);
@@ -3555,6 +3561,7 @@ describe("web conversations resolve inside their first run", () => {
         status: "queued",
         model: "m",
         focus: null,
+        helperIndex: null,
         startedAt: null,
       });
       const recent = await store.createRun({
@@ -3567,6 +3574,7 @@ describe("web conversations resolve inside their first run", () => {
         status: "running",
         model: "m",
         focus: null,
+        helperIndex: null,
         startedAt: null,
       });
       const helper = await store.createRun({
@@ -3579,6 +3587,7 @@ describe("web conversations resolve inside their first run", () => {
         status: "running",
         model: "m",
         focus: "x",
+        helperIndex: 0,
         startedAt: new Date(),
       });
       store.runs.get(helper.id)!.createdAtDate = new Date(Date.now() - 10 * 60_000);

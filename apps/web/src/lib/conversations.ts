@@ -68,7 +68,7 @@ export interface RunView {
   failure: RunFailure | null;
   /** When the run was created (epoch ms; first sight for a run heard of live). */
   createdAt: number;
-  /** 0-based helper index across the parent run's `delegate_explore` calls (live only). */
+  /** HELPER runs: 0-based helper index across the parent run's `delegate_explore` calls. */
   helperIndex: number | null;
 }
 
@@ -127,7 +127,7 @@ function runFromDetail(run: DetailRun): RunView {
     started: run.startedAt !== null,
     failure: run.failure,
     createdAt: new Date(run.createdAt).getTime(),
-    helperIndex: null,
+    helperIndex: run.helperIndex,
   };
 }
 
@@ -761,7 +761,7 @@ export type TranscriptBlock =
       parts: MessagePart[];
       results: Map<string, { content: string | null; error: boolean }>;
       /** Helper runs started by each `delegate_explore` call, by call id. */
-      helpers: Map<string, RunView[]>;
+      helpers: Map<string, CallHelpers>;
       /** Its run is still active: a tool call without a result is still running. */
       live: boolean;
       streaming: boolean;
@@ -789,18 +789,28 @@ function delegateCalls(messages: ReadonlyArray<{ parts: readonly MessagePart[] }
   return calls;
 }
 
+/** The helpers one `delegate_explore` call started, and the index of its first brief. */
+export interface CallHelpers {
+  runs: RunView[];
+  /** The `helperIndex` its first brief got: a helper's number in the call is `helperIndex - firstIndex + 1`. */
+  firstIndex: number;
+}
+
 /**
  * Pair a run's helpers with the `delegate_explore` calls that started them.
  * Helper indexes are unique across the run's calls and handed out in call
- * order, so helpers sorted by index (else creation order) fill each call's
- * `agents` count in turn. A call the helper limit trimmed claims fewer, but it
- * spent the last of the budget, so every later call started none and the
- * slices still line up. Helpers no call claims are returned separately.
+ * order, brief by brief, so each call owns the next `agents.length` indexes
+ * and its helpers are the ones whose index falls in that range (a helper whose
+ * row was never written leaves a gap, and the others keep their numbers). A
+ * call the helper limit trimmed claims fewer, but it spent the last of the
+ * budget, so every later call started none and the ranges still line up.
+ * Helpers no call claims (or not yet indexed) are returned separately.
  */
 export function assignHelpers(
   messages: ReadonlyArray<{ parts: readonly MessagePart[] }>,
   helpers: readonly RunView[],
-): { byCall: Map<string, RunView[]>; unassigned: RunView[] } {
+): { byCall: Map<string, CallHelpers>; unassigned: RunView[] } {
+  // By index; not-yet-indexed ones last, in the order they came.
   const ordered = helpers
     .map((run, order) => ({ run, order }))
     .sort(
@@ -809,16 +819,23 @@ export function assignHelpers(
           (b.run.helperIndex ?? Number.MAX_SAFE_INTEGER) || a.order - b.order,
     )
     .map((entry) => entry.run);
-  const byCall = new Map<string, RunView[]>();
+  const indexed = ordered.filter((run) => run.helperIndex !== null);
+  const byCall = new Map<string, CallHelpers>();
+  const claimed = new Set<RunView>();
   const calls = delegateCalls(messages);
-  let next = 0;
+  let start = 0;
   calls.forEach((call, index) => {
     const last = index === calls.length - 1;
-    const take = call.count === null || last ? ordered.length - next : call.count;
-    byCall.set(call.id, ordered.slice(next, next + take));
-    next += take;
+    const end = call.count === null || last ? Number.POSITIVE_INFINITY : start + call.count;
+    const runs = indexed.filter((run) => {
+      const at = run.helperIndex ?? -1;
+      return at >= start && at < end;
+    });
+    for (const run of runs) claimed.add(run);
+    byCall.set(call.id, { runs, firstIndex: start });
+    start = end;
   });
-  return { byCall, unassigned: ordered.slice(next) };
+  return { byCall, unassigned: ordered.filter((run) => !claimed.has(run)) };
 }
 
 /** The last assistant turn with text and no tool calls: a completed run's answer. */

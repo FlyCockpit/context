@@ -381,6 +381,35 @@ describe("conversationsRouter", () => {
       expect(db.agentRun.findMany.mock.calls[0]?.[0].select).not.toHaveProperty("error");
     });
 
+    it("returns each helper run's brief position, so a reload numbers its panel as the call did", async () => {
+      db.conversation.findFirst.mockResolvedValue(conversationRow("c-1"));
+      const run = {
+        createdAt: NOW,
+        status: "COMPLETED",
+        trigger: "WEB_MESSAGE",
+        model: "m",
+        stopReason: "completed",
+        failure: null,
+        iterations: 1,
+        startedAt: NOW,
+        finishedAt: NOW,
+        answer: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        costUsdMicros: 0,
+        unpricedCalls: 0,
+      };
+      db.agentRun.findMany.mockResolvedValue([
+        { ...run, id: "run-1", parentRunId: null, kind: "MAIN", focus: null, helperIndex: null },
+        { ...run, id: "run-2", parentRunId: "run-1", kind: "HELPER", focus: "src", helperIndex: 4 },
+      ]);
+      db.runTurn.findMany.mockResolvedValue([]);
+      db.agentRun.groupBy.mockResolvedValue([] as never);
+      const detail = await client().get({ id: "c-1" });
+      expect(detail.runs.map((entry) => entry.helperIndex)).toEqual([null, 4]);
+    });
+
     it("loads runs and turns owner-scoped at every level", async () => {
       db.conversation.findFirst.mockResolvedValue(conversationRow("c-1"));
       db.agentRun.findMany.mockResolvedValue([

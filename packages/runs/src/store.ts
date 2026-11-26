@@ -93,6 +93,8 @@ export interface NewRun {
   status: RunStatus;
   model: string | null;
   focus: string | null;
+  /** HELPER runs: the 0-based position of its brief among the main run's briefs. */
+  helperIndex: number | null;
   startedAt: Date | null;
   /**
    * A retry's replacement: in the same transaction, the ended MAIN run whose
@@ -537,6 +539,7 @@ export const prismaRunStore: RunStore = {
         status: toDbStatus(data.status),
         model: data.model,
         focus: data.focus,
+        helperIndex: data.helperIndex,
         startedAt: data.startedAt,
       },
       select: { id: true },

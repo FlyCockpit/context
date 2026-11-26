@@ -48,6 +48,7 @@ function detailRun(overrides: Partial<DetailRun> = {}): DetailRun {
     trigger: "web_message",
     model: "fake/model",
     focus: null,
+    helperIndex: null,
     stopReason: "completed",
     iterations: 3,
     startedAt: NOW,
@@ -522,8 +523,8 @@ describe("assignHelpers", () => {
       helper("h1", 0),
       helper("h2", 1),
     ]);
-    expect(byCall.get("d1")?.map((run) => run.id)).toEqual(["h1", "h2"]);
-    expect(byCall.get("d2")?.map((run) => run.id)).toEqual(["h3"]);
+    expect(byCall.get("d1")?.runs.map((run) => run.id)).toEqual(["h1", "h2"]);
+    expect(byCall.get("d2")?.runs.map((run) => run.id)).toEqual(["h3"]);
     expect(unassigned).toEqual([]);
   });
 
@@ -542,15 +543,37 @@ describe("assignHelpers", () => {
       helper("h2", 2),
       helper("h3", 3),
     ]);
-    expect(byCall.get("d1")?.map((run) => run.id)).toEqual(["h0", "h1", "h2"]);
-    expect(byCall.get("d2")?.map((run) => run.id)).toEqual(["h3"]);
-    expect(byCall.get("d3")).toEqual([]);
-    expect(byCall.get("d4")).toEqual([]);
+    expect(byCall.get("d1")?.runs.map((run) => run.id)).toEqual(["h0", "h1", "h2"]);
+    expect(byCall.get("d2")?.runs.map((run) => run.id)).toEqual(["h3"]);
+    expect(byCall.get("d3")?.runs).toEqual([]);
+    expect(byCall.get("d4")?.runs).toEqual([]);
     expect(unassigned).toEqual([]);
   });
 
-  it("returns helpers no call claims", () => {
-    expect(assignHelpers([], [helper("h1", null)]).unassigned.map((run) => run.id)).toEqual(["h1"]);
+  it("keeps each helper in its own call's range when an earlier row is missing", () => {
+    const messages = [
+      { parts: [call("d1", "delegate_explore", { agents: [{}, {}] })] },
+      { parts: [call("d2", "delegate_explore", { agents: [{}, {}] })] },
+    ];
+    // Brief 0's row was never written: brief 1 stays second in d1, brief 2 first in d2.
+    const { byCall } = assignHelpers(messages, [helper("h2", 2), helper("h1", 1)]);
+    expect(byCall.get("d1")).toEqual({
+      runs: [expect.objectContaining({ id: "h1" })],
+      firstIndex: 0,
+    });
+    expect(byCall.get("d2")).toEqual({
+      runs: [expect.objectContaining({ id: "h2" })],
+      firstIndex: 2,
+    });
+  });
+
+  it("returns helpers no call claims, by index", () => {
+    // A stopped run's delegate call was never saved: its helpers stay in brief order.
+    const { unassigned } = assignHelpers(
+      [],
+      [helper("h2", 2), helper("hx", null), helper("h0", 0)],
+    );
+    expect(unassigned.map((run) => run.id)).toEqual(["h0", "h2", "hx"]);
   });
 });
 
@@ -575,6 +598,7 @@ describe("buildTranscript", () => {
       kind: "helper",
       parentRunId: "run-1",
       focus: "src",
+      helperIndex: 0,
       answer: null,
     });
     const followUp = detailRun({
@@ -597,11 +621,42 @@ describe("buildTranscript", () => {
     ]);
     const [question, tools, , answer, followUpQuestion] = blocks;
     expect(question).toMatchObject({ followUp: false, text: "How do I pad?" });
-    expect(tools?.kind === "assistant" && tools.helpers.get("d1")?.map((run) => run.id)).toEqual([
-      "h-1",
-    ]);
+    expect(
+      tools?.kind === "assistant" && tools.helpers.get("d1")?.runs.map((run) => run.id),
+    ).toEqual(["h-1"]);
     expect(answer).toMatchObject({ kind: "assistant", final: true });
     expect(followUpQuestion).toMatchObject({ followUp: true });
+  });
+
+  it("pairs reloaded helpers with their calls in brief order, not creation order", () => {
+    const main = detailRun({
+      turns: [
+        { seq: 0, role: "user", parts: [text("How do I pad?")], steering: false, createdAt: NOW },
+        {
+          seq: 1,
+          role: "assistant",
+          parts: [
+            call("d1", "delegate_explore", { agents: [{}, {}] }, "ok"),
+            call("d2", "delegate_explore", { agents: [{}] }, "ok"),
+          ],
+          steering: false,
+          createdAt: NOW,
+        },
+      ],
+    });
+    // Started together, so they share a createdAt; the server lists them by id.
+    const helper = (id: string, helperIndex: number) =>
+      detailRun({ id, kind: "helper", parentRunId: "run-1", focus: id, helperIndex });
+    const blocks = buildTranscript(
+      fold([snapshot(detail([main, helper("h-c", 2), helper("h-b", 1), helper("h-a", 0)]))]),
+    );
+    const tools = blocks.find((block) => block.kind === "assistant");
+    const ids = (callId: string) =>
+      tools?.kind === "assistant"
+        ? tools.helpers.get(callId)?.runs.map((run) => run.id)
+        : undefined;
+    expect(ids("d1")).toEqual(["h-a", "h-b"]);
+    expect(ids("d2")).toEqual(["h-c"]);
   });
 
   it("shows a working line while a live run has nothing streaming", () => {

@@ -63,6 +63,7 @@ function conversation(status: Status): ConversationDetail {
         trigger: "web_message",
         model: "fake/model",
         focus: null,
+        helperIndex: null,
         stopReason: live ? null : "aborted",
         iterations: 1,
         startedAt: NOW,
@@ -183,5 +184,85 @@ describe("TranscriptBlocks file citations", () => {
     const html = renderAnswer("git@github.com:expressjs/express.git");
     expect(html).toContain("<code>lib/router/index.js:12-30</code>");
     expect(html).not.toContain("<a ");
+  });
+});
+
+describe("TranscriptBlocks helper panels", () => {
+  const delegate = (id: string, briefs: number): MessagePart => ({
+    type: "tool-call",
+    id,
+    name: "delegate_explore",
+    arguments: JSON.stringify({
+      agents: Array.from({ length: briefs }, (_, index) => ({ focus: `f${index}`, question: "?" })),
+    }),
+    state: "complete",
+  });
+  /** A finished run whose two delegate_explore calls started 2 helpers, then 1. */
+  function withHelpers(helperIndexes: Array<number | null>): ConversationDetail {
+    const base = conversation("completed");
+    const main = base.runs[0];
+    if (!main) throw new Error("no run");
+    const turns = [
+      { seq: 0, role: "user" as const, parts: [question], steering: false, createdAt: NOW },
+      {
+        seq: 1,
+        role: "assistant" as const,
+        parts: [delegate("d1", 2), delegate("d2", 1)],
+        steering: false,
+        createdAt: NOW,
+      },
+    ];
+    const helpers = helperIndexes.map((helperIndex, index) => ({
+      ...main,
+      id: `h-${index}`,
+      parentRunId: "run-1",
+      kind: "helper" as const,
+      focus: `area-${index}`,
+      helperIndex,
+      turns: [],
+    }));
+    return { ...base, runs: [{ ...main, turns }, ...helpers] };
+  }
+  const titles = (html: string) => [...html.matchAll(/Helper \d+/g)].map((match) => match[0]);
+
+  it("numbers each panel by its brief's place in its call, as the call's result does", async () => {
+    // Reloaded: each helper row carries its brief position across the run's calls.
+    const reloaded = await render(
+      fold([{ type: "snapshot", conversation: withHelpers([0, 1, 2]), live: { runs: [] } }]),
+    );
+    expect(titles(reloaded)).toEqual(["Helper 1", "Helper 2", "Helper 1"]);
+    expect(reloaded.indexOf("area-0")).toBeLessThan(reloaded.indexOf("area-1"));
+  });
+
+  it("keeps the numbers when a helper's row is missing or they start out of order", async () => {
+    // Brief 0's row was never written: brief 1 is still Helper 2.
+    const sparse = await render(
+      fold([{ type: "snapshot", conversation: withHelpers([1, 2]), live: { runs: [] } }]),
+    );
+    expect(titles(sparse)).toEqual(["Helper 2", "Helper 1"]);
+
+    // Live, the second brief's helper is heard of first.
+    const running = withHelpers([]);
+    const main = running.runs[0];
+    if (!main) throw new Error("no run");
+    const live: WatchEvent[] = [
+      {
+        type: "snapshot",
+        conversation: { ...running, ongoing: true, runs: [{ ...main, status: "running" }] },
+        live: { runs: [] },
+      },
+      ...[1, 0, 2].map(
+        (index): WatchEvent => ({
+          type: "helper.started",
+          runId: `h-${index}`,
+          parentRunId: "run-1",
+          index,
+          focus: `area-${index}`,
+        }),
+      ),
+    ];
+    const html = await render(fold(live));
+    expect(titles(html)).toEqual(["Helper 1", "Helper 2", "Helper 1"]);
+    expect(html.indexOf("area-0")).toBeLessThan(html.indexOf("area-1"));
   });
 });

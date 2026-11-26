@@ -270,6 +270,7 @@ const runSelect = {
   trigger: true,
   model: true,
   focus: true,
+  helperIndex: true,
   stopReason: true,
   failure: true,
   iterations: true,
@@ -362,6 +363,8 @@ async function loadConversationDetail(ownerId: string, conversationId: string) {
       trigger: lower(run.trigger),
       model: run.model,
       focus: run.focus,
+      /** HELPER runs: the 0-based position of its brief among the main run's briefs. */
+      helperIndex: run.helperIndex,
       stopReason: run.stopReason,
       /** Why a run that never reached the agent failed (a RepoError code and safe details). */
       failure: runFailureFromJson(run.failure),

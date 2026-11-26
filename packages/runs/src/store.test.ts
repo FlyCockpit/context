@@ -60,12 +60,30 @@ describe("prismaRunStore", () => {
       status: "queued",
       model: "m",
       focus: null,
+      helperIndex: null,
       startedAt: null,
     });
     expect(db.agentRun.create.mock.calls[0]?.[0].data).toMatchObject({
       kind: "MAIN",
       trigger: "WEB_MESSAGE",
       status: "QUEUED",
+    });
+    await prismaRunStore.createRun({
+      ownerId: "u1",
+      conversationId: "c1",
+      parentRunId: "r0",
+      checkoutId: "k1",
+      kind: "helper",
+      trigger: "web_message",
+      status: "running",
+      model: "m",
+      focus: "src",
+      helperIndex: 3,
+      startedAt: null,
+    });
+    expect(db.agentRun.create.mock.calls[1]?.[0].data).toMatchObject({
+      kind: "HELPER",
+      helperIndex: 3,
     });
     db.agentRun.findFirst.mockResolvedValue({
       id: "r1",
@@ -444,6 +462,7 @@ describe("prismaRunStore: background resolution and the stale sweep", () => {
       status: "queued" as const,
       model: "m",
       focus: null,
+      helperIndex: null,
       startedAt: null,
     };
     await expect(prismaRunStore.createRun({ ...base, replacesRunId: "r1" })).resolves.toEqual({

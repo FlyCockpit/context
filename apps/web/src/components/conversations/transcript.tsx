@@ -22,6 +22,7 @@ import { Markdown, SourceLinksContext } from "@/components/markdown";
 import { RunStatusPill } from "@/components/run-status-pill";
 import { useNow } from "@/hooks/use-now";
 import {
+  type CallHelpers,
   formatElapsed,
   isActive,
   isKnownStopReason,
@@ -54,7 +55,7 @@ import { sourceLinks } from "@/lib/source-links";
 type ToolResults = ReadonlyMap<string, { content: string | null; error: boolean }>;
 
 /** Helper panels do not nest helpers of their own. */
-const NO_HELPERS: ReadonlyMap<string, RunView[]> = new Map();
+const NO_HELPERS: ReadonlyMap<string, CallHelpers> = new Map();
 
 function PulseDot({ className }: { className?: string }) {
   return (
@@ -205,7 +206,7 @@ function AssistantMessage({
 }: {
   parts: readonly MessagePart[];
   results: ToolResults;
-  helpers: ReadonlyMap<string, RunView[]>;
+  helpers: ReadonlyMap<string, CallHelpers>;
   live: boolean;
   streaming: boolean;
   final: boolean;
@@ -234,7 +235,7 @@ function MessageParts({
 }: {
   parts: readonly MessagePart[];
   results: ToolResults;
-  helpers: ReadonlyMap<string, RunView[]>;
+  helpers: ReadonlyMap<string, CallHelpers>;
   /** The run is still active: a call without a result is still running. */
   live: boolean;
 }) {
@@ -294,10 +295,13 @@ function prettyArgs(call: ToolCallView): string {
  */
 const ToolCallRow = memo(
   ToolCallRowView,
-  (a, b) => sameToolCallView(a.call, b.call) && sameRuns(a.helpers, b.helpers),
+  (a, b) =>
+    sameToolCallView(a.call, b.call) &&
+    sameRuns(a.helpers?.runs, b.helpers?.runs) &&
+    a.helpers?.firstIndex === b.helpers?.firstIndex,
 );
 
-function ToolCallRowView({ call, helpers }: { call: ToolCallView; helpers?: RunView[] }) {
+function ToolCallRowView({ call, helpers }: { call: ToolCallView; helpers?: CallHelpers }) {
   const { t } = useTranslation(["dashboard", "common"]);
   const [open, setOpen] = useState(false);
   const outcomeText = useOutcomeText();
@@ -388,10 +392,14 @@ function ToolCallRowView({ call, helpers }: { call: ToolCallView; helpers?: RunV
           )}
         </div>
       ) : null}
-      {helpers && helpers.length > 0 ? (
+      {helpers && helpers.runs.length > 0 ? (
         <div className="min-w-0 space-y-2 border-t p-2">
-          {helpers.map((run, index) => (
-            <HelperPanel key={run.id} run={run} position={index} />
+          {helpers.runs.map((run) => (
+            <HelperPanel
+              key={run.id}
+              run={run}
+              position={(run.helperIndex ?? helpers.firstIndex) - helpers.firstIndex}
+            />
           ))}
         </div>
       ) : null}
@@ -406,7 +414,9 @@ function HelperPanelView({ run, position }: { run: RunView; position?: number })
   const live = isActive(run.status);
   // A running helper opens so it can be watched; a finished one stays tidy.
   const [open, setOpen] = useState(live);
-  const number = (run.helperIndex ?? position ?? 0) + 1;
+  // Its place in the call's brief list: what the call's result numbers it
+  // ("## Helper N"), live and after a reload alike.
+  const number = (position ?? run.helperIndex ?? 0) + 1;
   const results = useMemo(
     () => toolResultsOf(run.partial ? [...run.turns, run.partial] : run.turns),
     [run.turns, run.partial],
