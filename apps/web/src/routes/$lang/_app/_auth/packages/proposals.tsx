@@ -21,7 +21,7 @@ import { z } from "zod";
 import { EmptyState } from "@/components/empty-state";
 import { LoadMore } from "@/components/load-more";
 import { EcosystemIcon } from "@/components/packages/ecosystem-badge";
-import { ApproveProposalDialog } from "@/components/packages/package-overlays";
+import { ApproveProposalSheet } from "@/components/packages/package-overlays";
 import { BACK_LINK_CLASS, PageHeader, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
 import { StatusPill } from "@/components/status-pill";
@@ -165,7 +165,7 @@ function ProposalsPage() {
         </Card>
       </section>
 
-      <ApproveProposalDialog
+      <ApproveProposalSheet
         proposal={approving}
         onOpenChange={(open) => (open ? null : setApproving(null))}
         lang={lang}

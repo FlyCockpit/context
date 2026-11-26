@@ -53,7 +53,7 @@ import {
   ConfirmRevertDialog,
   DeleteCheckoutDialog,
   EditSummarySheet,
-  SummaryDialog,
+  SummarySheet,
   useRegenerateSummary,
 } from "@/components/packages/checkout-overlays";
 import { EcosystemBadge, EcosystemIcon } from "@/components/packages/ecosystem-badge";
@@ -597,7 +597,7 @@ function CheckoutsCard({
         </QueryBoundary>
       </CardContent>
 
-      <SummaryDialog
+      <SummarySheet
         checkout={viewing}
         onOpenChange={(open) => (open ? null : setViewingId(null))}
         onEdit={(checkout) => {

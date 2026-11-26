@@ -35,3 +35,15 @@ So do the template's five rules from the apps' passes:
 - **Overriding a Button's padding: override every breakpoint.** tailwind-merge treats `px-*` and `md:px-*` as separate groups, so a `className="px-2"` leaves a responsive size padding in force at that breakpoint. Write `px-2 md:px-2` whenever the size carries one.
 - **A control flush with a clipping edge draws its focus ring inside its box** (`focus-visible:ring-inset focus-visible:ring-offset-0`). Button's default ring is drawn 2px outside the box after a 2px offset, and the viewport or an `overflow-*-hidden` ancestor cuts it off.
 - **Frame bands keep the frame line.** Bands above the page (`TwoFactorNudge`, `AdminSetupBanner`) and the header sit 16px inside the frame at every width. They are not re-aligned to a narrower page container below them (see the two-factor nudge row).
+
+## Form surfaces
+
+This app follows the template's form-surface rule (FlyCockpit/template, `patterns/design-system.md` § Form surfaces). The shared pieces live in `apps/web/src/components/form-surface.tsx` until the template's components are ported.
+
+- **Dialog**: confirmations and short forms only, about 6 controls or fewer, fitting **without inner scrolling** at 1280×800 and 390×844 (the dialog-fits check). Create token, Invite user, Ask, Add git host, Generate/Import key, Reject proposal and every type-to-confirm delete are dialogs.
+- **Wide form sheet** (`FormSheetContent`): anything longer, and long read-only details. Full screen on phones, `max-w-xl` from `sm:`, `max-w-3xl` from `lg:` with two field columns. The header stays at the top, the action bar (`FORM_SHEET_FOOTER_CLASS`, primary action last) stays at the bottom, and only the fields between them scroll (`FORM_SHEET_BODY_CLASS`). Add package, Approve proposal, Edit package, Checkout overview and Edit overview are sheets.
+- **Quick path first**: the few fields most people decide (Add package: ecosystem, name with the registry lookup, git URL; the SSH key only for SSH URLs). Fields with safe defaults go in a collapsed `AdvancedSection` whose summary line shows the current values ("Shown as … · Starts in the repository root · Tags: usual patterns · No version: default branch · No notes"), so nothing is hidden. Edit forms use the same split as their create form.
+- **Errors** appear inline under the field; a failed submit focuses the first invalid control and opens the Advanced section that holds it (`focusFirstInvalid`).
+- **One thing at a time** for results: the new-token view shows the token and one client's setup (Claude Code, Codex or other clients), not every snippet stacked.
+
+The field-by-field triage behind these choices is recorded in the forms-ctx run notes; a new create/edit surface states its essential fields and its Advanced defaults in its PR.

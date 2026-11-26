@@ -237,10 +237,16 @@ function CreateTokenForm({
   );
 }
 
-/** The one-time token plus the Claude Code command and the generic JSON block. */
+type SetupClient = "claude" | "codex" | "json";
+
+/**
+ * The one-time token plus how to add it to one client at a time (Claude Code
+ * first), so the dialog fits on a phone and "Done" never scrolls away.
+ */
 function TokenSetup({ secret, onDone }: { secret: string; onDone: () => void }) {
   const { t } = useTranslation(["dashboard", "common", "errors"]);
   const status = useHomeStatus();
+  const [client, setClient] = useState<SetupClient>("claude");
   const mcpUrl = status.data?.mcpUrl ?? null;
   const onCopied = () => toast.success(t("common:actions.copied"));
   const onCopyError = () => toast.error(t("errors:couldNotCopy"));
@@ -251,41 +257,59 @@ function TokenSetup({ secret, onDone }: { secret: string; onDone: () => void }) 
       onDone={onDone}
     >
       {mcpUrl ? (
-        <>
-          <div className="min-w-0 space-y-1.5">
-            <p className="text-sm font-medium">{t("dashboard:access.tokens.created.claudeCode")}</p>
-            <CopyField
-              value={claudeTokenCommand(mcpUrl, secret)}
-              copyLabel={t("dashboard:access.tokens.created.copyCommand")}
-              onCopied={onCopied}
-              onCopyError={onCopyError}
-            />
-            <p className="text-xs text-pretty text-muted-foreground">
-              {t("dashboard:access.tokens.created.claudeCodeHint")}
-            </p>
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <p className="text-sm font-medium">{t("dashboard:access.tokens.created.codex")}</p>
-            <CodeSnippet
-              code={codexTokenCommand(mcpUrl, secret)}
-              copyLabel={t("dashboard:access.tokens.created.copyCodex")}
-              onCopied={onCopied}
-              onCopyError={onCopyError}
-            />
-            <p className="text-xs text-pretty text-muted-foreground">
-              {t("dashboard:access.tokens.created.codexHint")}
-            </p>
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <p className="text-sm font-medium">{t("dashboard:access.tokens.created.json")}</p>
-            <CodeSnippet
-              code={mcpJsonConfig(mcpUrl, secret)}
-              copyLabel={t("dashboard:access.tokens.created.copyJson")}
-              onCopied={onCopied}
-              onCopyError={onCopyError}
-            />
-          </div>
-        </>
+        <div className="min-w-0 space-y-2">
+          <SegmentedControl
+            value={client}
+            onChange={setClient}
+            ariaLabel={t("dashboard:access.tokens.created.clientLabel")}
+            items={[
+              { value: "claude", label: t("dashboard:access.tokens.created.claudeCode") },
+              { value: "codex", label: t("dashboard:access.tokens.created.codex") },
+              { value: "json", label: t("dashboard:access.tokens.created.other") },
+            ]}
+          />
+          {client === "claude" ? (
+            <>
+              <CopyField
+                value={claudeTokenCommand(mcpUrl, secret)}
+                copyLabel={t("dashboard:access.tokens.created.copyCommand")}
+                onCopied={onCopied}
+                onCopyError={onCopyError}
+              />
+              <p className="text-xs text-pretty text-muted-foreground">
+                {t("dashboard:access.tokens.created.claudeCodeHint")}
+              </p>
+            </>
+          ) : client === "codex" ? (
+            <>
+              <CodeSnippet
+                code={codexTokenCommand(mcpUrl, secret)}
+                copyLabel={t("dashboard:access.tokens.created.copyCodex")}
+                // Long commands wrap instead of hiding under the copy button on phones.
+                preClassName="whitespace-pre-wrap break-all"
+                onCopied={onCopied}
+                onCopyError={onCopyError}
+              />
+              <p className="text-xs text-pretty text-muted-foreground">
+                {t("dashboard:access.tokens.created.codexHint")}
+              </p>
+            </>
+          ) : (
+            <>
+              <CodeSnippet
+                code={mcpJsonConfig(mcpUrl, secret)}
+                copyLabel={t("dashboard:access.tokens.created.copyJson")}
+                // Long commands wrap instead of hiding under the copy button on phones.
+                preClassName="whitespace-pre-wrap break-all"
+                onCopied={onCopied}
+                onCopyError={onCopyError}
+              />
+              <p className="text-xs text-pretty text-muted-foreground">
+                {t("dashboard:access.tokens.created.jsonHint")}
+              </p>
+            </>
+          )}
+        </div>
       ) : status.isError ? (
         // The token is still shown above; only the snippets need the address.
         <InlineRetry

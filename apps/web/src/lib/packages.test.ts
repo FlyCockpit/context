@@ -8,12 +8,15 @@ import {
   hasUpdates,
   isSshRemote,
   type PackageFormValues,
+  packageFieldForReason,
   toApproveInput,
   toCreateInput,
   toUpdateInput,
 } from "./packages";
 
 const MESSAGES = {
+  gitUrl: "git-url",
+  defaultRef: "ref",
   sshKeyRequired: "key",
   privateKeyRequired: "private-key",
   keyNameRequired: "key-name",
@@ -119,8 +122,14 @@ describe("toUpdateInput", () => {
     ).toEqual({ id: "p1", gitUrl: "git@github.com:o/r", sshKeyId: "k" });
   });
 
-  it("never clears the display name", () => {
-    expect(toUpdateInput("p1", before, { ...before, displayName: "" })).toEqual({ id: "p1" });
+  it("resets a cleared display name to the package name", () => {
+    expect(toUpdateInput("p1", before, { ...before, displayName: "" })).toEqual({
+      id: "p1",
+      displayName: "zod",
+    });
+    const plain = form({ displayName: "" });
+    expect(toUpdateInput("p1", plain, { ...plain, displayName: " " })).toEqual({ id: "p1" });
+    expect(toUpdateInput("p1", plain, { ...plain, displayName: "zod" })).toEqual({ id: "p1" });
   });
 });
 
@@ -140,6 +149,26 @@ describe("buildPackageFormSchema", () => {
     expect(issues(form({ subdirectory: "packages/react-query/" }))).toEqual([]);
     expect(issues(form({ tagPattern: "v1.0.0" }))).toEqual(["tagPattern"]);
     expect(issues(form({ tagPattern: "v{version}" }))).toEqual([]);
+  });
+
+  it("refuses tag patterns and default refs git would refuse, like the server", () => {
+    expect(issues(form({ tagPattern: "release {version}" }))).toEqual(["tagPattern"]);
+    expect(issues(form({ tagPattern: "-{version}" }))).toEqual(["tagPattern"]);
+    expect(issues(form({ tagPattern: "@tanstack/react-query@{version}" }))).toEqual([]);
+    expect(issues(form({ defaultRef: "bad ref" }))).toEqual(["defaultRef"]);
+    expect(issues(form({ defaultRef: "feature/../x" }))).toEqual(["defaultRef"]);
+    expect(issues(form({ defaultRef: "x.lock" }))).toEqual(["defaultRef"]);
+    expect(issues(form({ defaultRef: "release/2.x" }))).toEqual([]);
+  });
+
+  it("accepts only https:// and SSH git URLs, like the server", () => {
+    expect(issues(form({ gitUrl: "not a url" }))).toEqual(["gitUrl"]);
+    expect(issues(form({ gitUrl: "http://github.com/o/r" }))).toEqual(["gitUrl"]);
+    expect(issues(form({ gitUrl: "github.com/o/r" }))).toEqual(["gitUrl"]);
+    expect(issues(form({ gitUrl: "file:///srv/repo" }))).toEqual(["gitUrl"]);
+    expect(issues(form({ gitUrl: "HTTPS://github.com/o/r" }))).toEqual([]);
+    expect(issues(form({ gitUrl: "ssh://git@host:2222/o/r", sshKeyId: "k" }))).toEqual([]);
+    expect(issues(form({ gitUrl: "git@github.com:o/r.git", sshKeyId: "k" }))).toEqual([]);
   });
 
   it("needs a name and a git URL", () => {
@@ -190,4 +219,20 @@ it("ignores hidden one-time key requirements after switching to HTTPS", () => {
     expect(issues(values)).toEqual([]);
     expect(toCreateInput(values)).not.toHaveProperty("oneTimeKey");
   }
+});
+
+describe("packageFieldForReason", () => {
+  it("puts a server refusal on the field it is about", () => {
+    expect(packageFieldForReason("INVALID_REMOTE_URL")).toBe("gitUrl");
+    expect(packageFieldForReason("PRIVATE_ADDRESS")).toBe("gitUrl");
+    expect(packageFieldForReason("PACKAGE_EXISTS")).toBe("name");
+    expect(packageFieldForReason("SSH_KEY_PASSPHRASE_INVALID")).toBe("passphrase");
+    expect(packageFieldForReason("INVALID_REF")).toBe("defaultRef");
+  });
+
+  it("leaves other failures to the toast", () => {
+    expect(packageFieldForReason("GIT_TIMEOUT")).toBeNull();
+    expect(packageFieldForReason("toString")).toBeNull();
+    expect(packageFieldForReason(null)).toBeNull();
+  });
 });

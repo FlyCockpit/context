@@ -8,10 +8,11 @@ import { cn } from "@cockpit-context/ui/lib/utils";
 import { useForm, useStore } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, ExternalLink, Search } from "lucide-react";
-import type { ReactNode } from "react";
+import { ExternalLink, Search } from "lucide-react";
+import { type ReactNode, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import { AdvancedSection, focusFirstInvalid } from "@/components/form-surface";
 import {
   buildPackageFormSchema,
   ECOSYSTEMS,
@@ -19,7 +20,9 @@ import {
   hasRegistry,
   isSshRemote,
   type PackageFormValues,
+  packageFieldForReason,
 } from "@/lib/packages";
+import { errorReason, friendly } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 
 /**
@@ -66,10 +69,13 @@ export function PackageForm({
   footerClassName?: string;
 }) {
   const { t } = useTranslation(["dashboard", "common"]);
+  const formRef = useRef<HTMLFormElement>(null);
   const form = useForm({
     defaultValues: initialValues,
     validators: {
       onChange: buildPackageFormSchema({
+        gitUrl: t("dashboard:packages.form.gitUrlInvalid"),
+        defaultRef: t("dashboard:packages.form.defaultRefInvalid"),
         sshKeyRequired: t("dashboard:packages.form.sshKeyRequired"),
         privateKeyRequired: t("dashboard:access.sshKeys.form.privateKeyRequired"),
         keyNameRequired: t("dashboard:access.sshKeys.form.nameRequired"),
@@ -80,9 +86,16 @@ export function PackageForm({
     onSubmit: async ({ value }) => {
       try {
         await onSubmit(value);
-      } catch {
+      } catch (error) {
         // The mutation's global error toast already told the user; the form
         // stays open with their input.
+        showRefusalAtField(error, formRef.current, (name, message) =>
+          form.setFieldMeta(name, (meta) => ({
+            ...meta,
+            isTouched: true,
+            errorMap: { ...meta.errorMap, onSubmit: message },
+          })),
+        );
       }
     },
   });
@@ -94,15 +107,47 @@ export function PackageForm({
   const ecosystemLabels = Object.fromEntries(
     ECOSYSTEMS.map((value) => [value, t(`dashboard:packages.ecosystems.${value}`)]),
   );
-  const advancedSet = [
-    initialValues.subdirectory,
-    initialValues.tagPattern,
-    initialValues.defaultRef,
-    initialValues.notes,
-  ].some((value) => value.trim() !== "");
-
+  const advancedValues = {
+    displayName: useStore(form.store, (state) => state.values.displayName.trim()),
+    subdirectory: useStore(form.store, (state) => state.values.subdirectory.trim()),
+    tagPattern: useStore(form.store, (state) => state.values.tagPattern.trim()),
+    defaultRef: useStore(form.store, (state) => state.values.defaultRef.trim()),
+    hasNotes: useStore(form.store, (state) => state.values.notes.trim() !== ""),
+  };
+  const advancedSummary = [
+    t("dashboard:packages.form.summary.displayName", {
+      value:
+        advancedValues.displayName ||
+        name ||
+        initialValues.name ||
+        t("dashboard:packages.form.summary.packageName"),
+    }),
+    t("dashboard:packages.form.summary.subdirectory", {
+      value: advancedValues.subdirectory || t("dashboard:packages.form.summary.repoRoot"),
+    }),
+    t("dashboard:packages.form.summary.tagPattern", {
+      value: advancedValues.tagPattern || t("dashboard:packages.form.summary.auto"),
+    }),
+    t("dashboard:packages.form.summary.defaultRef", {
+      value: advancedValues.defaultRef || t("dashboard:packages.form.summary.remoteDefault"),
+    }),
+    advancedValues.hasNotes
+      ? t("dashboard:packages.form.summary.notesSet")
+      : t("dashboard:packages.form.summary.noNotes"),
+  ].join(" · ");
   const advanced = (
-    <>
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+      <form.Field name="displayName">
+        {(field) => (
+          <TextField
+            field={field}
+            label={t("dashboard:packages.form.displayName")}
+            description={t("dashboard:packages.form.displayNameHint")}
+            inputMode="text"
+            autoComplete="off"
+          />
+        )}
+      </form.Field>
       <form.Field name="subdirectory">
         {(field) => (
           <TextField
@@ -117,39 +162,38 @@ export function PackageForm({
           />
         )}
       </form.Field>
-      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-        <form.Field name="tagPattern">
-          {(field) => (
-            <TextField
-              field={field}
-              label={t("dashboard:packages.form.tagPattern")}
-              description={t("dashboard:packages.form.tagPatternHint")}
-              placeholder={t("dashboard:packages.form.placeholders.tagPattern")}
-              inputMode="url"
-              autoComplete="off"
-              spellCheck={false}
-              inputClassName="font-mono"
-            />
-          )}
-        </form.Field>
-        <form.Field name="defaultRef">
-          {(field) => (
-            <TextField
-              field={field}
-              label={t("dashboard:packages.form.defaultRef")}
-              description={t("dashboard:packages.form.defaultRefHint")}
-              placeholder={t("dashboard:packages.form.placeholders.defaultRef")}
-              inputMode="url"
-              autoComplete="off"
-              spellCheck={false}
-              inputClassName="font-mono"
-            />
-          )}
-        </form.Field>
-      </div>
+      <form.Field name="tagPattern">
+        {(field) => (
+          <TextField
+            field={field}
+            label={t("dashboard:packages.form.tagPattern")}
+            description={t("dashboard:packages.form.tagPatternHint")}
+            placeholder={t("dashboard:packages.form.placeholders.tagPattern")}
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            inputClassName="font-mono"
+          />
+        )}
+      </form.Field>
+      <form.Field name="defaultRef">
+        {(field) => (
+          <TextField
+            field={field}
+            label={t("dashboard:packages.form.defaultRef")}
+            description={t("dashboard:packages.form.defaultRefHint")}
+            placeholder={t("dashboard:packages.form.placeholders.defaultRef")}
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            inputClassName="font-mono"
+          />
+        )}
+      </form.Field>
       <form.Field name="notes">
         {(field) => (
           <TextareaField
+            className="lg:col-span-2"
             field={field}
             label={t("dashboard:packages.form.notes")}
             description={t("dashboard:packages.form.notesHint")}
@@ -159,7 +203,7 @@ export function PackageForm({
           />
         )}
       </form.Field>
-    </>
+    </div>
   );
 
   return (
@@ -168,8 +212,11 @@ export function PackageForm({
       onSubmit={(event) => {
         event.preventDefault();
         event.stopPropagation();
-        form.handleSubmit();
+        void form.handleSubmit().then(() => {
+          if (!form.state.isValid) focusFirstInvalid(formRef.current);
+        });
       }}
+      ref={formRef}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
       <div className={cn("min-w-0 space-y-4", bodyClassName)}>
@@ -230,34 +277,20 @@ export function PackageForm({
         )}
 
         {mode !== "snapshot-update" ? (
-          <>
-            <form.Field name="displayName">
-              {(field) => (
-                <TextField
-                  field={field}
-                  label={t("dashboard:packages.form.displayName")}
-                  description={t("dashboard:packages.form.displayNameHint")}
-                  inputMode="text"
-                  autoComplete="off"
-                />
-              )}
-            </form.Field>
-
-            <form.Field name="gitUrl">
-              {(field) => (
-                <TextField
-                  field={field}
-                  label={t("dashboard:packages.form.gitUrl")}
-                  description={t("dashboard:packages.form.gitUrlHint")}
-                  placeholder={t("dashboard:packages.form.placeholders.gitUrl")}
-                  inputMode="url"
-                  autoComplete="off"
-                  spellCheck={false}
-                  inputClassName="font-mono"
-                />
-              )}
-            </form.Field>
-          </>
+          <form.Field name="gitUrl">
+            {(field) => (
+              <TextField
+                field={field}
+                label={t("dashboard:packages.form.gitUrl")}
+                description={t("dashboard:packages.form.gitUrlHint")}
+                placeholder={t("dashboard:packages.form.placeholders.gitUrl")}
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                inputClassName="font-mono"
+              />
+            )}
+          </form.Field>
         ) : null}
         {isSsh ? (
           <div className="space-y-4">
@@ -345,19 +378,10 @@ export function PackageForm({
           </div>
         ) : null}
 
-        {mode === "snapshot-update" ? null : mode === "edit" ? (
-          advanced
-        ) : (
-          <details open={advancedSet} className="group min-w-0 rounded-md border">
-            <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 rounded-md px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-              <ChevronRight
-                aria-hidden="true"
-                className="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none"
-              />
-              {t("dashboard:packages.form.moreOptions")}
-            </summary>
-            <div className="min-w-0 space-y-4 border-t p-3">{advanced}</div>
-          </details>
+        {mode === "snapshot-update" ? null : (
+          <AdvancedSection title={t("dashboard:packages.form.advanced")} summary={advancedSummary}>
+            {advanced}
+          </AdvancedSection>
         )}
       </div>
 
@@ -380,11 +404,11 @@ export function PackageForm({
             </Button>
           )}
         </form.Subscribe>
-        <form.Subscribe
-          selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting })}
-        >
-          {({ canSubmit, isSubmitting }) => (
-            <Button type="submit" size="touch" disabled={!canSubmit || isSubmitting}>
+        {/* Enabled while invalid: a click lands on the first error, even one
+            inside the collapsed Advanced section (focusFirstInvalid). */}
+        <form.Subscribe selector={(state) => state.isSubmitting}>
+          {(isSubmitting) => (
+            <Button type="submit" size="touch" disabled={isSubmitting}>
               {isSubmitting ? pendingLabel : submitLabel}
             </Button>
           )}
@@ -392,6 +416,24 @@ export function PackageForm({
       </div>
     </form>
   );
+}
+
+/**
+ * A refusal about one field (a bad git URL, a taken name, a wrong passphrase)
+ * also shows at that field until the user changes it, and focus moves there.
+ * Only when the field is on screen: an error on a hidden field would block
+ * the form with nothing to fix. Returns whether it was shown.
+ */
+export function showRefusalAtField(
+  error: unknown,
+  root: HTMLElement | null,
+  setFieldError: (name: keyof PackageFormValues, message: string) => void,
+): boolean {
+  const name = packageFieldForReason(errorReason(error));
+  if (!name || !root?.querySelector(`[id$="-${name}"]`)) return false;
+  setFieldError(name, friendly(error));
+  focusFirstInvalid(root);
+  return true;
 }
 
 type LookupSuggestion = {

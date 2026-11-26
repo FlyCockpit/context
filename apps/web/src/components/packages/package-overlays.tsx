@@ -7,7 +7,6 @@ import {
 } from "@cockpit-context/ui/components/dialog";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
@@ -18,6 +17,11 @@ import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/reac
 import { useTranslation } from "react-i18next";
 
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import {
+  FORM_SHEET_BODY_CLASS,
+  FORM_SHEET_FOOTER_CLASS,
+  FormSheetContent,
+} from "@/components/form-surface";
 import { InlineRetry } from "@/components/inline-retry";
 import { PackageForm } from "@/components/packages/package-form";
 import {
@@ -47,8 +51,8 @@ function useInvalidatePackages() {
 const FORM_DIALOG_CLASS =
   "flex max-h-[calc(100dvh-2rem)] flex-col overflow-x-hidden overflow-y-auto sm:max-w-lg";
 
-/** Create → Dialog (docs/development.md). */
-export function CreatePackageDialog({
+/** Create → a wide sheet: the form is too long for a dialog (docs/ui.md#form-surfaces). */
+export function CreatePackageSheet({
   open,
   onOpenChange,
   lang,
@@ -74,17 +78,19 @@ export function CreatePackageDialog({
   });
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (create.isPending ? null : onOpenChange(next))}>
-      <DialogContent closeLabel={t("common:actions.close")} className={FORM_DIALOG_CLASS}>
-        <DialogHeader>
-          <DialogTitle>{t("dashboard:packages.create.title")}</DialogTitle>
-          <DialogDescription>{t("dashboard:packages.create.description")}</DialogDescription>
-        </DialogHeader>
+    <Sheet open={open} onOpenChange={(next) => (create.isPending ? null : onOpenChange(next))}>
+      <FormSheetContent closeLabel={t("common:actions.close")}>
+        <SheetHeader>
+          <SheetTitle>{t("dashboard:packages.create.title")}</SheetTitle>
+          <SheetDescription>{t("dashboard:packages.create.description")}</SheetDescription>
+        </SheetHeader>
         {open ? (
           <PackageForm
             mode="create"
             lang={lang}
             initialValues={emptyPackageForm()}
+            bodyClassName={FORM_SHEET_BODY_CLASS}
+            footerClassName={FORM_SHEET_FOOTER_CLASS}
             onSubmit={async (values) => {
               try {
                 return await create.mutateAsync(toCreateInput(values));
@@ -97,13 +103,13 @@ export function CreatePackageDialog({
             pendingLabel={t("dashboard:packages.create.pending")}
           />
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </FormSheetContent>
+    </Sheet>
   );
 }
 
-/** Approve → the create dialog, prefilled from the proposal; the owner can edit every field. */
-export function ApproveProposalDialog({
+/** Approve → the create sheet, prefilled from the proposal; the owner can edit every field. */
+export function ApproveProposalSheet({
   proposal,
   onOpenChange,
   lang,
@@ -123,15 +129,15 @@ export function ApproveProposalDialog({
   });
 
   return (
-    <Dialog
+    <Sheet
       open={proposal !== null}
       onOpenChange={(next) => (approve.isPending ? null : onOpenChange(next))}
     >
-      <DialogContent closeLabel={t("common:actions.close")} className={FORM_DIALOG_CLASS}>
-        <DialogHeader>
-          <DialogTitle>{t("dashboard:proposals.approve.title")}</DialogTitle>
-          <DialogDescription>{t("dashboard:proposals.approve.description")}</DialogDescription>
-        </DialogHeader>
+      <FormSheetContent closeLabel={t("common:actions.close")}>
+        <SheetHeader>
+          <SheetTitle>{t("dashboard:proposals.approve.title")}</SheetTitle>
+          <SheetDescription>{t("dashboard:proposals.approve.description")}</SheetDescription>
+        </SheetHeader>
         {proposal ? (
           <PackageForm
             key={proposal.id}
@@ -139,6 +145,8 @@ export function ApproveProposalDialog({
             lang={lang}
             initialValues={proposalToFormValues(proposal)}
             intro={<ProposalSummary proposal={proposal} />}
+            bodyClassName={FORM_SHEET_BODY_CLASS}
+            footerClassName={FORM_SHEET_FOOTER_CLASS}
             onSubmit={async (values) => {
               const result = await approve
                 .mutateAsync(toApproveInput(proposal.id, values))
@@ -155,8 +163,8 @@ export function ApproveProposalDialog({
             pendingLabel={t("dashboard:proposals.approve.pending")}
           />
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </FormSheetContent>
+    </Sheet>
   );
 }
 
@@ -211,10 +219,7 @@ export function EditPackageSheet({
       open={packageId !== null}
       onOpenChange={(next) => (update.isPending ? null : onOpenChange(next))}
     >
-      <SheetContent
-        closeLabel={t("common:actions.close")}
-        className="data-[side=right]:w-full data-[side=right]:sm:max-w-lg"
-      >
+      <FormSheetContent closeLabel={t("common:actions.close")}>
         <SheetHeader>
           <SheetTitle>{t("dashboard:packages.edit.title")}</SheetTitle>
           <SheetDescription>{t("dashboard:packages.edit.description")}</SheetDescription>
@@ -225,8 +230,8 @@ export function EditPackageSheet({
             mode="edit"
             lang={lang}
             initialValues={packageToFormValues(pkg.data)}
-            bodyClassName="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-2"
-            footerClassName="border-t p-4"
+            bodyClassName={FORM_SHEET_BODY_CLASS}
+            footerClassName={FORM_SHEET_FOOTER_CLASS}
             onSubmit={async (values) => {
               const input = toUpdateInput(pkg.data.id, packageToFormValues(pkg.data), values);
               if (!hasUpdates(input)) {
@@ -255,7 +260,7 @@ export function EditPackageSheet({
             ))}
           </div>
         )}
-      </SheetContent>
+      </FormSheetContent>
     </Sheet>
   );
 }

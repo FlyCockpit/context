@@ -31,7 +31,7 @@ import { LoadMore } from "@/components/load-more";
 import { NavBadge } from "@/components/nav-badge";
 import { EcosystemIcon } from "@/components/packages/ecosystem-badge";
 import {
-  CreatePackageDialog,
+  CreatePackageSheet,
   DeletePackageDialog,
   EditPackageSheet,
 } from "@/components/packages/package-overlays";
@@ -197,7 +197,7 @@ function PackagesPage() {
         </CardContent>
       </Card>
 
-      <CreatePackageDialog
+      <CreatePackageSheet
         open={createOpen}
         onOpenChange={setCreateOpen}
         lang={lang}

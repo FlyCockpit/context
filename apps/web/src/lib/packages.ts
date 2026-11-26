@@ -220,9 +220,10 @@ export function toUpdateInput(id: string, before: PackageFormValues, after: Pack
     defaultRef?: string | null;
     notes?: string | null;
   } = { id };
-  if (next.displayName !== undefined && next.displayName !== prev.displayName) {
-    input.displayName = next.displayName;
-  }
+  // A cleared display name goes back to the package name, as the field's hint
+  // and the Advanced summary say.
+  const displayName = next.displayName ?? after.name.trim();
+  if (displayName !== (prev.displayName ?? before.name.trim())) input.displayName = displayName;
   if (next.gitUrl !== prev.gitUrl || next.sshKeyId !== prev.sshKeyId) {
     input.gitUrl = next.gitUrl;
     input.sshKeyId = next.sshKeyId;
@@ -249,7 +250,27 @@ function validSubdirectory(value: string): boolean {
   );
 }
 
+/** Mirrors `isSafeRefName` in packages/repos/src/resolve.ts (that module runs git, so it can't be imported here). */
+function safeRefName(ref: string): boolean {
+  return (
+    ref.length > 0 &&
+    ref.length <= 200 &&
+    /^[A-Za-z0-9._/@+-]+$/.test(ref) &&
+    !ref.startsWith("-") &&
+    !ref.startsWith("/") &&
+    !ref.endsWith("/") &&
+    !ref.endsWith(".") &&
+    !ref.endsWith(".lock") &&
+    !ref.includes("..") &&
+    !ref.includes("//") &&
+    !ref.includes("@{") &&
+    !ref.split("/").some((part) => part.startsWith("."))
+  );
+}
+
 export type PackageFormMessages = {
+  gitUrl: string;
+  defaultRef: string;
   sshKeyRequired: string;
   privateKeyRequired: string;
   keyNameRequired: string;
@@ -281,6 +302,11 @@ export function buildPackageFormSchema(messages: PackageFormMessages) {
       notes: z.string().trim().max(10_000),
     })
     .superRefine((values, ctx) => {
+      const gitUrl = values.gitUrl.trim();
+      // The server's shape rule (packages/repos/src/remote-url.ts): https:// or SSH.
+      if (gitUrl !== "" && !/^https:\/\/\S/i.test(gitUrl) && !isSshRemote(gitUrl)) {
+        ctx.addIssue({ code: "custom", path: ["gitUrl"], message: messages.gitUrl });
+      }
       if (
         isSshRemote(values.gitUrl) &&
         values.keyMode !== "once" &&
@@ -303,8 +329,48 @@ export function buildPackageFormSchema(messages: PackageFormMessages) {
       if (values.subdirectory.trim() !== "" && !validSubdirectory(values.subdirectory)) {
         ctx.addIssue({ code: "custom", path: ["subdirectory"], message: messages.subdirectory });
       }
-      if (values.tagPattern.trim() !== "" && !values.tagPattern.includes("{version}")) {
+      const tagPattern = values.tagPattern.trim();
+      if (
+        tagPattern !== "" &&
+        !(
+          tagPattern.includes("{version}") &&
+          safeRefName(tagPattern.replaceAll("{version}", "1.0.0"))
+        )
+      ) {
         ctx.addIssue({ code: "custom", path: ["tagPattern"], message: messages.tagPattern });
       }
+      const defaultRef = values.defaultRef.trim();
+      if (defaultRef !== "" && !safeRefName(defaultRef)) {
+        ctx.addIssue({ code: "custom", path: ["defaultRef"], message: messages.defaultRef });
+      }
     });
+}
+
+/** Server refusals that are about one field of the package form. */
+const FIELD_BY_REASON: Readonly<Record<string, keyof PackageFormValues>> = {
+  PACKAGE_EXISTS: "name",
+  INVALID_PACKAGE_NAME: "name",
+  GIT_URL_REQUIRED: "gitUrl",
+  INVALID_REMOTE_URL: "gitUrl",
+  PRIVATE_ADDRESS: "gitUrl",
+  HOST_UNRESOLVABLE: "gitUrl",
+  HOST_KEY_UNCONFIRMED: "gitUrl",
+  SSH_KEY_REQUIRED: "sshKeyId",
+  SSH_KEY_NOT_FOUND: "sshKeyId",
+  SSH_KEY_UNREADABLE: "sshKeyId",
+  SSH_KEY_INVALID: "privateKey",
+  SSH_KEY_UNSUPPORTED: "privateKey",
+  SSH_KEY_DUPLICATE: "privateKey",
+  SSH_KEY_PASSPHRASE_REQUIRED: "passphrase",
+  SSH_KEY_PASSPHRASE_INVALID: "passphrase",
+  SSH_KEY_PASSPHRASE_TOO_LONG: "passphrase",
+  SSH_KEY_PASSPHRASE_LINE_BREAK: "passphrase",
+  INVALID_REF: "defaultRef",
+};
+
+/** The form field a server refusal belongs to, so its message shows at that field. */
+export function packageFieldForReason(reason: string | null): keyof PackageFormValues | null {
+  return reason !== null && Object.hasOwn(FIELD_BY_REASON, reason)
+    ? (FIELD_BY_REASON[reason] ?? null)
+    : null;
 }

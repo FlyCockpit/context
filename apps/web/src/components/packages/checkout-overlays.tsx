@@ -10,15 +10,7 @@ import {
 } from "@cockpit-context/ui/components/alert-dialog";
 import { Button } from "@cockpit-context/ui/components/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@cockpit-context/ui/components/dialog";
-import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
@@ -33,6 +25,11 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import {
+  FORM_SHEET_BODY_CLASS,
+  FORM_SHEET_FOOTER_CLASS,
+  FormSheetContent,
+} from "@/components/form-surface";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { SegmentedControl } from "@/components/segmented-control";
 import { type CheckoutRow, describeResolvedFrom, shortSha } from "@/lib/packages";
@@ -60,8 +57,12 @@ function checkoutLabel(checkout: CheckoutRow) {
 
 type OverviewTab = "yours" | "generated";
 
-/** View details → Dialog. Shows the viewer's edited version (if any) and the model-written one. */
-export function SummaryDialog({
+/**
+ * View details → a wide sheet: an overview can run to pages, so it scrolls
+ * between a fixed header and action bar. Shows the viewer's edited version
+ * (if any) and the model-written one.
+ */
+export function SummarySheet({
   checkout,
   onOpenChange,
   onEdit,
@@ -78,20 +79,17 @@ export function SummaryDialog({
 }) {
   const { t } = useTranslation(["dashboard", "common"]);
   return (
-    <Dialog open={checkout !== null} onOpenChange={onOpenChange}>
-      <DialogContent
-        closeLabel={t("common:actions.close")}
-        className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-2xl"
-      >
-        <DialogHeader>
-          <DialogTitle>
+    <Sheet open={checkout !== null} onOpenChange={onOpenChange}>
+      <FormSheetContent closeLabel={t("common:actions.close")}>
+        <SheetHeader className="pe-12">
+          <SheetTitle>
             {t("dashboard:checkouts.summary.title", {
               version: checkout ? checkoutLabel(checkout) : "",
             })}
-          </DialogTitle>
-        </DialogHeader>
+          </SheetTitle>
+        </SheetHeader>
         {checkout ? (
-          <SummaryDialogBody
+          <SummarySheetBody
             // A fresh tab choice per checkout, and again once an override appears or goes.
             key={`${checkout.id}:${checkout.summaryOverride ? "own" : "model"}`}
             checkout={checkout}
@@ -102,12 +100,12 @@ export function SummaryDialog({
             canRegenerate={canRegenerate(checkout)}
           />
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </FormSheetContent>
+    </Sheet>
   );
 }
 
-function SummaryDialogBody({
+function SummarySheetBody({
   checkout,
   onClose,
   onEdit,
@@ -128,36 +126,40 @@ function SummaryDialogBody({
   const showingOwn = override !== null && tab === "yours";
   return (
     <>
-      {override ? (
-        <SegmentedControl
-          value={tab}
-          onChange={setTab}
-          ariaLabel={t("dashboard:checkouts.summary.versionPicker")}
-          items={[
-            { value: "yours", label: t("dashboard:checkouts.summary.yourVersion") },
-            { value: "generated", label: t("dashboard:checkouts.summary.generatedVersion") },
-          ]}
-        />
-      ) : null}
-      <DialogDescription>
-        {showingOwn
-          ? t("dashboard:checkouts.summary.overrideNote")
-          : t("dashboard:checkouts.summary.modelNote")}
-        {!showingOwn && override ? ` ${t("dashboard:checkouts.summary.overrideInUse")}` : null}
-      </DialogDescription>
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pe-1">
-        {showingOwn ? (
-          <LazyMarkdown content={override.body} />
-        ) : (
-          <GeneratedOverview checkout={checkout} />
+      <div className={`${FORM_SHEET_BODY_CLASS} space-y-3`}>
+        {override ? (
+          <SegmentedControl
+            value={tab}
+            onChange={setTab}
+            ariaLabel={t("dashboard:checkouts.summary.versionPicker")}
+            items={[
+              { value: "yours", label: t("dashboard:checkouts.summary.yourVersion") },
+              { value: "generated", label: t("dashboard:checkouts.summary.generatedVersion") },
+            ]}
+          />
+        ) : null}
+        <SheetDescription>
+          {showingOwn
+            ? t("dashboard:checkouts.summary.overrideNote")
+            : t("dashboard:checkouts.summary.modelNote")}
+          {!showingOwn && override ? ` ${t("dashboard:checkouts.summary.overrideInUse")}` : null}
+        </SheetDescription>
+        <div className="min-w-0">
+          {showingOwn ? (
+            <LazyMarkdown content={override.body} />
+          ) : (
+            <GeneratedOverview checkout={checkout} />
+          )}
+        </div>
+        {showingOwn ? null : (
+          <p className="text-xs text-muted-foreground text-pretty">
+            {t("dashboard:checkouts.summary.regenerateNote")}
+          </p>
         )}
       </div>
-      {showingOwn ? null : (
-        <p className="text-xs text-muted-foreground text-pretty">
-          {t("dashboard:checkouts.summary.regenerateNote")}
-        </p>
-      )}
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+      <div
+        className={`${FORM_SHEET_FOOTER_CLASS} flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end`}
+      >
         <Button variant="ghost" size="touch" onClick={onClose}>
           {t("common:actions.close")}
         </Button>
@@ -231,10 +233,7 @@ export function EditSummarySheet({
       open={checkout !== null}
       onOpenChange={(next) => (save.isPending ? null : onOpenChange(next))}
     >
-      <SheetContent
-        closeLabel={t("common:actions.close")}
-        className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl"
-      >
+      <FormSheetContent closeLabel={t("common:actions.close")}>
         <SheetHeader>
           <SheetTitle>
             {t("dashboard:checkouts.summary.editTitle", {
@@ -257,7 +256,7 @@ export function EditSummarySheet({
             }}
           />
         ) : null}
-      </SheetContent>
+      </FormSheetContent>
     </Sheet>
   );
 }
@@ -287,7 +286,7 @@ function SummaryForm({
       }}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-2">
+      <div className={FORM_SHEET_BODY_CLASS}>
         <form.Field name="summary">
           {(field) => (
             <TextareaField
@@ -302,7 +301,9 @@ function SummaryForm({
           )}
         </form.Field>
       </div>
-      <div className="flex flex-col-reverse gap-2 border-t p-4 sm:flex-row sm:justify-end">
+      <div
+        className={`${FORM_SHEET_FOOTER_CLASS} flex flex-col-reverse gap-2 sm:flex-row sm:justify-end`}
+      >
         <form.Subscribe selector={(state) => state.isSubmitting}>
           {(isSubmitting) => (
             <Button
