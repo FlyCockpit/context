@@ -3280,7 +3280,7 @@ describe("web conversations resolve inside their first run", () => {
       // Simulate a restart before the agent started.
       const row = store.runs.get(first.runId);
       if (!row) throw new Error("no run");
-      Object.assign(row, { status: "interrupted", startedAt: null });
+      Object.assign(row, { status: "interrupted", startedAt: null, answer: null });
       store.conversations.get(first.conversationId)!.commitSha = null;
       const retried = await engine.retryConversation({
         ownerId: OWNER,
@@ -3292,7 +3292,189 @@ describe("web conversations resolve inside their first run", () => {
       });
     });
 
-    it("refuses a run that reached the agent, a live run, a retarget once resolved, and others' conversations", async () => {
+    it("asks again after the agent started and failed, leaving that attempt out of the history", async () => {
+      exploreRun.mockImplementationOnce(async (options) => {
+        await announce(options, [[text("a1", "assistant", "Looking at pad.ts"), "assistant"]]);
+        throw new ExploreAgentError("upstream 500", {
+          cause: new Error("upstream 500"),
+          usage: { inputTokens: 1, outputTokens: 1, costUsd: 0 },
+          helperRuns: [],
+        });
+      });
+      const engine = makeEngine();
+      const first = await open(engine);
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "failed", stopReason: "model-error" });
+      expect(store.runs.get(first.runId)?.startedAt).not.toBeNull();
+      const retried = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: retried.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "completed" });
+      const options = exploreRun.mock.calls.at(-1)?.[0];
+      expect(options?.question).toBe("How do I pad?");
+      expect(options?.history).toEqual([]);
+      // The ended attempt stays in the transcript.
+      expect(store.runs.get(first.runId)?.status).toBe("failed");
+      // A run that completed is never asked again.
+      await expect(
+        engine.retryConversation({ ownerId: OWNER, conversationId: first.conversationId }),
+      ).rejects.toMatchObject({ code: "NOT_RETRYABLE" });
+    });
+
+    it("keeps every replaced started attempt out of a retry's and a follow-up's history", async () => {
+      const failing = async (options: ExploreAgentOptions) => {
+        await announce(options, [[text("a1", "assistant", "partial work"), "assistant"]]);
+        throw new ExploreAgentError("upstream 500", {
+          cause: new Error("upstream 500"),
+          usage: { inputTokens: 1, outputTokens: 1, costUsd: 0 },
+          helperRuns: [],
+        });
+      };
+      exploreRun.mockImplementationOnce(failing).mockImplementationOnce(failing);
+      const engine = makeEngine();
+      const first = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+      const second = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: second.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "failed" });
+      const third = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: third.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "completed" });
+      expect(exploreRun.mock.calls.at(-1)?.[0].history).toEqual([]);
+      const follow = await engine.sendMessage({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+        text: "And then?",
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: follow.runId, timeoutMs: 5_000 });
+      const history = exploreRun.mock.calls.at(-1)?.[0].history ?? [];
+      expect(history.filter((message) => message.role === "user")).toHaveLength(1);
+      expect(JSON.stringify(history)).not.toContain("partial work");
+    });
+
+    it("keeps a replaced started attempt out even when a retry in between never started", async () => {
+      exploreRun.mockImplementationOnce(async (options) => {
+        await announce(options, [[text("a1", "assistant", "partial work"), "assistant"]]);
+        throw new ExploreAgentError("upstream 500", {
+          cause: new Error("upstream 500"),
+          usage: { inputTokens: 1, outputTokens: 1, costUsd: 0 },
+          helperRuns: [],
+        });
+      });
+      const engine = makeEngine();
+      const first = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+      expect(store.runs.get(first.runId)?.retriedAt).toBeUndefined();
+      // The first retry fails while preparing the checkout, before the agent starts.
+      materialize.mockRejectedValueOnce(new Error("disk full"));
+      const second = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: second.runId, timeoutMs: 5_000 });
+      expect(store.runs.get(second.runId)).toMatchObject({ status: "failed", startedAt: null });
+      expect(store.runs.get(first.runId)?.retriedAt).toBeInstanceOf(Date);
+      const third = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await expect(
+        engine.waitForRun({ ownerId: OWNER, runId: third.runId, timeoutMs: 5_000 }),
+      ).resolves.toMatchObject({ status: "completed" });
+      expect(exploreRun.mock.calls.at(-1)?.[0].history).toEqual([]);
+    });
+
+    it("keeps an answered stopped run in the history when the same question is sent again", async () => {
+      const engine = makeEngine();
+      const first = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+      const row = store.runs.get(first.runId);
+      if (!row) throw new Error("no run");
+      Object.assign(row, { status: "stopped" });
+      // Not a retry: a follow-up that happens to repeat the question.
+      const again = await engine.sendMessage({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+        text: "How do I pad?",
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: again.runId, timeoutMs: 5_000 });
+      const third = await engine.sendMessage({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+        text: "And trim?",
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: third.runId, timeoutMs: 5_000 });
+      const history = exploreRun.mock.calls.at(-1)?.[0].history ?? [];
+      expect(history.filter((message) => message.role === "user")).toHaveLength(2);
+      expect(store.runs.get(first.runId)?.retriedAt).toBeUndefined();
+    });
+
+    it("marks the attempt only together with its replacement, and leaves it out of that run's history", async () => {
+      exploreRun.mockImplementationOnce(async (options) => {
+        await announce(options, [[text("a1", "assistant", "partial work"), "assistant"]]);
+        throw new ExploreAgentError("upstream 500", {
+          cause: new Error("upstream 500"),
+          usage: { inputTokens: 1, outputTokens: 1, costUsd: 0 },
+          helperRuns: [],
+        });
+      });
+      const engine = makeEngine();
+      const first = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: first.runId, timeoutMs: 5_000 });
+      // The replacement's row can't be written: the attempt is not marked, so a
+      // follow-up still sees its question and work.
+      const createRun = store.createRun.bind(store);
+      store.createRun = async () => {
+        throw new Error("database down");
+      };
+      await expect(
+        engine.retryConversation({ ownerId: OWNER, conversationId: first.conversationId }),
+      ).rejects.toThrow("database down");
+      store.createRun = createRun;
+      expect(store.runs.get(first.runId)?.retriedAt).toBeUndefined();
+      // The retry's own history leaves the attempt out in the query (before the cap).
+      const listHistoryTurns = store.listHistoryTurns.bind(store);
+      const asked: Array<{ excludeRunId?: string } | undefined> = [];
+      store.listHistoryTurns = async (conversationId, options) => {
+        asked.push(options);
+        return listHistoryTurns(conversationId, options);
+      };
+      const retried = await engine.retryConversation({
+        ownerId: OWNER,
+        conversationId: first.conversationId,
+      });
+      await engine.waitForRun({ ownerId: OWNER, runId: retried.runId, timeoutMs: 5_000 });
+      store.listHistoryTurns = listHistoryTurns;
+      expect(asked[0]).toEqual({ excludeRunId: first.runId });
+      expect(exploreRun.mock.calls.at(-1)?.[0].history).toEqual([]);
+      expect(store.runs.get(first.runId)?.retriedAt).toBeInstanceOf(Date);
+    });
+
+    it("refuses a stopped run that kept a partial answer", async () => {
+      const engine = makeEngine();
+      const done = await open(engine);
+      await engine.waitForRun({ ownerId: OWNER, runId: done.runId, timeoutMs: 5_000 });
+      const row = store.runs.get(done.runId);
+      if (!row) throw new Error("no run");
+      Object.assign(row, { status: "stopped", answer: "Partly: use padStart." });
+      await expect(
+        engine.retryConversation({ ownerId: OWNER, conversationId: done.conversationId }),
+      ).rejects.toMatchObject({ code: "NOT_RETRYABLE" });
+    });
+
+    it("refuses a completed run, a live run, a retarget once resolved, and others' conversations", async () => {
       const engine = makeEngine();
       const done = await open(engine);
       await engine.waitForRun({ ownerId: OWNER, runId: done.runId, timeoutMs: 5_000 });

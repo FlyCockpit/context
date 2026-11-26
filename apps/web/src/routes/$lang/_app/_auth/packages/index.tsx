@@ -12,16 +12,7 @@ import { useDebounce } from "@cockpit-context/ui/hooks/use-async-search";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import {
-  ArrowRight,
-  Inbox,
-  KeyRound,
-  MoreVertical,
-  Package,
-  Pencil,
-  Plus,
-  Trash,
-} from "lucide-react";
+import { Inbox, KeyRound, MoreVertical, Package, Pencil, Plus, Trash } from "lucide-react";
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -35,6 +26,7 @@ import {
   DeletePackageDialog,
   EditPackageSheet,
 } from "@/components/packages/package-overlays";
+import { PendingProposalsBanner } from "@/components/packages/pending-proposals-banner";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
 import { SegmentedControl } from "@/components/segmented-control";
@@ -107,7 +99,7 @@ function PackagesPage() {
         }
       />
 
-      <PendingBanner lang={lang} />
+      <PendingProposalsBanner lang={lang} />
 
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <SegmentedControl
@@ -238,42 +230,6 @@ function ProposalsLink({ lang }: { lang: string }) {
       {t("dashboard:proposals.title")}
       <NavBadge count={pending} />
     </Link>
-  );
-}
-
-/** The pending-proposals banner: agents asked for packages and are waiting on you. */
-function PendingBanner({ lang }: { lang: string }) {
-  const { t } = useTranslation(["dashboard"]);
-  const pending = useHomeStatus().data?.pendingProposals ?? 0;
-  if (pending === 0) return null;
-  return (
-    <div
-      role="status"
-      className="flex min-w-0 flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <div className="flex min-w-0 items-start gap-3">
-        <Inbox
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-300"
-        />
-        <div className="min-w-0 space-y-0.5">
-          <p className="text-sm font-medium">
-            {t("dashboard:packages.pendingBanner.title", { count: pending })}
-          </p>
-          <p className="text-sm text-pretty text-muted-foreground">
-            {t("dashboard:packages.pendingBanner.body")}
-          </p>
-        </div>
-      </div>
-      <Link
-        to="/$lang/packages/proposals"
-        params={{ lang }}
-        className={cn(buttonVariants({ variant: "outline", size: "touch" }), "shrink-0 gap-2")}
-      >
-        {t("dashboard:packages.pendingBanner.action")}
-        <ArrowRight aria-hidden="true" className="size-4" />
-      </Link>
-    </div>
   );
 }
 

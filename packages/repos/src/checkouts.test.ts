@@ -235,7 +235,10 @@ describe("ensureCheckout", () => {
       timeout,
     );
     const [row] = fake.checkouts.values();
-    expect(row).toMatchObject({ status: "FAILED", lastError: "git fetch timed out after 120s." });
+    expect(row).toMatchObject({
+      status: "FAILED",
+      lastError: "GIT_TIMEOUT: git fetch timed out after 120s.",
+    });
   });
 
   it("refuses a non-SHA", async () => {

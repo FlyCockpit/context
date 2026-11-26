@@ -143,6 +143,7 @@ describe("prismaRunStore", () => {
         kind: "MAIN",
         status: { notIn: ["QUEUED", "RUNNING"] },
         startedAt: { not: null },
+        retriedAt: null,
       },
     });
     expect(args.orderBy).toEqual([
@@ -394,12 +395,25 @@ describe("prismaRunStore: background resolution and the stale sweep", () => {
 
   it("reads the latest main run's start and a run's question", async () => {
     const startedAt = new Date("2026-11-23T00:00:00Z");
-    db.agentRun.findFirst.mockResolvedValue({ id: "r1", status: "FAILED", startedAt });
+    db.agentRun.findFirst.mockResolvedValue({
+      id: "r1",
+      status: "FAILED",
+      startedAt,
+      answer: null,
+    });
     await expect(prismaRunStore.latestMainRun("c1")).resolves.toEqual({
       id: "r1",
       status: "failed",
       startedAt,
+      answered: false,
     });
+    db.agentRun.findFirst.mockResolvedValue({
+      id: "r1",
+      status: "STOPPED",
+      startedAt,
+      answer: "partial",
+    });
+    await expect(prismaRunStore.latestMainRun("c1")).resolves.toMatchObject({ answered: true });
     db.runTurn.findFirst.mockResolvedValue({
       parts: [
         { type: "text", content: "How " },
@@ -416,15 +430,57 @@ describe("prismaRunStore: background resolution and the stale sweep", () => {
     await expect(prismaRunStore.loadRunQuestion("r2")).resolves.toBeNull();
   });
 
-  it("leaves runs that never reached the agent out of the history", async () => {
+  it("creates a retry's run and marks the run it replaces in one transaction", async () => {
+    db.agentRun.create.mockReturnValue("create-op" as never);
+    db.agentRun.update.mockReturnValue("mark-op" as never);
+    db.$transaction.mockResolvedValue([{ id: "r2" }, { id: "r1" }]);
+    const base = {
+      ownerId: "u1",
+      conversationId: "c1",
+      parentRunId: null,
+      checkoutId: null,
+      kind: "main" as const,
+      trigger: "web_message" as const,
+      status: "queued" as const,
+      model: "m",
+      focus: null,
+      startedAt: null,
+    };
+    await expect(prismaRunStore.createRun({ ...base, replacesRunId: "r1" })).resolves.toEqual({
+      id: "r2",
+    });
+    expect(db.$transaction).toHaveBeenCalledWith(["create-op", "mark-op"]);
+    expect(db.agentRun.update.mock.calls.at(-1)?.[0]).toMatchObject({
+      where: { id: "r1" },
+      data: { retriedAt: expect.any(Date) },
+    });
+    // An ordinary run marks nothing.
+    db.agentRun.create.mockResolvedValue({ id: "r3" });
+    db.agentRun.update.mockClear();
+    await expect(prismaRunStore.createRun(base)).resolves.toEqual({ id: "r3" });
+    expect(db.agentRun.update).not.toHaveBeenCalled();
+  });
+
+  it("leaves out the run a retry is about to replace, in the query", async () => {
+    db.runTurn.findMany.mockResolvedValue([]);
+    await prismaRunStore.listHistoryTurns("c1", { excludeRunId: "r9" });
+    expect(db.runTurn.findMany.mock.calls.at(-1)?.[0].where.AgentRun).toMatchObject({
+      retriedAt: null,
+      id: { not: "r9" },
+    });
+  });
+
+  it("leaves runs that never reached the agent, and attempts a retry replaced, out of the history", async () => {
     db.runTurn.findMany.mockResolvedValue([]);
     await prismaRunStore.listHistoryTurns("c1");
+    // In the query itself, so a replaced attempt never takes room under the cap.
     expect(db.runTurn.findMany.mock.calls[0]?.[0].where).toEqual({
       AgentRun: {
         conversationId: "c1",
         kind: "MAIN",
         status: { notIn: ["QUEUED", "RUNNING"] },
         startedAt: { not: null },
+        retriedAt: null,
       },
     });
   });

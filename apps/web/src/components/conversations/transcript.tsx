@@ -68,7 +68,7 @@ function PulseDot({ className }: { className?: string }) {
 }
 
 /**
- * Asking a question again whose run never reached the agent
+ * Asking a question again whose run ended without an answer
  * (`conversations.retry`): offered on that run's ended note.
  */
 export interface RetryControls {

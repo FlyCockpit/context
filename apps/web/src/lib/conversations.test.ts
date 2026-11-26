@@ -1064,7 +1064,29 @@ describe("web conversations that resolve inside their first run", () => {
     ]);
   });
 
-  it("reads the failure from saved rows, and never offers a retry once the agent started", () => {
+  it("labels the same question after a run that failed once the agent started as asked again", () => {
+    const question = (id: string) =>
+      detailRun({
+        id,
+        ...(id === "run-1"
+          ? { status: "failed" as const, answer: null, stopReason: "model-error" }
+          : {}),
+        turns: [
+          { seq: 0, role: "user", parts: [text("How do I pad?")], steering: false, createdAt: NOW },
+        ],
+      });
+    const questions = buildTranscript(
+      fold([snapshot(detail([question("run-1"), question("run-2")]))]),
+    ).filter((block) => block.kind === "question");
+    expect(
+      questions.map((block) => block.kind === "question" && [block.followUp, block.retry]),
+    ).toEqual([
+      [false, false],
+      [true, true],
+    ]);
+  });
+
+  it("reads the failure from saved rows, and offers a retry for any run that ended unanswered", () => {
     const failed = detailRun({
       status: "failed",
       stopReason: "resolve-failed",
@@ -1075,8 +1097,19 @@ describe("web conversations that resolve inside their first run", () => {
     const state = fold([snapshot(unresolved([failed]))]);
     expect(state.runs[0]).toMatchObject({ started: false, failure: { reason: "GIT_FAILED" } });
     expect(retryableRun(state)?.id).toBe("run-1");
-    // The agent ran (startedAt set), or the package is gone: no retry.
-    expect(retryableRun(fold([snapshot(detail([detailRun({ status: "failed" })]))]))).toBeNull();
+    // The agent ran (startedAt set) and the run still ended unanswered: Ask again.
+    for (const status of ["failed", "stopped", "interrupted"] as const) {
+      expect(
+        retryableRun(fold([snapshot(detail([detailRun({ status, answer: null })]))]))?.id,
+      ).toBe("run-1");
+    }
+    // A stopped run that kept a partial answer is not asked again.
+    expect(
+      retryableRun(
+        fold([snapshot(detail([detailRun({ status: "stopped", answer: "Partly: padStart." })]))]),
+      ),
+    ).toBeNull();
+    // The package is gone: no retry.
     expect(
       retryableRun(fold([snapshot(unresolved([failed]))].map((event) => event))),
     ).not.toBeNull();

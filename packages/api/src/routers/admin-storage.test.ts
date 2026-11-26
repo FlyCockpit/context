@@ -41,6 +41,7 @@ function repositoryRow(visibility: "PUBLIC" | "PRIVATE") {
     remoteUrl: visibility === "PUBLIC" ? "https://github.com/a/b" : "git@git.example.com:me/x",
     visibility,
     status: "READY",
+    lastError: null as string | null,
     diskBytes: 100n,
     lastUsedAt: NOW,
     lastFetchedAt: NOW,
@@ -106,6 +107,7 @@ describe("adminStorageRouter", () => {
         "diskBytes",
         "id",
         "isSnapshot",
+        "lastError",
         "lastFetchedAt",
         "lastUsedAt",
         "remoteUrl",
@@ -116,6 +118,23 @@ describe("adminStorageRouter", () => {
     expect(select.Owner).toEqual({ select: { email: true } });
     expect(select.Checkouts.select).not.toHaveProperty("summary");
     expect(select.Checkouts.select).not.toHaveProperty("repoMap");
+  });
+
+  it("explains a failed clone with a fixed reason, never the stored git output", async () => {
+    const failed = {
+      ...repositoryRow("PRIVATE"),
+      status: "FAILED",
+      lastError:
+        "GIT_FAILED: git clone failed: git@git.example.com: Permission denied (publickey).",
+    };
+    db.repository.findMany.mockResolvedValue([repositoryRow("PUBLIC"), failed]);
+    const result = await client().list({});
+    expect(result.items.map((item) => [item.status, item.failureReason])).toEqual([
+      ["ready", null],
+      ["failed", "auth"],
+    ]);
+    expect(JSON.stringify(result)).not.toContain("Permission denied");
+    expect(result.items[1]).not.toHaveProperty("lastError");
   });
 
   it("deletes a checkout or a clone, forcing only when asked", async () => {

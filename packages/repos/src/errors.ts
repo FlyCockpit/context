@@ -119,7 +119,81 @@ export function isRepoError(error: unknown): error is RepoError {
 /** Longest error text kept on a row (`Repository.lastError`, `Checkout.lastError`). */
 export const MAX_LAST_ERROR_LENGTH = 2_000;
 
+/** `lastError` of a clone or checkout that a restart cut off. */
+export const INTERRUPTED_BY_RESTART = "Interrupted by a server restart; retry to continue.";
+
+/**
+ * The text kept in `lastError`. A RepoError leads with its code
+ * (`GIT_FAILED: git clone failed: …`) so {@link repositoryFailureReason} can
+ * classify the row without parsing English.
+ */
 export function lastErrorText(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  const text = isRepoError(error) ? `${error.code}: ${message}` : message;
   return text.length > MAX_LAST_ERROR_LENGTH ? `${text.slice(0, MAX_LAST_ERROR_LENGTH)}…` : text;
+}
+
+/**
+ * Why a clone or fetch failed, as a fixed reason the web can explain with a
+ * next step. Never the stored text itself: that is operator detail and may
+ * hold git's own output (docs/access-matrix.md).
+ */
+export type RepositoryFailureReason =
+  | "auth"
+  | "notFound"
+  | "unreachable"
+  | "hostKey"
+  | "timeout"
+  | "interrupted"
+  | "invalidUrl"
+  | "privateAddress"
+  | "sshKey"
+  | "snapshot"
+  | "other";
+
+const REASON_BY_CODE: Partial<Record<RepoErrorCode, RepositoryFailureReason>> = {
+  INVALID_REMOTE_URL: "invalidUrl",
+  PRIVATE_ADDRESS: "privateAddress",
+  HOST_UNRESOLVABLE: "unreachable",
+  HOST_KEY_UNCONFIRMED: "hostKey",
+  SSH_KEY_REQUIRED: "sshKey",
+  SSH_KEY_NOT_FOUND: "sshKey",
+  SSH_KEY_INVALID: "sshKey",
+  SSH_KEY_UNSUPPORTED: "sshKey",
+  SSH_KEY_UNREADABLE: "sshKey",
+  ENCRYPTION_UNAVAILABLE: "sshKey",
+  GIT_TIMEOUT: "timeout",
+};
+
+/** git's own words for the common remote failures (LANG=C), most specific first. */
+const GIT_OUTPUT_REASONS: ReadonlyArray<[RegExp, RepositoryFailureReason]> = [
+  [/host key verification failed/i, "hostKey"],
+  [
+    /permission denied \(publickey|authentication failed|could not read (username|password)|terminal prompts disabled|access denied|returned error: 40[13]\b/i,
+    "auth",
+  ],
+  [
+    /repository not found|does not appear to be a git repository|returned error: 404\b|not found/i,
+    "notFound",
+  ],
+  [
+    /could not resolve host|connection refused|connection timed out|network is unreachable|no route to host|could not connect|failed to connect|connection reset/i,
+    "unreachable",
+  ],
+  [/timed out after/i, "timeout"],
+];
+
+const CODE_PREFIX = /^([A-Z][A-Z_]+): /;
+
+export function repositoryFailureReason(lastError: string | null): RepositoryFailureReason {
+  if (!lastError) return "other";
+  if (lastError === INTERRUPTED_BY_RESTART) return "interrupted";
+  if (lastError.startsWith("Snapshot operation failed.")) return "snapshot";
+  const code = CODE_PREFIX.exec(lastError)?.[1] as RepoErrorCode | undefined;
+  const byCode = code ? REASON_BY_CODE[code] : undefined;
+  if (byCode) return byCode;
+  for (const [pattern, reason] of GIT_OUTPUT_REASONS) {
+    if (pattern.test(lastError)) return reason;
+  }
+  return "other";
 }

@@ -117,7 +117,7 @@ Each toast gets its own id (`packages/ui/src/components/sileo.tsx`), so two toas
 
 ## Settings that are on or off
 
-A setting that is on or off shows a `Switch` named by the setting's title, with visible "On" / "Off" text beside it in a 44px label, never only a button verb such as a red "Disable" (`components/admin/security-policy-card.tsx`). A prerequisite (set up your own 2FA before requiring it for others) is not an error: it is an info note (`role="note"`, `bg-state-info-bg`, Info icon in `text-state-info`) with a real link button to the place that fixes it, and the switch it blocks is disabled with the reason beside it (`aria-describedby`). Turning a policy off is never blocked.
+A setting that is on or off shows a `Switch` named by the setting's title, with visible "On" / "Off" text beside it in a 44px label, never only a button verb such as a red "Disable" (`components/setting-switch-row.tsx`: the 2FA policies, sign-up and email alerts). A prerequisite (set up your own 2FA before requiring it for others) is not an error: it is an info note (`role="note"`, `bg-state-info-bg`, Info icon in `text-state-info`) with a real link button to the place that fixes it, and the switch it blocks is disabled with the reason beside it (`aria-describedby`). Turning a policy off is never blocked.
 
 ## Smaller rules
 

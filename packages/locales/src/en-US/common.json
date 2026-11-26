@@ -89,5 +89,10 @@
         }
       }
     }
+  },
+  "switch": {
+    "on": "On",
+    "off": "Off",
+    "updating": "Updating…"
   }
 }

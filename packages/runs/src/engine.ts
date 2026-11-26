@@ -211,9 +211,10 @@ export interface RunEngine {
    */
   openConversation(input: Omit<StartConversationInput, "signal">): Promise<StartedRun>;
   /**
-   * Ask the latest main run's question again when that run never reached the
-   * agent (it failed, was stopped or was interrupted while resolving,
-   * preparing or queued). While the conversation is unresolved, `version` or
+   * Ask the latest main run's question again when that run ended without
+   * completing: it failed, was stopped or was interrupted, before or after it
+   * reached the agent. The ended attempt stays in the transcript but not in
+   * the new run's history. While the conversation is unresolved, `version` or
    * `ref` (at most one) may replace the target, e.g. a nearest tag.
    */
   retryConversation(input: {
@@ -1169,6 +1170,8 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
      * written or read again.
      */
     created?: { pkg: PackageForRun };
+    /** A retry: the ended run whose question this run asks again (`NewRun.replacesRunId`). */
+    replacesRunId?: string;
   };
 
   async function launchMainRun(input: MainRunInput): Promise<StartedRun> {
@@ -1208,6 +1211,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
       model: models.model,
       focus: null,
       startedAt: null,
+      ...(input.replacesRunId ? { replacesRunId: input.replacesRunId } : {}),
     });
     const writer = new TurnWriter(
       runId,
@@ -2257,10 +2261,10 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           "The agent is still working on this conversation; steer it instead.",
         );
       }
-      if (!latest || latest.status === "completed" || latest.startedAt !== null) {
+      if (!latest || latest.status === "completed" || latest.answered) {
         throw new RunEngineError(
           "NOT_RETRYABLE",
-          "Only a question that never reached the agent can be asked again; send a follow-up instead.",
+          "Only a question that ended without an answer can be asked again; send a follow-up instead.",
         );
       }
       const retarget = input.version != null || input.ref != null;
@@ -2285,9 +2289,13 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           await store.updateConversation(conversation.id, target);
           Object.assign(conversation, target);
         }
-        // The failed attempt stays in the transcript but not in the history
-        // (no run that never reached the agent is): it is asked again now.
-        const history = historyFromTurns(await store.listHistoryTurns(conversation.id));
+        // The ended attempt stays in the transcript but not in the history:
+        // left out of this run's (in the query, before the cap), and marked
+        // `retriedAt` in the same transaction that creates its replacement,
+        // so it is out of every later one's too, and only once replaced.
+        const history = historyFromTurns(
+          await store.listHistoryTurns(conversation.id, { excludeRunId: latest.id }),
+        );
         const resultStore = new MemoryResultStore();
         await pruneAgentMessages(history, resultStore, { lastDispatchAt: 0 });
         const started = await launchMainRun({
@@ -2296,6 +2304,7 @@ export function createRunEngine(deps: RunEngineDeps): RunEngine {
           text,
           history,
           resultStore,
+          replacesRunId: latest.id,
         });
         if (retarget) {
           // An open view shows the new target (its header, and what Try again asks about).

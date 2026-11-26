@@ -62,6 +62,7 @@ import {
   EditPackageSheet,
   UpdateSnapshotDialog,
 } from "@/components/packages/package-overlays";
+import { RepositoryFailureNote } from "@/components/packages/repository-failure-note";
 import { BACK_LINK_CLASS, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
 import { RunStatusPill } from "@/components/run-status-pill";
@@ -425,6 +426,12 @@ function RepositoryStatus({ pkg }: { pkg: PackageDetail }) {
         </span>
       ) : null}
       {pkg.isSnapshot ? <SnapshotSyncNote pkg={pkg} /> : null}
+      {repository.status === "failed" &&
+      !snapshotBusy(pkg) &&
+      repository.snapshotSync.status !== "failed" ? (
+        // A snapshot's own sync failure is explained by SnapshotSyncNote.
+        <RepositoryFailureNote reason={repository.failureReason} audience="owner" />
+      ) : null}
     </span>
   );
 }
@@ -455,7 +462,8 @@ function SnapshotSyncNote({ pkg }: { pkg: PackageDetail }) {
   return (
     <span role="alert" className="block w-full text-xs text-destructive">
       {t("dashboard:packages.snapshot.syncFailed")}
-      {key && i18n.exists(key) ? ` ${t(key)}` : ""}
+      {key && i18n.exists(key) ? ` ${t(key)}` : ""}{" "}
+      {t("dashboard:packages.snapshot.syncFailedNext")}
     </span>
   );
 }

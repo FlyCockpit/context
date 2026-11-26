@@ -1,4 +1,5 @@
 import enAdmin from "@cockpit-context/locales/src/en-US/admin.json";
+import enCommon from "@cockpit-context/locales/src/en-US/common.json";
 import { createInstance } from "i18next";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -30,7 +31,7 @@ const i18n = createInstance();
 beforeAll(async () => {
   await i18n.init({
     lng: "en-US",
-    resources: { "en-US": { admin: enAdmin } },
+    resources: { "en-US": { admin: enAdmin, common: enCommon } },
     interpolation: { escapeValue: false },
     react: { useSuspense: false },
   });
@@ -61,7 +62,7 @@ const attrs = (html: string) => html.replace(/ class="[^"]*"/g, "");
 const rows = (html: string) =>
   [
     ...html.matchAll(
-      /data-slot="settings-policy" data-state="(on|off)"([\s\S]*?)(?=data-slot="settings-policy"|$)/g,
+      /data-slot="setting-switch" data-state="(on|off)"([\s\S]*?)(?=data-slot="setting-switch"|$)/g,
     ),
   ].map(([, state = "", body = ""]) => ({ state, body }));
 
@@ -119,6 +120,6 @@ describe("SecurityPolicyCard", () => {
 
   it("says it is updating while a change is in flight", () => {
     const html = render(true, true);
-    expect(html).toContain(enAdmin.settings.updating);
+    expect(html).toContain(enCommon.switch.updating);
   });
 });

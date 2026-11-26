@@ -34,7 +34,7 @@
       "undo": "Undo",
       "connect": {
         "title": "Connect your coding agent",
-        "body": "Add Cockpit Context to Claude Code or Codex. Sign in with OAuth without copying a token.",
+        "body": "Add the cockpit-context server to Claude Code or Codex. It signs in with OAuth, so there is no token to copy.",
         "copy": "Copy the Claude Code command",
         "authenticate": "Then run /mcp in Claude Code, pick cockpit-context and choose Authenticate.",
         "token": "Use an API token instead",
@@ -120,7 +120,8 @@
       "autoApproveShort": "Auto-approve proposals",
       "autoApproveHint": "Its proposals become packages without waiting for you. Packages that need an SSH key always wait.",
       "saved": "Saved",
-      "saveFailed": "Couldn’t save that change. Try again."
+      "saveFailed": "Couldn’t save that change. Try again.",
+      "rowLabel": "{{flag}}: {{name}}"
     },
     "secret": {
       "title": "Copy this token now",
@@ -188,7 +189,7 @@
     },
     "connections": {
       "title": "OAuth connections",
-      "description": "Agents you approved on the Cockpit Context consent page. Each acts as you, within its flags.",
+      "description": "Agents you approved on the Cockpit Context consent page. Each acts as you and may only do what its switches allow.",
       "loadFailed": "Couldn’t load your connections.",
       "clientId": "Client ID",
       "revokeLabel": "Revoke {{name}}",
@@ -197,18 +198,21 @@
         "body": "Follow the steps above. Once you approve an agent, it appears here."
       },
       "guide": {
-        "title": "Connect Claude Code with OAuth",
-        "description": "No token to copy: Claude Code signs in through your browser.",
-        "add": "Add Cockpit Context in a terminal",
-        "copyCommand": "Copy command",
-        "authenticate": "Authenticate in Claude Code",
-        "authenticateBody": "Run /mcp, pick Cockpit Context and choose Authenticate. Your browser opens Cockpit Context.",
+        "title": "Connect your coding agent with OAuth",
+        "description": "No token to copy: Claude Code and Codex sign in through your browser.",
+        "add": "Add cockpit-context in a terminal",
+        "copyCommand": "Copy the Claude Code command",
+        "authenticate": "Sign in from your agent",
+        "authenticateBody": "In Claude Code, run /mcp, pick cockpit-context and choose Authenticate. In Codex, the second command (codex mcp login cockpit-context) does this. Your browser opens Cockpit Context.",
         "approve": "Sign in and approve",
-        "approveBody": "Check the agent’s name and where your browser returns, choose its flags, then allow it.",
+        "approveBody": "Check the agent’s name and where your browser returns, choose what it may do (propose packages, auto-approve its proposals), then allow it.",
         "otherClients": "Other MCP clients",
         "copyUrl": "Copy MCP URL",
         "otherClientsBody": "Use this URL in any client that supports MCP authorization.",
-        "useToken": "Clients that can’t sign in can use a token."
+        "useToken": "Clients that can’t sign in can use a token.",
+        "claudeCode": "Claude Code",
+        "codex": "Codex",
+        "copyCodex": "Copy Codex commands"
       },
       "revoke": {
         "title": "Revoke this connection?",
@@ -413,8 +417,9 @@
     "pendingBanner": {
       "title_one": "An agent proposed {{count}} package",
       "title_other": "Agents proposed {{count}} packages",
-      "body": "They can’t ask about it until you approve it.",
-      "action": "Review proposals"
+      "action": "Review proposals",
+      "body_one": "The agent can’t ask about it until you approve it.",
+      "body_other": "The agents can’t ask about them until you approve them."
     },
     "form": {
       "ecosystem": "Ecosystem",
@@ -551,7 +556,21 @@
       "refreshing": "Updating the snapshot with your key…",
       "syncFailed": "The last snapshot update didn’t finish.",
       "started": "Snapshot update started. This page shows when it’s done.",
-      "runningHint": "This runs on the server: you can leave this page. Your key is held in memory only until it finishes."
+      "runningHint": "This runs on the server: you can leave this page. Your key is held in memory only until it finishes.",
+      "syncFailedNext": "Choose Update with SSH key to try again."
+    },
+    "repositoryFailure": {
+      "auth": "The git host refused access. If the repository is private, edit the package to choose an SSH key whose public half is a deploy key on the host; the next question clones it again.",
+      "notFound": "The git host couldn’t find that repository. Edit the package to fix its git URL (a private repository also looks missing without access); the next question clones it again.",
+      "unreachable": "This server couldn’t reach the git host. Check the host name in the git URL, or try again later with Fetch latest.",
+      "hostKey": "This git host’s SSH key isn’t confirmed. Confirm it in Access → Known hosts, then choose Fetch latest.",
+      "timeout": "The download took too long. Try again later with Fetch latest; if it keeps happening, ask the admin.",
+      "interrupted": "The server restarted during the download. Choose Fetch latest to start again.",
+      "invalidUrl": "That git URL isn’t supported. Edit the package to use an https:// or SSH URL; the next question clones it again.",
+      "privateAddress": "The git URL points at a private or local address, which this server won’t reach. Edit the package to use a public host; the next question clones it again.",
+      "sshKey": "This package’s SSH key is missing or can’t be used. Edit the package to choose another key (add one in Access → SSH keys); the next question clones it again.",
+      "snapshot": "The one-time SSH clone didn’t finish. Update the package with your SSH key to try again.",
+      "other": "Something went wrong during the download. Choose Fetch latest to try again; if it keeps failing, ask the admin to check the server logs."
     }
   },
   "checkouts": {
@@ -839,8 +858,8 @@
     },
     "resolvingHint": "A package’s first question clones its repository, which can take a few minutes. You can leave this page: the work goes on, and the answer will be here.",
     "retry": {
-      "action": "Try again",
-      "pending": "Retrying…",
+      "action": "Ask again",
+      "pending": "Asking again…",
       "failed": "Couldn’t ask again. Try again in a moment.",
       "nearestTags": "Tags close to that version. Pick one to ask about it instead:"
     }

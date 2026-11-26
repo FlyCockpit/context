@@ -15,21 +15,21 @@ import { type ConnectionFlags, normalizeFlags } from "@/lib/access";
  * - `variant="form"`: checkboxes with a short explanation each, for the
  *   create-token dialog and the consent page.
  * - `variant="row"`: compact switches for a list row; each change is saved
- *   at once by the caller.
+ *   at once by the caller. `subject` (the token or agent name) goes into each
+ *   switch's accessible name, so a screen reader can tell the rows apart.
  */
 export function FlagSwitches({
   value,
   onChange,
   disabled = false,
-  variant,
   className,
+  ...props
 }: {
   value: ConnectionFlags;
   onChange: (next: ConnectionFlags) => void;
   disabled?: boolean;
-  variant: "form" | "row";
   className?: string;
-}) {
+} & ({ variant: "form" } | { variant: "row"; subject: string })) {
   const { t } = useTranslation(["dashboard"]);
   const baseId = useId();
   const flags = normalizeFlags(value);
@@ -54,7 +54,8 @@ export function FlagSwitches({
     },
   ];
 
-  if (variant === "row") {
+  if (props.variant === "row") {
+    const subject = props.subject;
     return (
       <div className={cn("flex min-w-0 flex-wrap gap-x-5 gap-y-1", className)}>
         {rows.map((row) => {
@@ -65,6 +66,11 @@ export function FlagSwitches({
                 id={id}
                 checked={row.checked}
                 disabled={row.disabled}
+                // The visible label first, then whose flag it is.
+                aria-label={t("dashboard:access.flags.rowLabel", {
+                  flag: row.short,
+                  name: subject,
+                })}
                 onCheckedChange={(checked) => row.set(checked)}
               />
               <Label htmlFor={id} className="text-sm font-normal text-muted-foreground">

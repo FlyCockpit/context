@@ -19,6 +19,7 @@ import {
 } from "@/components/conversations/conversation-row";
 import { GettingStarted } from "@/components/getting-started";
 import { InlineRetry } from "@/components/inline-retry";
+import { PendingProposalsBanner } from "@/components/packages/pending-proposals-banner";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
 import { StatusPill } from "@/components/status-pill";
@@ -77,6 +78,8 @@ function OngoingPage() {
               ) : null}
             </Card>
           ) : null}
+          {/* An agent waiting on an approval is the most urgent thing here. */}
+          <PendingProposalsBanner lang={lang} />
           {/* Renders nothing once every step is done or the user hid it. */}
           <GettingStarted lang={lang} status={status.data} scope={session.user.id} />
           <LiveSection lang={lang} />

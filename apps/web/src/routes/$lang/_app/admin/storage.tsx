@@ -18,6 +18,7 @@ import { DeleteStorageDialog, type StorageDeleteTarget } from "@/components/admi
 import { EmptyState } from "@/components/empty-state";
 import { FillMeter } from "@/components/fill-meter";
 import { LoadMore } from "@/components/load-more";
+import { RepositoryFailureNote } from "@/components/packages/repository-failure-note";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
 import { StatusPill } from "@/components/status-pill";
@@ -336,6 +337,13 @@ function RepositoryRows({
           </StatusPill>
           {repository.isSnapshot ? (
             <StatusPill tone="muted">{t("admin:storage.snapshot")}</StatusPill>
+          ) : null}
+          {repository.status === "failed" ? (
+            <RepositoryFailureNote
+              reason={repository.failureReason}
+              audience="admin"
+              className="mt-1 max-w-56"
+            />
           ) : null}
         </td>
         <td className="px-3 py-2 text-end whitespace-nowrap tabular-nums">

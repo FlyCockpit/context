@@ -48,5 +48,9 @@
     "disabling": "Disabling…",
     "couldNotDisable": "Couldn't disable 2FA. Try again.",
     "disabledSuccess": "Two-factor authentication disabled"
+  },
+  "emailAlerts": {
+    "title": "Email alerts",
+    "description": "Saved as soon as you switch it; no need to press Save."
   }
 }

@@ -591,9 +591,9 @@ export const conversationsRouter = {
     }),
 
   /**
-   * Ask the latest question again when its run never reached the agent
-   * (resolving or preparing failed, or it was stopped or interrupted before
-   * it started). While the conversation is unresolved, a `version` or `ref`
+   * Ask the latest question again when its run ended without completing
+   * (it failed, was stopped or was interrupted, before or after it reached
+   * the agent). While the conversation is unresolved, a `version` or `ref`
    * may replace the target (e.g. a nearest tag). Costs a run point, as `send`.
    */
   retry: protectedProcedure

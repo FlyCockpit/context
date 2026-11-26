@@ -73,9 +73,6 @@
     "force2faAdminPrerequisite": "Para requerir la autenticación de dos factores a otros, primero configúrala en tu propia cuenta.",
     "goToSecurity": "Configurar 2FA",
     "force2faNeedsOwn2fa": "Disponible cuando configures 2FA en tu cuenta.",
-    "stateOn": "Activado",
-    "stateOff": "Desactivado",
-    "updating": "Actualizando…",
     "force2faInternalEnabled": "La autenticación de dos factores ahora es requerida para administradores",
     "force2faInternalDisabled": "La autenticación de dos factores ya no es requerida para administradores",
     "force2faPublicEnabled": "La autenticación de dos factores ahora es requerida para usuarios públicos",
@@ -86,13 +83,9 @@
     "signupOpenTitle": "Registro abierto",
     "signupOpenDescription": "Si está abierto, cualquiera que pueda acceder a este servidor puede crear una cuenta. Si está cerrado, solo entran las personas invitadas.",
     "signupEnvDisabled": "SIGNUP_ENABLED está desactivado en el entorno del servidor, así que el registro permanece cerrado. Cámbialo a true y reinicia el servidor para poder abrir el registro desde aquí.",
-    "signupOpenAction": "Abrir",
-    "signupCloseAction": "Cerrar",
     "signupOpened": "El registro ahora está abierto",
     "signupClosed": "El registro ahora está cerrado",
-    "signupStatusOpen": "Abierto",
-    "signupStatusClosed": "Cerrado",
-    "signupEnvEnabled": "SIGNUP_ENABLED está activado en el entorno del servidor, así que este interruptor decide si el registro está abierto. Desactivar SIGNUP_ENABLED lo cierra sin importar lo que diga este interruptor.",
+    "signupEnvEnabled": "SIGNUP_ENABLED está activado en el entorno del servidor, así que el interruptor de abajo decide si el registro está abierto. Desactivar SIGNUP_ENABLED lo cierra sin importar lo que diga el interruptor.",
     "runtime": {
       "loadFailed": "No se pudo cargar la configuración del servidor.",
       "servicesTitle": "Modelo, correo y respaldos",
@@ -206,7 +199,8 @@
         "maxLiveStreamsPerUser": "Vistas en vivo de ejecuciones a la vez, por persona",
         "maxPendingProposalsPerUser": "Propuestas de dependencias pendientes por persona"
       }
-    }
+    },
+    "signupEnvOffReason": "Desactivado por SIGNUP_ENABLED."
   },
   "setupBanner": {
     "title": "Este servidor no tiene administrador",
@@ -376,7 +370,20 @@
     },
     "snapshot": "Instantánea",
     "snapshotsOverCap": "El almacenamiento supera el límite. La limpieza automática conserva las instantáneas; elimínalas manualmente o aumenta el límite si la limpieza no libera suficiente espacio.",
-    "snapshotDeleteWarning": "Esta instantánea no se puede restaurar sin la llave SSH de su propietario."
+    "snapshotDeleteWarning": "Esta instantánea no se puede restaurar sin la llave SSH de su propietario.",
+    "repositoryFailure": {
+      "auth": "El host de git negó el acceso. El dueño de un repositorio privado necesita una clave de despliegue SSH válida en el paquete.",
+      "notFound": "El host de git no encontró el repositorio. El dueño de un paquete debe revisar su URL de git.",
+      "unreachable": "Este servidor no pudo conectarse al host de git. Revisa el DNS y la red de salida del servidor.",
+      "hostKey": "La clave SSH del host de git no está confirmada. El dueño del paquete la confirma en Acceso → Hosts conocidos.",
+      "timeout": "La descarga se quedó sin tiempo. Un repositorio muy grande puede necesitar un tiempo límite de git más largo.",
+      "interrupted": "Un reinicio del servidor interrumpió la descarga. La siguiente pregunta o actualización la inicia de nuevo.",
+      "invalidUrl": "La URL de git no es compatible. El dueño de un paquete debe cambiarla.",
+      "privateAddress": "La URL de git apunta a una dirección privada o local, que este servidor rechaza.",
+      "sshKey": "La clave SSH del paquete falta o no se puede leer. Su dueño debe elegir otra clave.",
+      "snapshot": "La clonación SSH única no terminó. Su dueño actualiza el paquete con su clave para reintentar.",
+      "other": "La descarga falló. El registro del servidor tiene el mensaje de git."
+    }
   },
   "jobs": {
     "title": "Tareas",

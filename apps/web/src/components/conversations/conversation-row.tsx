@@ -67,10 +67,16 @@ export function ConversationRow({
         />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="truncate text-sm font-medium">{item.title}</span>
+        {/* Two lines before cutting, so similar questions stay apart on a phone. */}
+        <span
+          data-slot="conversation-title"
+          className="line-clamp-2 text-sm font-medium text-pretty [overflow-wrap:anywhere]"
+        >
+          {item.title}
+        </span>
         <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {run ? <RunStatusPill status={run.status} /> : null}
-          <span className="min-w-0 truncate font-mono">
+          <span className="min-w-0 font-mono [overflow-wrap:anywhere]">
             {item.packageIdentifier}
             {version ? `@${version}` : ""}
           </span>

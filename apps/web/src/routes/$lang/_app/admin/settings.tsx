@@ -3,7 +3,6 @@ import {
   type ForceTwoFactorSettingKey,
   isForcedTwoFactorEnabled,
 } from "@cockpit-context/auth/two-factor-policy";
-import { Button } from "@cockpit-context/ui/components/button";
 import {
   Card,
   CardContent,
@@ -24,6 +23,7 @@ import { SecurityPolicyCard } from "@/components/admin/security-policy-card";
 import { InlineRetry } from "@/components/inline-retry";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { QueryBoundary } from "@/components/query-boundary";
+import { SettingSwitchRow } from "@/components/setting-switch-row";
 import { StatusPill } from "@/components/status-pill";
 import { formatSeconds, type RuntimeConfig } from "@/lib/admin";
 import { orpc } from "@/utils/orpc";
@@ -166,7 +166,7 @@ function SignupCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <UserPlus className="size-5" />
+          <UserPlus className="size-5" aria-hidden="true" />
           {t("settings.signupTitle")}
         </CardTitle>
         <CardDescription>{t("settings.signupDescription")}</CardDescription>
@@ -175,31 +175,15 @@ function SignupCard({
         <p className="max-w-prose text-sm text-muted-foreground">
           {envEnabled ? t("settings.signupEnvEnabled") : t("settings.signupEnvDisabled")}
         </p>
-        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-          <div className="space-y-1">
-            <p className="font-medium">
-              {t("settings.signupOpenTitle")}
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                {open ? t("settings.signupStatusOpen") : t("settings.signupStatusClosed")}
-              </span>
-            </p>
-            <p className="max-w-prose text-sm text-muted-foreground">
-              {t("settings.signupOpenDescription")}
-            </p>
-          </div>
-          <Button
-            variant={open ? "destructive" : "default"}
-            size="touch"
-            disabled={!envEnabled || isUpdating}
-            onClick={() => onToggle(open ? "false" : "true")}
-          >
-            {isUpdating
-              ? t("settings.updating")
-              : open
-                ? t("settings.signupCloseAction")
-                : t("settings.signupOpenAction")}
-          </Button>
-        </div>
+        <SettingSwitchRow
+          title={t("settings.signupOpenTitle")}
+          description={t("settings.signupOpenDescription")}
+          checked={open}
+          disabled={!envEnabled}
+          reason={envEnabled ? null : t("settings.signupEnvOffReason")}
+          updating={isUpdating}
+          onCheckedChange={(checked) => onToggle(checked ? "true" : "false")}
+        />
       </CardContent>
     </Card>
   );

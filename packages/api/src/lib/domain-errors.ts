@@ -97,7 +97,7 @@ const MAPPING: Record<DomainCode, { code: OrpcCode; message: string }> = {
   RUN_ACTIVE: { code: "CONFLICT", message: "That conversation is still running." },
   NOT_RETRYABLE: {
     code: "CONFLICT",
-    message: "Only a question that never reached the agent can be asked again.",
+    message: "Only a question that ended without an answer can be asked again.",
   },
   BUSY: {
     code: "TOO_MANY_REQUESTS",

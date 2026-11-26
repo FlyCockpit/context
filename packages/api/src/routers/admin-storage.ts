@@ -7,6 +7,7 @@ import {
   REQUEST_LOCK_WAIT_MS,
   totalStorageBytes,
 } from "@cockpit-context/repos";
+import { repositoryFailureReason } from "@cockpit-context/repos/errors";
 import { pruneStorageJob } from "@cockpit-context/repos/jobs";
 import { z } from "zod";
 
@@ -33,6 +34,8 @@ function repositorySelect(now: Date) {
     remoteUrl: true,
     visibility: true,
     status: true,
+    // Read only to classify a failure (`failureReason`); never sent.
+    lastError: true,
     isSnapshot: true,
     diskBytes: true,
     lastUsedAt: true,
@@ -66,6 +69,8 @@ function serializeRepository(row: RepositoryRow) {
     /** Private clones only; public clones are shared and have no owner. */
     ownerEmail: row.visibility === "PRIVATE" ? (row.Owner?.email ?? null) : null,
     status: lower(row.status),
+    /** Why the last clone or fetch failed (a fixed reason, never git output); null unless `failed`. */
+    failureReason: row.status === "FAILED" ? repositoryFailureReason(row.lastError) : null,
     isSnapshot: row.isSnapshot,
     diskBytes: Number(row.diskBytes),
     lastUsedAt: row.lastUsedAt,

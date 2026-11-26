@@ -197,6 +197,7 @@ function TokenRow({
         />
         <FlagSwitches
           variant="row"
+          subject={token.name}
           value={shown}
           disabled={!active || update.isPending}
           onChange={(next) => update.mutate({ id: token.id, ...next })}

@@ -1,9 +1,8 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-
 import prisma from "@cockpit-context/db";
-
 import { removeWorktree } from "./checkouts";
+import { INTERRUPTED_BY_RESTART } from "./errors";
 import { repositoryLockKey, withLock } from "./locks";
 import { checkoutDir, removeInsideDataDir, reposRoot } from "./paths";
 
@@ -21,7 +20,7 @@ import { checkoutDir, removeInsideDataDir, reposRoot } from "./paths";
  *   `PENDING` rows, and the UI would poll them forever).
  */
 
-export const INTERRUPTED_BY_RESTART = "Interrupted by a server restart; retry to continue.";
+export { INTERRUPTED_BY_RESTART };
 
 /** `<repository id>.git.clone-<12 hex>`: exactly what cloneRepository stages into. */
 const STAGING_DIR = /^[A-Za-z0-9-]{8,64}\.git\.clone-[0-9a-f]{12}$/;

@@ -6,19 +6,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@cockpit-context/ui/components/card";
-import { Checkbox } from "@cockpit-context/ui/components/checkbox";
 import { Input } from "@cockpit-context/ui/components/input";
 import { Label } from "@cockpit-context/ui/components/label";
 import { toast } from "@cockpit-context/ui/components/sileo";
+import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { TextField } from "@cockpit-context/ui/components/text-field";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Mail } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import z from "zod";
 
 import { InlineRetry } from "@/components/inline-retry";
+import { SettingSwitchRow } from "@/components/setting-switch-row";
 import { authClient } from "@/lib/auth-client";
 import { friendly } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
@@ -46,6 +48,7 @@ function ProfileSettings() {
   const { lang } = Route.useParams();
   const { t } = useTranslation(["settings", "auth", "common", "privacy"]);
   const queryClient = useQueryClient();
+  const isAdmin = hasAdminRole(session.user.role);
   const {
     data: notificationPrefsData,
     isPending: notificationPrefsPending,
@@ -53,7 +56,7 @@ function ProfileSettings() {
     refetch: refetchNotificationPrefs,
   } = useQuery({
     ...orpc.settings.myNotificationPreferences.queryOptions(),
-    enabled: hasAdminRole(session.user.role),
+    enabled: isAdmin,
   });
   const updateNotificationPrefs = useMutation({
     ...orpc.settings.updateMyNotificationPreferences.mutationOptions({
@@ -88,94 +91,105 @@ function ProfileSettings() {
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle role="heading" aria-level={2}>
-          {t("settings:profile.title")}
-        </CardTitle>
-        <CardDescription>{t("settings:profile.description")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            form.handleSubmit();
-          }}
-          className="space-y-4"
-        >
-          <div className="space-y-2">
-            <Label htmlFor="profile-email">{t("auth:fields.email")}</Label>
-            <Input
-              id="profile-email"
-              autoComplete="email"
-              value={session.user.email}
-              disabled
-              aria-describedby="profile-email-hint"
-            />
-            <p id="profile-email-hint" className="text-xs text-muted-foreground">
-              {t("settings:profile.emailReadonly")}
-            </p>
-          </div>
-
-          <form.Field name="name">
-            {(field) => (
-              <TextField
-                field={field}
-                label={t("auth:fields.name")}
-                inputMode="text"
-                autoComplete="name"
-              />
-            )}
-          </form.Field>
-
-          <form.Subscribe
-            selector={(state) => ({
-              canSubmit: state.canSubmit,
-              isSubmitting: state.isSubmitting,
-            })}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle role="heading" aria-level={2}>
+            {t("settings:profile.title")}
+          </CardTitle>
+          <CardDescription>{t("settings:profile.description")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              form.handleSubmit();
+            }}
+            className="space-y-4"
           >
-            {({ canSubmit, isSubmitting }) => (
-              <Button type="submit" size="touch" disabled={!canSubmit || isSubmitting}>
-                {isSubmitting ? t("common:actions.saving") : t("common:actions.saveChanges")}
-              </Button>
-            )}
-          </form.Subscribe>
-        </form>
+            <div className="space-y-2">
+              <Label htmlFor="profile-email">{t("auth:fields.email")}</Label>
+              <Input
+                id="profile-email"
+                autoComplete="email"
+                value={session.user.email}
+                disabled
+                aria-describedby="profile-email-hint"
+              />
+              <p id="profile-email-hint" className="text-xs text-muted-foreground">
+                {t("settings:profile.emailReadonly")}
+              </p>
+            </div>
 
-        {hasAdminRole(session.user.role) ? (
-          <div className="mt-6 border-t pt-6">
+            <form.Field name="name">
+              {(field) => (
+                <TextField
+                  field={field}
+                  label={t("auth:fields.name")}
+                  inputMode="text"
+                  autoComplete="name"
+                />
+              )}
+            </form.Field>
+
+            <form.Subscribe
+              selector={(state) => ({
+                canSubmit: state.canSubmit,
+                isSubmitting: state.isSubmitting,
+              })}
+            >
+              {({ canSubmit, isSubmitting }) => (
+                <Button type="submit" size="touch" disabled={!canSubmit || isSubmitting}>
+                  {isSubmitting ? t("common:actions.saving") : t("common:actions.saveChanges")}
+                </Button>
+              )}
+            </form.Subscribe>
+          </form>
+        </CardContent>
+      </Card>
+
+      {isAdmin ? (
+        // Saved at once, so it sits outside the profile form and its Save button.
+        <Card>
+          <CardHeader>
+            <CardTitle role="heading" aria-level={2} className="flex items-center gap-2">
+              <Mail className="size-5" aria-hidden="true" />
+              {t("settings:emailAlerts.title")}
+            </CardTitle>
+            <CardDescription>{t("settings:emailAlerts.description")}</CardDescription>
+          </CardHeader>
+          <CardContent>
             {notificationPrefsError ? (
               <InlineRetry
                 message={t("settings:profile.notificationsLoadError")}
                 onRetry={() => refetchNotificationPrefs()}
               />
+            ) : notificationPrefsPending ? (
+              <Skeleton className="h-24 w-full rounded-lg" />
             ) : (
-              <div className="flex items-start gap-3">
-                <Checkbox
-                  id="operational-alerts"
-                  checked={notificationPrefsData?.operationalAlerts ?? true}
-                  disabled={notificationPrefsPending || updateNotificationPrefs.isPending}
-                  onCheckedChange={(checked) => {
-                    updateNotificationPrefs.mutate({ operationalAlerts: checked === true });
-                  }}
-                />
-                <div className="space-y-1">
-                  <Label htmlFor="operational-alerts">
-                    {t("settings:profile.operationalAlerts")}
-                  </Label>
-                  <p className="text-sm text-muted-foreground">
-                    {t("settings:profile.operationalAlertsDescription")}
-                  </p>
-                </div>
-              </div>
+              <SettingSwitchRow
+                title={t("settings:profile.operationalAlerts")}
+                description={t("settings:profile.operationalAlertsDescription")}
+                checked={notificationPrefsData.operationalAlerts}
+                updating={updateNotificationPrefs.isPending}
+                onCheckedChange={(checked) =>
+                  updateNotificationPrefs.mutate({ operationalAlerts: checked })
+                }
+              />
             )}
-          </div>
-        ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
-        <div className="mt-6 space-y-2 border-t pt-6">
-          <h3 className="text-sm font-medium">{t("privacy:settingsTitle")}</h3>
-          <p className="text-muted-foreground text-sm">{t("privacy:settingsDescription")}</p>
+      <Card>
+        <CardHeader>
+          <CardTitle role="heading" aria-level={2}>
+            {t("privacy:settingsTitle")}
+          </CardTitle>
+          <CardDescription>{t("privacy:settingsDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
           <Link
             to="/$lang/privacy"
             params={{ lang }}
@@ -183,8 +197,8 @@ function ProfileSettings() {
           >
             {t("privacy:title")}
           </Link>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

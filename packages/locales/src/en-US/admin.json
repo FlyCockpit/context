@@ -80,9 +80,6 @@
     "force2faAdminPrerequisite": "To require two-factor authentication for others, first set it up on your own account.",
     "goToSecurity": "Set up 2FA",
     "force2faNeedsOwn2fa": "Available after you set up 2FA on your account.",
-    "stateOn": "On",
-    "stateOff": "Off",
-    "updating": "Updating…",
     "force2faInternalEnabled": "Two-factor authentication is now required for administrators",
     "force2faInternalDisabled": "Two-factor authentication is no longer required for administrators",
     "force2faPublicEnabled": "Two-factor authentication is now required for public users",
@@ -93,13 +90,9 @@
     "signupOpenTitle": "Open sign-up",
     "signupOpenDescription": "When open, anyone who can reach this server can create an account. When closed, only invited people get in.",
     "signupEnvDisabled": "SIGNUP_ENABLED is off in the server environment, so sign-up stays closed. Set it to true and restart the server to open sign-up from here.",
-    "signupOpenAction": "Open",
-    "signupCloseAction": "Close",
     "signupOpened": "Sign-up is now open",
     "signupClosed": "Sign-up is now closed",
-    "signupStatusOpen": "Open",
-    "signupStatusClosed": "Closed",
-    "signupEnvEnabled": "SIGNUP_ENABLED is on in the server environment, so this switch decides whether sign-up is open. Turning SIGNUP_ENABLED off closes it whatever this switch says.",
+    "signupEnvEnabled": "SIGNUP_ENABLED is on in the server environment, so the switch below decides whether sign-up is open. Turning SIGNUP_ENABLED off closes it whatever the switch says.",
     "runtime": {
       "loadFailed": "Couldn’t load the server configuration.",
       "servicesTitle": "Model, email and backups",
@@ -213,7 +206,8 @@
         "maxLiveStreamsPerUser": "Live run views at once, per person",
         "maxPendingProposalsPerUser": "Pending dependency proposals per person"
       }
-    }
+    },
+    "signupEnvOffReason": "Kept off by SIGNUP_ENABLED."
   },
   "twoFactorNudge": {
     "title": "Two-factor authentication is not set up",
@@ -376,7 +370,20 @@
     },
     "snapshot": "Snapshot",
     "snapshotsOverCap": "Storage exceeds the cap. Automatic pruning preserves snapshot clones; remove snapshots manually or raise the cap if pruning cannot free enough space.",
-    "snapshotDeleteWarning": "This snapshot cannot be restored without the owner’s SSH key."
+    "snapshotDeleteWarning": "This snapshot cannot be restored without the owner’s SSH key.",
+    "repositoryFailure": {
+      "auth": "The git host refused access. A private repository’s owner needs a working SSH deploy key on the package.",
+      "notFound": "The git host couldn’t find the repository. A package owner should check its git URL.",
+      "unreachable": "This server couldn’t reach the git host. Check the server’s DNS and outbound network.",
+      "hostKey": "The git host’s SSH key isn’t confirmed. The package owner confirms it in Access → Known hosts.",
+      "timeout": "The download ran out of time. A very large repository may need a longer git timeout.",
+      "interrupted": "A server restart cut the download off. The next question or fetch starts it again.",
+      "invalidUrl": "The git URL isn’t supported. A package owner should change it.",
+      "privateAddress": "The git URL points at a private or local address, which this server refuses.",
+      "sshKey": "The package’s SSH key is missing or unreadable. Its owner should choose another key.",
+      "snapshot": "The one-time SSH clone didn’t finish. Its owner updates the package with their key to retry.",
+      "other": "The download failed. The server log has git’s own message."
+    }
   },
   "jobs": {
     "title": "Jobs",

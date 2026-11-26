@@ -34,7 +34,7 @@
       "undo": "Deshacer",
       "connect": {
         "title": "Conecta tu agente de programación",
-        "body": "Agrega Cockpit Context a Claude Code o Codex. Usa OAuth para iniciar sesión sin copiar un token.",
+        "body": "Agrega el servidor cockpit-context a Claude Code o Codex. Inicia sesión con OAuth, así que no hay token que copiar.",
         "copy": "Copiar el comando de Claude Code",
         "authenticate": "Luego ejecuta /mcp en Claude Code, elige cockpit-context y selecciona Authenticate.",
         "token": "Usar un token de API",
@@ -120,7 +120,8 @@
       "autoApproveShort": "Aprobar propuestas automáticamente",
       "autoApproveHint": "Sus propuestas se vuelven paquetes sin esperarte. Los paquetes que necesitan una llave SSH siempre esperan.",
       "saved": "Guardado",
-      "saveFailed": "No se pudo guardar ese cambio. Inténtalo de nuevo."
+      "saveFailed": "No se pudo guardar ese cambio. Inténtalo de nuevo.",
+      "rowLabel": "{{flag}}: {{name}}"
     },
     "secret": {
       "title": "Copia este token ahora",
@@ -188,7 +189,7 @@
     },
     "connections": {
       "title": "Conexiones OAuth",
-      "description": "Agentes que aprobaste en la página de consentimiento de Cockpit Context. Cada uno actúa en tu nombre, dentro de sus permisos.",
+      "description": "Agentes que aprobaste en la página de consentimiento de Cockpit Context. Cada uno actúa como tú y solo puede hacer lo que permiten sus interruptores.",
       "loadFailed": "No se pudieron cargar tus conexiones.",
       "clientId": "ID de cliente",
       "revokeLabel": "Revocar {{name}}",
@@ -197,18 +198,21 @@
         "body": "Sigue los pasos de arriba. Cuando apruebes un agente, aparecerá aquí."
       },
       "guide": {
-        "title": "Conecta Claude Code con OAuth",
-        "description": "Sin token que copiar: Claude Code inicia sesión a través de tu navegador.",
-        "add": "Agrega Cockpit Context en una terminal",
-        "copyCommand": "Copiar comando",
-        "authenticate": "Autentícate en Claude Code",
-        "authenticateBody": "Ejecuta /mcp, elige Cockpit Context y selecciona Authenticate. Tu navegador abre Cockpit Context.",
+        "title": "Conecta tu agente de programación con OAuth",
+        "description": "No hay token que copiar: Claude Code y Codex inician sesión desde tu navegador.",
+        "add": "Agrega cockpit-context en una terminal",
+        "copyCommand": "Copiar el comando de Claude Code",
+        "authenticate": "Inicia sesión desde tu agente",
+        "authenticateBody": "En Claude Code, ejecuta /mcp, elige cockpit-context y selecciona Authenticate. En Codex, el segundo comando (codex mcp login cockpit-context) lo hace. Tu navegador abre Cockpit Context.",
         "approve": "Inicia sesión y aprueba",
-        "approveBody": "Revisa el nombre del agente y a dónde vuelve tu navegador, elige sus permisos y permítelo.",
+        "approveBody": "Revisa el nombre del agente y a dónde regresa tu navegador, elige qué puede hacer (proponer paquetes, aprobar automáticamente sus propuestas) y luego permítelo.",
         "otherClients": "Otros clientes MCP",
         "copyUrl": "Copiar URL de MCP",
         "otherClientsBody": "Usa esta URL en cualquier cliente que admita autorización MCP.",
-        "useToken": "Los clientes que no pueden iniciar sesión pueden usar un token."
+        "useToken": "Los clientes que no pueden iniciar sesión pueden usar un token.",
+        "claudeCode": "Claude Code",
+        "codex": "Codex",
+        "copyCodex": "Copiar los comandos de Codex"
       },
       "revoke": {
         "title": "¿Revocar esta conexión?",
@@ -413,8 +417,9 @@
     "pendingBanner": {
       "title_one": "Un agente propuso {{count}} paquete",
       "title_other": "Los agentes propusieron {{count}} paquetes",
-      "body": "No pueden preguntar sobre ellos hasta que los apruebes.",
-      "action": "Revisar propuestas"
+      "action": "Revisar propuestas",
+      "body_one": "El agente no puede preguntar sobre él hasta que lo apruebes.",
+      "body_other": "Los agentes no pueden preguntar sobre ellos hasta que los apruebes."
     },
     "form": {
       "ecosystem": "Ecosistema",
@@ -551,7 +556,21 @@
       "refreshing": "Actualizando la instantánea con tu llave…",
       "syncFailed": "La última actualización de la instantánea no terminó.",
       "started": "Se inició la actualización de la instantánea. Esta página mostrará cuando termine.",
-      "runningHint": "Esto se ejecuta en el servidor: puedes salir de esta página. Tu llave solo se guarda en memoria hasta que termine."
+      "runningHint": "Esto se ejecuta en el servidor: puedes salir de esta página. Tu llave solo se guarda en memoria hasta que termine.",
+      "syncFailedNext": "Elige Actualizar con llave SSH para intentarlo de nuevo."
+    },
+    "repositoryFailure": {
+      "auth": "El host de git negó el acceso. Si el repositorio es privado, edita el paquete para elegir una llave SSH cuya parte pública sea una llave de despliegue en el host; la siguiente pregunta lo clona de nuevo.",
+      "notFound": "El host de git no encontró ese repositorio. Edita el paquete para corregir su URL de git (un repositorio privado también parece no existir sin acceso); la siguiente pregunta lo clona de nuevo.",
+      "unreachable": "Este servidor no pudo conectarse al host de git. Revisa el nombre del host en la URL de git o vuelve a intentarlo más tarde con Traer lo más reciente.",
+      "hostKey": "La clave SSH de este host de git no está confirmada. Confírmala en Acceso → Hosts conocidos y luego elige Traer lo más reciente.",
+      "timeout": "La descarga tardó demasiado. Vuelve a intentarlo más tarde con Traer lo más reciente; si sigue pasando, avisa al administrador.",
+      "interrupted": "El servidor se reinició durante la descarga. Elige Traer lo más reciente para empezar de nuevo.",
+      "invalidUrl": "Esa URL de git no es compatible. Edita el paquete para usar una URL https:// o SSH; la siguiente pregunta lo clona de nuevo.",
+      "privateAddress": "La URL de git apunta a una dirección privada o local, a la que este servidor no se conecta. Edita el paquete para usar un host público; la siguiente pregunta lo clona de nuevo.",
+      "sshKey": "Falta la llave SSH de este paquete o no se puede usar. Edita el paquete para elegir otra llave (agrega una en Acceso → Llaves SSH); la siguiente pregunta lo clona de nuevo.",
+      "snapshot": "La clonación SSH única no terminó. Actualiza el paquete con tu clave SSH para intentarlo de nuevo.",
+      "other": "Algo salió mal durante la descarga. Elige Traer lo más reciente para intentarlo de nuevo; si sigue fallando, pide al administrador que revise los registros del servidor."
     }
   },
   "checkouts": {
@@ -839,8 +858,8 @@
     },
     "resolvingHint": "La primera pregunta sobre un paquete clona su repositorio, lo que puede tardar unos minutos. Puedes salir de esta página: el trabajo continúa y la respuesta estará aquí.",
     "retry": {
-      "action": "Intentar de nuevo",
-      "pending": "Reintentando…",
+      "action": "Preguntar de nuevo",
+      "pending": "Preguntando de nuevo…",
       "failed": "No se pudo volver a preguntar. Inténtalo en un momento.",
       "nearestTags": "Tags cercanos a esa versión. Elige uno para preguntar sobre él en su lugar:"
     }

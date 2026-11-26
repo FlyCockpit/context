@@ -75,6 +75,7 @@ function packageRow(overrides: Record<string, unknown> = {}) {
       visibility: "PUBLIC",
       defaultBranch: "main",
       lastFetchedAt: NOW,
+      lastError: null as string | null,
       snapshotSyncStatus: "NONE",
       snapshotSyncError: null,
       snapshotSyncStartedAt: null,
@@ -183,6 +184,26 @@ describe("packagesRouter", () => {
           "updatedAt",
         ].sort(),
       );
+    });
+
+    it("says why its repository failed with a fixed reason, never git output", async () => {
+      const row = packageRow();
+      db.package.findFirst.mockResolvedValue({
+        ...row,
+        Repository: {
+          ...row.Repository,
+          status: "FAILED",
+          lastError: "GIT_FAILED: git fetch failed: remote: Repository not found.",
+        },
+      });
+      const result = await client().get({ id: "pkg-1" });
+      expect(result.repository).toMatchObject({ status: "failed", failureReason: "notFound" });
+      expect(result.repository).not.toHaveProperty("lastError");
+      expect(JSON.stringify(result)).not.toContain("Repository not found");
+      db.package.findFirst.mockResolvedValue(packageRow());
+      await expect(client().get({ id: "pkg-1" })).resolves.toMatchObject({
+        repository: { status: "ready", failureReason: null },
+      });
     });
 
     it("is NOT_FOUND for another user's package", async () => {

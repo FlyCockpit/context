@@ -30,6 +30,7 @@ export type MemoryRun = NewRun &
     failure?: RunFailure;
     startedAt: Date | null;
     finishedAt: Date | null;
+    retriedAt?: Date;
   };
 
 export type MemoryCheckout = CheckoutForRun & { remoteKey: string; summaryModel?: string };
@@ -89,7 +90,12 @@ export class MemoryRunStore implements RunStore {
       .sort((a, b) => b.createdAt - a.createdAt);
     const latest = mains[0];
     return latest
-      ? { id: latest.id, status: latest.status, startedAt: latest.startedAt ?? null }
+      ? {
+          id: latest.id,
+          status: latest.status,
+          startedAt: latest.startedAt ?? null,
+          answered: (latest.answer ?? null) !== null,
+        }
       : null;
   }
 
@@ -111,6 +117,8 @@ export class MemoryRunStore implements RunStore {
   }
 
   async createRun(data: NewRun) {
+    const replaced = data.replacesRunId ? this.runs.get(data.replacesRunId) : undefined;
+    if (data.replacesRunId && !replaced) throw new Error(`no run ${data.replacesRunId}`);
     const id = this.nextId(`${data.kind}-run`);
     this.runs.set(id, {
       ...data,
@@ -129,6 +137,7 @@ export class MemoryRunStore implements RunStore {
       finishedAt: null,
       answer: null,
     });
+    if (replaced) replaced.retriedAt = new Date();
     return { id };
   }
 
@@ -196,7 +205,10 @@ export class MemoryRunStore implements RunStore {
     return this.turns.filter((turn) => turn.runId === runId).sort((a, b) => a.seq - b.seq);
   }
 
-  async listHistoryTurns(conversationId: string): Promise<StoredTurn[]> {
+  async listHistoryTurns(
+    conversationId: string,
+    options: { excludeRunId?: string } = {},
+  ): Promise<StoredTurn[]> {
     const runs = [...this.runs.values()]
       .filter(
         (run) =>
@@ -204,7 +216,9 @@ export class MemoryRunStore implements RunStore {
           run.startedAt !== null &&
           run.kind === "main" &&
           run.status !== "queued" &&
-          run.status !== "running",
+          run.status !== "running" &&
+          run.retriedAt === undefined &&
+          run.id !== options.excludeRunId,
       )
       .sort((a, b) => a.createdAt - b.createdAt);
     return runs.flatMap((run) =>

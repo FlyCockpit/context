@@ -7,13 +7,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@cockpit-context/ui/components/card";
-import { Switch } from "@cockpit-context/ui/components/switch";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { Link, useParams } from "@tanstack/react-router";
 import { Info, Shield } from "lucide-react";
-import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
+import { SettingSwitchRow } from "@/components/setting-switch-row";
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/i18n/config";
 
 export type SecurityPolicy = {
@@ -76,82 +75,19 @@ export function SecurityPolicyCard({
           </div>
         )}
         {policies.map((policy) => (
-          <PolicyRow
+          <SettingSwitchRow
             key={policy.key}
-            policy={policy}
+            title={policy.title}
+            description={policy.description}
+            checked={policy.enabled}
             // Turning a policy OFF never needs the admin's own 2FA.
-            blocked={!adminHas2FA && !policy.enabled}
-            isUpdating={isUpdating}
-            onToggle={onToggle}
+            disabled={!adminHas2FA && !policy.enabled}
+            reason={!adminHas2FA && !policy.enabled ? t("settings.force2faNeedsOwn2fa") : null}
+            updating={isUpdating}
+            onCheckedChange={(checked) => onToggle(policy.key, checked ? "true" : "false")}
           />
         ))}
       </CardContent>
     </Card>
-  );
-}
-
-function PolicyRow({
-  policy,
-  blocked,
-  isUpdating,
-  onToggle,
-}: {
-  policy: SecurityPolicy;
-  blocked: boolean;
-  isUpdating: boolean;
-  onToggle: (key: ForceTwoFactorSettingKey, newValue: "true" | "false") => void;
-}) {
-  const { t } = useTranslation("admin");
-  const id = useId();
-  const titleId = `${id}-title`;
-  const descriptionId = `${id}-description`;
-  const reasonId = `${id}-reason`;
-
-  return (
-    <div
-      data-slot="settings-policy"
-      data-state={policy.enabled ? "on" : "off"}
-      className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
-    >
-      <div className="min-w-0 space-y-1">
-        <p id={titleId} className="font-medium">
-          {policy.title}
-        </p>
-        <p id={descriptionId} className="max-w-prose text-sm text-muted-foreground">
-          {policy.description}
-        </p>
-      </div>
-      <div className="flex shrink-0 flex-col gap-1 sm:items-end">
-        {/* The label widens the hit area to 44px; the switch is named by the
-            policy title, and its state is aria-checked. */}
-        <label className="flex min-h-[44px] cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed">
-          <span
-            aria-hidden="true"
-            className={cn(
-              "min-w-[2.5rem] text-sm font-medium sm:text-right",
-              policy.enabled ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {isUpdating
-              ? t("settings.updating")
-              : policy.enabled
-                ? t("settings.stateOn")
-                : t("settings.stateOff")}
-          </span>
-          <Switch
-            checked={policy.enabled}
-            disabled={blocked || isUpdating}
-            aria-labelledby={titleId}
-            aria-describedby={blocked ? `${descriptionId} ${reasonId}` : descriptionId}
-            onCheckedChange={(checked) => onToggle(policy.key, checked ? "true" : "false")}
-          />
-        </label>
-        {blocked ? (
-          <p id={reasonId} className="text-xs text-muted-foreground sm:max-w-48 sm:text-right">
-            {t("settings.force2faNeedsOwn2fa")}
-          </p>
-        ) : null}
-      </div>
-    </div>
   );
 }

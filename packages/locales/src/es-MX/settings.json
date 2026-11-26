@@ -48,5 +48,9 @@
   },
   "title": "Configuración",
   "description": "Tu perfil y cómo inicias sesión.",
-  "tabsAriaLabel": "Secciones de configuración"
+  "tabsAriaLabel": "Secciones de configuración",
+  "emailAlerts": {
+    "title": "Alertas por correo",
+    "description": "Se guarda en cuanto lo cambias; no hace falta pulsar Guardar."
+  }
 }

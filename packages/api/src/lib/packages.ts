@@ -16,6 +16,7 @@ import {
   toStoredEcosystem,
   validateRemoteUrl,
 } from "@cockpit-context/repos";
+import { repositoryFailureReason } from "@cockpit-context/repos/errors";
 import { invalidateAnswersForPackage } from "@cockpit-context/runs/answer-reuse";
 import { z } from "zod";
 
@@ -198,6 +199,8 @@ export const packageViewSelect = {
       visibility: true,
       defaultBranch: true,
       lastFetchedAt: true,
+      // Read only to classify a failure (`failureReason`); never sent.
+      lastError: true,
       snapshotSyncStatus: true,
       snapshotSyncError: true,
       snapshotSyncStartedAt: true,
@@ -232,6 +235,11 @@ export function serializePackage(row: PackageViewRow) {
           visibility: lower(row.Repository.visibility),
           defaultBranch: row.Repository.defaultBranch,
           lastFetchedAt: row.Repository.lastFetchedAt,
+          /** Why the last clone or fetch failed (a fixed reason, never git output); null unless `failed`. */
+          failureReason:
+            row.Repository.status === "FAILED"
+              ? repositoryFailureReason(row.Repository.lastError)
+              : null,
           /**
            * A snapshot's background clone or refresh with a pasted key:
            * `running`, `failed` (with the RepoError code, never git output)

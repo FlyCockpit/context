@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@cockpit-context/ui/components/card";
+import { CodeSnippet } from "@cockpit-context/ui/components/code-snippet";
 import { CopyField } from "@cockpit-context/ui/components/copy-field";
 import { toast } from "@cockpit-context/ui/components/sileo";
 import { Skeleton } from "@cockpit-context/ui/components/skeleton";
@@ -32,6 +33,7 @@ import { useHomeStatus } from "@/hooks/use-home-status";
 import {
   type ConnectionFlags,
   claudeOAuthCommand,
+  codexOAuthCommand,
   type McpConnection,
   normalizeFlags,
 } from "@/lib/access";
@@ -114,7 +116,11 @@ function AccessConnectionsPage() {
   );
 }
 
-/** Connect with OAuth: the Claude Code command, then `/mcp` → Authenticate. */
+/**
+ * Connect with OAuth: the Claude Code command (then `/mcp` → Authenticate) or
+ * the Codex commands (`codex mcp login` signs in), then approve in the browser.
+ * The same commands as the getting-started card, which hides once set up.
+ */
 function ConnectGuide() {
   const { lang } = Route.useParams();
   const { t } = useTranslation(["dashboard", "common", "errors"]);
@@ -134,12 +140,26 @@ function ConnectGuide() {
         <ol className="min-w-0 space-y-4">
           <GuideStep index={1} title={t("dashboard:access.connections.guide.add")}>
             {mcpUrl ? (
-              <CopyField
-                value={claudeOAuthCommand(mcpUrl)}
-                copyLabel={t("dashboard:access.connections.guide.copyCommand")}
-                onCopied={onCopied}
-                onCopyError={onCopyError}
-              />
+              <>
+                <p className="text-sm text-muted-foreground">
+                  {t("dashboard:access.connections.guide.claudeCode")}
+                </p>
+                <CopyField
+                  value={claudeOAuthCommand(mcpUrl)}
+                  copyLabel={t("dashboard:access.connections.guide.copyCommand")}
+                  onCopied={onCopied}
+                  onCopyError={onCopyError}
+                />
+                <p className="pt-1 text-sm text-muted-foreground">
+                  {t("dashboard:access.connections.guide.codex")}
+                </p>
+                <CodeSnippet
+                  code={codexOAuthCommand(mcpUrl)}
+                  copyLabel={t("dashboard:access.connections.guide.copyCodex")}
+                  onCopied={onCopied}
+                  onCopyError={onCopyError}
+                />
+              </>
             ) : status.isError ? (
               <InlineRetry
                 variant="destructive"
@@ -263,6 +283,7 @@ function ConnectionRow({
         <CredentialDates createdAt={connection.createdAt} lastUsedAt={connection.lastUsedAt} />
         <FlagSwitches
           variant="row"
+          subject={label}
           value={shown}
           disabled={!active || update.isPending}
           onChange={(next) => update.mutate({ id: connection.id, ...next })}

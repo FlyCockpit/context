@@ -148,9 +148,10 @@ function ConversationView({ lang, conversationId }: { lang: string; conversation
 }
 
 /**
- * Retry for a question whose run never reached the agent (the version did
- * not resolve, or it was stopped or interrupted first): the ended note's
- * actions. The new run arrives through the live view like any other.
+ * Ask again for a question whose run ended without an answer (the version
+ * did not resolve, the model or server failed, or it was stopped or
+ * interrupted): the ended note's actions. The new run arrives through the
+ * live view like any other.
  */
 function useRetryControls(
   state: ConversationViewState | null,

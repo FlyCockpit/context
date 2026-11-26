@@ -389,13 +389,16 @@ export function composerMode(state: ConversationViewState): ComposerMode {
 }
 
 /**
- * The run `conversations.retry` would replace: the latest main run, when it
- * ended (failed, stopped, interrupted) before the agent started, and the
- * package still exists. Null otherwise.
+ * The run `conversations.retry` would ask again: the latest main run, when it
+ * ended without completing (failed, stopped, interrupted) and without even a
+ * partial answer, before or after the agent started, and the package still
+ * exists. Null otherwise.
  */
 export function retryableRun(state: ConversationViewState): RunView | null {
   const main = latestMainRun(state);
-  if (!main || isActive(main.status) || main.status === "completed" || main.started) return null;
+  if (!main || isActive(main.status) || main.status === "completed" || main.answer !== null) {
+    return null;
+  }
   if (state.conversation.packageId === null) return null;
   return main;
 }
@@ -741,7 +744,7 @@ export type TranscriptBlock =
       key: string;
       text: string;
       followUp: boolean;
-      /** The same question asked again: the run before never reached the agent. */
+      /** The same question asked again: the run before ended without completing. */
       retry: boolean;
     }
   | { kind: "steer"; key: string; text: string }
@@ -855,13 +858,13 @@ export function buildTranscript(state: ConversationViewState): TranscriptBlock[]
     return turn ? partText(turn.parts) : null;
   };
   mains.forEach((run, runIndex) => {
-    // `conversations.retry` re-asks the question of a run that never reached
-    // the agent. A follow-up may also come after such a run (once the version
-    // resolved), so the question must be the same one too.
+    // `conversations.retry` re-asks the question of a run that ended without
+    // completing. A follow-up may also come after such a run, so the
+    // question must be the same one too.
     const previous = runIndex > 0 ? mains[runIndex - 1] : undefined;
     const retry =
       previous !== undefined &&
-      !previous.started &&
+      previous.status !== "completed" &&
       !isActive(previous.status) &&
       questionOf(previous) === questionOf(run);
     const messages: Array<{ parts: readonly MessagePart[] }> = [...run.turns];

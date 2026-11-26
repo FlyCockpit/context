@@ -94,6 +94,12 @@ export interface NewRun {
   model: string | null;
   focus: string | null;
   startedAt: Date | null;
+  /**
+   * A retry's replacement: in the same transaction, the ended MAIN run whose
+   * question it asks again gets `retriedAt`, which keeps that run out of every
+   * later history.
+   */
+  replacesRunId?: string;
 }
 
 export interface RunUpdate {
@@ -168,10 +174,13 @@ export interface RunStore {
   loadPackage(ownerId: string, packageId: string): Promise<PackageForRun | null>;
   createConversation(data: NewConversation): Promise<ConversationForRun>;
   loadConversation(ownerId: string, conversationId: string): Promise<ConversationForRun | null>;
-  /** The conversation's newest MAIN run, if any. `startedAt` is null until the agent ran. */
+  /**
+   * The conversation's newest MAIN run, if any. `startedAt` is null until the
+   * agent ran; `answered` is true once it saved an answer (even a partial one).
+   */
   latestMainRun(
     conversationId: string,
-  ): Promise<{ id: string; status: RunStatus; startedAt: Date | null } | null>;
+  ): Promise<{ id: string; status: RunStatus; startedAt: Date | null; answered: boolean } | null>;
   updateConversation(conversationId: string, data: ConversationUpdate): Promise<void>;
   /** The question a run was started with (its first, non-steering USER turn), or null. */
   loadRunQuestion(runId: string): Promise<string | null>;
@@ -207,9 +216,14 @@ export interface RunStore {
    * resolve, is no history; a retry asks it again), oldest run first, by seq.
    * Capped at the newest {@link MAX_HISTORY_TURNS}: a follow-up needs the
    * latest turns most, and `historyFromTurns` drops a tool result whose call
-   * fell outside the cap.
+   * fell outside the cap. Runs a retry replaced (`retriedAt` set), and
+   * `excludeRunId` (the run a retry is about to replace), are left out
+   * before the cap.
    */
-  listHistoryTurns(conversationId: string): Promise<StoredTurn[]>;
+  listHistoryTurns(
+    conversationId: string,
+    options?: { excludeRunId?: string },
+  ): Promise<StoredTurn[]>;
   /** Find or create the checkout row for (repository, sha); does not touch the disk. */
   upsertCheckout(repositoryId: string, sha: string, resolvedFrom: string | null): Promise<string>;
   loadCheckout(checkoutId: string): Promise<CheckoutForRun | null>;
@@ -471,9 +485,17 @@ export const prismaRunStore: RunStore = {
     const row = await prisma.agentRun.findFirst({
       where: { conversationId, kind: "MAIN" },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true, status: true, startedAt: true },
+      // `answer` only to tell whether there is one (a stopped run can keep a partial answer).
+      select: { id: true, status: true, startedAt: true, answer: true },
     });
-    return row ? { id: row.id, status: fromDbStatus(row.status), startedAt: row.startedAt } : null;
+    return row
+      ? {
+          id: row.id,
+          status: fromDbStatus(row.status),
+          startedAt: row.startedAt,
+          answered: row.answer !== null,
+        }
+      : null;
   },
 
   async loadRunQuestion(runId) {
@@ -499,7 +521,7 @@ export const prismaRunStore: RunStore = {
   },
 
   async createRun(data) {
-    return prisma.agentRun.create({
+    const create = prisma.agentRun.create({
       data: {
         ownerId: data.ownerId,
         conversationId: data.conversationId,
@@ -519,6 +541,16 @@ export const prismaRunStore: RunStore = {
       },
       select: { id: true },
     });
+    if (!data.replacesRunId) return create;
+    const [created] = await prisma.$transaction([
+      create,
+      prisma.agentRun.update({
+        where: { id: data.replacesRunId },
+        data: { retriedAt: new Date() },
+        select: { id: true },
+      }),
+    ]);
+    return created;
   },
 
   async updateRun(runId, data) {
@@ -578,7 +610,7 @@ export const prismaRunStore: RunStore = {
     });
   },
 
-  async listHistoryTurns(conversationId) {
+  async listHistoryTurns(conversationId, options = {}) {
     // Newest first so the cap drops the oldest turns, then back to oldest first.
     const rows = await prisma.runTurn.findMany({
       where: {
@@ -587,6 +619,9 @@ export const prismaRunStore: RunStore = {
           kind: "MAIN",
           status: { notIn: ACTIVE },
           startedAt: { not: null },
+          // An attempt a retry replaced: its question is asked again.
+          retriedAt: null,
+          ...(options.excludeRunId ? { id: { not: options.excludeRunId } } : {}),
         },
       },
       orderBy: [{ AgentRun: { createdAt: "desc" } }, { runId: "desc" }, { seq: "desc" }],

@@ -125,6 +125,10 @@ model AgentRun {
   finishedAt        DateTime?
   /// Final assistant text (MAIN and SUMMARY runs).
   answer            String?
+  /// When `conversations.retry` asked this MAIN run's question again (it had
+  /// ended without an answer). Such a run stays in the transcript but is left
+  /// out of every later run's history.
+  retriedAt         DateTime?
 
   HelperRuns AgentRun[]      @relation("AgentRunHelpers")
   Turns      RunTurn[]
