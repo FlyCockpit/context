@@ -105,7 +105,8 @@ const latestMainRunArgs = {
   },
 } satisfies Prisma.Conversation$AgentRunsArgs;
 
-const conversationSelect = {
+/** A conversation as every list shows it (`list`, `pins.list`). */
+export const conversationSelect = {
   id: true,
   createdAt: true,
   title: true,
@@ -249,6 +250,15 @@ async function totalCosts(
         : [],
     ),
   );
+}
+
+/** List rows as the client sees them, each with its total cost (one query for all). */
+export async function serializeConversationRows(ownerId: string, rows: ConversationRow[]) {
+  const costs = await totalCosts(
+    ownerId,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => serializeConversation(row, costs.get(row.id) ?? NO_COST));
 }
 
 const runSelect = {
@@ -515,14 +525,7 @@ export const conversationsRouter = {
         if (anyFinished) next = { segment: "finished", cursor: null };
       }
 
-      const costs = await totalCosts(
-        ownerId,
-        items.map((row) => row.id),
-      );
-      return {
-        items: items.map((row) => serializeConversation(row, costs.get(row.id) ?? NO_COST)),
-        next,
-      };
+      return { items: await serializeConversationRows(ownerId, items), next };
     }),
 
   get: protectedProcedure

@@ -26,6 +26,12 @@ SELECT expected.name AS missing_index FROM (VALUES
  (SELECT FROM pg_indexes i WHERE i.schemaname = current_schema() AND i.indexname = expected.name);
 SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()
  AND indexname IN ('user_email_idx', 'user_name_idx') AND indexdef NOT LIKE '%USING gin%gin_trgm_ops%';
+SELECT p.id FROM conversation_pin p JOIN conversation c ON c.id = p."conversationId"
+ WHERE p.id LIKE 'fx_%' AND p."userId" <> c."ownerId";
+SELECT expected.name AS pin_fk_not_cascading FROM (VALUES
+ ('conversation_pin_userId_fkey'), ('conversation_pin_conversationId_fkey')
+) AS expected(name) WHERE NOT EXISTS
+ (SELECT FROM pg_constraint WHERE conname = expected.name AND contype = 'f' AND confdeltype = 'c');
 
 -- FK/unique failures are caught in subtransactions; successful destructive probes
 -- raise a private rollback sentinel after their assertions, leaving fixtures intact.
@@ -62,11 +68,22 @@ BEGIN
   EXCEPTION WHEN SQLSTATE 'ZX001' THEN NULL;
   END;
   BEGIN
+    DELETE FROM conversation WHERE id = 'fx_conversation_owner';
+    IF EXISTS (SELECT FROM conversation_pin WHERE id = 'fx_pin_owner') OR
+       NOT EXISTS (SELECT FROM conversation_pin WHERE id = 'fx_pin_reader') THEN
+      RAISE EXCEPTION 'Conversation pin cascade was lost';
+    END IF;
+    RAISE SQLSTATE 'ZX001' USING MESSAGE = 'rollback successful fixture probe';
+  EXCEPTION WHEN SQLSTATE 'ZX001' THEN NULL;
+  END;
+  BEGIN
     DELETE FROM "user" WHERE id = 'fx_owner';
     IF EXISTS (SELECT FROM package WHERE "ownerId" = 'fx_owner') OR
        EXISTS (SELECT FROM repository WHERE "ownerId" = 'fx_owner') OR
        EXISTS (SELECT FROM ssh_key WHERE "ownerId" = 'fx_owner') OR
        EXISTS (SELECT FROM conversation WHERE "ownerId" = 'fx_owner') OR
+       EXISTS (SELECT FROM conversation_pin WHERE "userId" = 'fx_owner') OR
+       NOT EXISTS (SELECT FROM conversation_pin WHERE id = 'fx_pin_reader') OR
        EXISTS (SELECT FROM run_turn WHERE "runId" = 'fx_run_done') OR
        NOT EXISTS (SELECT FROM package WHERE id = 'fx_package_reader') OR
        NOT EXISTS (SELECT FROM repository WHERE id = 'fx_public') THEN
@@ -98,4 +115,11 @@ BEGIN
   EXCEPTION WHEN unique_violation THEN refused := true;
   END;
   IF NOT refused THEN RAISE EXCEPTION 'Repository/SHA unique constraint was lost'; END IF;
+  refused := false;
+  BEGIN
+    INSERT INTO conversation_pin (id, "userId", "conversationId", position)
+    VALUES ('fx_pin_duplicate', 'fx_owner', 'fx_conversation_owner', 1);
+  EXCEPTION WHEN unique_violation THEN refused := true;
+  END;
+  IF NOT refused THEN RAISE EXCEPTION 'User/conversation pin unique constraint was lost'; END IF;
 END $cockpit_context_fixture$;

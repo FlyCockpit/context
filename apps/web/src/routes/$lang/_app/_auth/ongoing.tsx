@@ -13,10 +13,12 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Activity, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ConversationRowMenu } from "@/components/conversations/conversation-pin";
 import {
   ConversationRow,
   ConversationRowsSkeleton,
 } from "@/components/conversations/conversation-row";
+import { PinnedSection } from "@/components/conversations/pinned-section";
 import { GettingStarted } from "@/components/getting-started";
 import { InlineRetry } from "@/components/inline-retry";
 import { PendingProposalsBanner } from "@/components/packages/pending-proposals-banner";
@@ -120,6 +122,8 @@ function LiveSection({ lang }: { lang: string }) {
 
   return (
     <>
+      {/* Hidden until something is pinned. */}
+      <PinnedSection lang={lang} now={now} />
       <section aria-labelledby="ongoing-live-title" className="space-y-3">
         <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
           <h2 id="ongoing-live-title" className="flex items-center gap-2 text-base font-semibold">
@@ -141,7 +145,12 @@ function LiveSection({ lang }: { lang: string }) {
                 <ul className="divide-y">
                   {live.map((item) => (
                     <li key={item.id}>
-                      <ConversationRow item={item} lang={lang} now={now} />
+                      <ConversationRow
+                        item={item}
+                        lang={lang}
+                        now={now}
+                        actions={<ConversationRowMenu id={item.id} title={item.title} />}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -185,7 +194,12 @@ function LiveSection({ lang }: { lang: string }) {
                     .filter((item) => !liveIds.has(item.id))
                     .map((item) => (
                       <li key={item.id}>
-                        <ConversationRow item={item} lang={lang} now={now} />
+                        <ConversationRow
+                          item={item}
+                          lang={lang}
+                          now={now}
+                          actions={<ConversationRowMenu id={item.id} title={item.title} />}
+                        />
                       </li>
                     ))}
                 </ul>

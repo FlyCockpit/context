@@ -903,5 +903,20 @@
       "deletedAfter_other": "Conversations are deleted {{count}} days after their last activity.",
       "keptUntilDeleted": "Conversations are kept until you delete them."
     }
+  },
+  "pins": {
+    "title": "Pinned",
+    "pin": "Pin to home",
+    "unpin": "Unpin from home",
+    "full": "Pinned is full ({{count}}). Unpin one first.",
+    "pinnedToast": "Pinned to your home.",
+    "unpinnedToast": "Unpinned.",
+    "rowActions": "Actions for “{{title}}”",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "reorder": "Reorder “{{title}}”",
+    "reorderHint": "Drag to reorder, or press the up and down arrow keys.",
+    "moved": "Moved “{{title}}” to position {{position}} of {{count}}.",
+    "loadFailed": "Couldn’t load your pinned conversations."
   }
 }

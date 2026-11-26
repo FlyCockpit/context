@@ -903,5 +903,20 @@
       "deletedAfter_other": "Las conversaciones se borran {{count}} días después de su última actividad.",
       "keptUntilDeleted": "Las conversaciones se guardan hasta que las borres."
     }
+  },
+  "pins": {
+    "title": "Fijadas",
+    "pin": "Fijar en el inicio",
+    "unpin": "Quitar del inicio",
+    "full": "Ya fijaste el máximo ({{count}}). Quita una primero.",
+    "pinnedToast": "Fijada en tu inicio.",
+    "unpinnedToast": "Ya no está fijada.",
+    "rowActions": "Acciones de “{{title}}”",
+    "moveUp": "Subir",
+    "moveDown": "Bajar",
+    "reorder": "Reordenar “{{title}}”",
+    "reorderHint": "Arrastra para reordenar, o usa las flechas arriba y abajo.",
+    "moved": "“{{title}}” se movió a la posición {{position}} de {{count}}.",
+    "loadFailed": "No se pudieron cargar tus conversaciones fijadas."
   }
 }

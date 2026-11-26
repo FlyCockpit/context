@@ -360,6 +360,17 @@ CREATE TABLE "conversation" (
 );
 
 -- CreateTable
+CREATE TABLE "conversation_pin" (
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "userId" TEXT NOT NULL,
+    "conversationId" TEXT NOT NULL,
+    "position" INTEGER NOT NULL,
+
+    CONSTRAINT "conversation_pin_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "agent_run" (
     "id" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -386,6 +397,7 @@ CREATE TABLE "agent_run" (
     "startedAt" TIMESTAMP(3),
     "finishedAt" TIMESTAMP(3),
     "answer" TEXT,
+    "retriedAt" TIMESTAMP(3),
 
     CONSTRAINT "agent_run_pkey" PRIMARY KEY ("id")
 );
@@ -722,6 +734,12 @@ CREATE INDEX "conversation_mcpAgentTokenId_idx" ON "conversation"("mcpAgentToken
 CREATE INDEX "conversation_mcpGrantId_idx" ON "conversation"("mcpGrantId");
 
 -- CreateIndex
+CREATE INDEX "conversation_pin_conversationId_idx" ON "conversation_pin"("conversationId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "conversation_pin_userId_conversationId_key" ON "conversation_pin"("userId", "conversationId");
+
+-- CreateIndex
 CREATE INDEX "agent_run_conversationId_createdAt_idx" ON "agent_run"("conversationId", "createdAt");
 
 -- CreateIndex
@@ -890,6 +908,12 @@ ALTER TABLE "conversation" ADD CONSTRAINT "conversation_mcpAgentTokenId_fkey" FO
 ALTER TABLE "conversation" ADD CONSTRAINT "conversation_mcpGrantId_fkey" FOREIGN KEY ("mcpGrantId") REFERENCES "mcp_grant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "conversation_pin" ADD CONSTRAINT "conversation_pin_userId_fkey" FOREIGN KEY ("userId") REFERENCES "user"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "conversation_pin" ADD CONSTRAINT "conversation_pin_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "conversation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "agent_run" ADD CONSTRAINT "agent_run_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "user"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -951,6 +975,7 @@ ALTER TABLE "ssh_key" ADD CONSTRAINT "ssh_key_ownerId_fkey" FOREIGN KEY ("ownerI
 
 -- AddForeignKey
 ALTER TABLE "known_host" ADD CONSTRAINT "known_host_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "user"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 
 -- cockpit_context:commit-marker (lets the runner prove this transaction committed; keep it last)
 DO $cockpit_context$ DECLARE history text := current_setting('cockpit_context.history', true); BEGIN IF history <> '' THEN EXECUTE format('UPDATE %s SET "logs" = %L WHERE "id" = (SELECT "id" FROM %s WHERE "finished_at" IS NULL AND "rolled_back_at" IS NULL ORDER BY "started_at" DESC LIMIT 1)', history::oid::regclass, 'cockpit_context:committed', history::oid::regclass); END IF; END $cockpit_context$;

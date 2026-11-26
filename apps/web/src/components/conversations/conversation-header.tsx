@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { ConversationCost } from "@/components/conversations/conversation-cost";
+import { ConversationPinButton } from "@/components/conversations/conversation-pin";
 import { BACK_LINK_CLASS } from "@/components/page-shell";
 import { RunStatusPill } from "@/components/run-status-pill";
 import {
@@ -57,19 +58,22 @@ export function ConversationHeader({
           <ArrowLeft aria-hidden="true" className="size-4" />
           {t("dashboard:pages.conversation.back")}
         </Link>
-        {live ? null : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-touch"
-            className="text-muted-foreground hover:text-destructive"
-            aria-label={t("dashboard:conversation.delete.action")}
-            title={t("dashboard:conversation.delete.action")}
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash aria-hidden="true" className="size-4" />
-          </Button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          <ConversationPinButton id={conversation.id} />
+          {live ? null : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-touch"
+              className="text-muted-foreground hover:text-destructive"
+              aria-label={t("dashboard:conversation.delete.action")}
+              title={t("dashboard:conversation.delete.action")}
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash aria-hidden="true" className="size-4" />
+            </Button>
+          )}
+        </div>
       </div>
       {/* The question's first line (agent-written over MCP): plain text. */}
       <h1 className="line-clamp-2 text-lg font-semibold tracking-tight break-words sm:text-xl">
@@ -176,6 +180,7 @@ function DeleteConversationDialog({
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: orpc.conversations.key() });
         void queryClient.invalidateQueries({ queryKey: orpc.home.key() });
+        void queryClient.invalidateQueries({ queryKey: orpc.pins.key() });
         toast.success(t("dashboard:conversation.delete.done"));
         onOpenChange(false);
         void navigate({ to: "/$lang/conversations", params: { lang } });

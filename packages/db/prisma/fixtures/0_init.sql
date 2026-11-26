@@ -63,6 +63,9 @@ INSERT INTO agent_run (id, "ownerId", "conversationId", "checkoutId", kind, stat
   ('fx_run_done', 'fx_owner', 'fx_conversation_owner', 'fx_checkout_public', 'MAIN', 'COMPLETED', 'MCP_QUERY',
    'Synthetic answer from the fixture checkout.', '2026-01-01'),
   ('fx_run_live', 'fx_reader', 'fx_conversation_reader', 'fx_checkout_public', 'MAIN', 'RUNNING', 'MCP_QUERY', NULL, NULL);
+INSERT INTO conversation_pin (id, "userId", "conversationId", position) VALUES
+  ('fx_pin_owner', 'fx_owner', 'fx_conversation_owner', 0),
+  ('fx_pin_reader', 'fx_reader', 'fx_conversation_reader', 0);
 INSERT INTO run_turn (id, "runId", seq, role, parts) VALUES
   ('fx_turn_user', 'fx_run_done', 0, 'USER', '[{"type":"text","text":"Explain the fixture export."}]'),
   ('fx_turn_answer', 'fx_run_done', 1, 'ASSISTANT', '[{"type":"text","text":"Synthetic answer from the fixture checkout."}]');

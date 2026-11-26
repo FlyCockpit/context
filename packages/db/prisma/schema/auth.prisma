@@ -33,6 +33,7 @@ model User {
   McpAgentTokens     McpAgentToken[]
   McpGrants          McpGrant[]
   Conversations      Conversation[]
+  ConversationPins   ConversationPin[]
   AgentRuns          AgentRun[]
   SummaryOverrides   CheckoutSummaryOverride[]
   // Better-Auth OAuth provider (MCP OAuth).

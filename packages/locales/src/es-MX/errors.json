@@ -68,7 +68,10 @@
     "NOT_RETRYABLE": "Esta pregunta ya tiene respuesta. Haz una pregunta de seguimiento.",
     "SNAPSHOT_INTERRUPTED": "El servidor se reinició antes de que terminara la instantánea, y tu llave nunca se guarda. Actualízala de nuevo con tu llave SSH.",
     "SNAPSHOT_CANCELLED": "Se canceló la actualización de la instantánea.",
-    "PASSWORD_LINK_BUSY": "Todavía se está enviando un enlace de contraseña para este usuario. Inténtalo de nuevo en un momento."
+    "PASSWORD_LINK_BUSY": "Todavía se está enviando un enlace de contraseña para este usuario. Inténtalo de nuevo en un momento.",
+    "PIN_LIMIT": "Ya fijaste el máximo de conversaciones. Quita una primero.",
+    "PINS_CHANGED": "Tus fijadas cambiaron en otra pestaña. Se muestra el orden más reciente; inténtalo de nuevo.",
+    "PINS_BUSY": "Tus fijadas se estaban cambiando al mismo tiempo. Inténtalo de nuevo."
   },
   "pageNotFound": {
     "title": "No encontramos esa página",

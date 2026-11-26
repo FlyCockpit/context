@@ -42,6 +42,7 @@ model Conversation {
   lastActivityAt     DateTime           @default(now())
 
   AgentRuns AgentRun[]
+  Pins      ConversationPin[]
 
   @@index([ownerId, lastActivityAt])
   @@index([ownerId, packageId, lastActivityAt])
@@ -51,6 +52,25 @@ model Conversation {
   @@index([mcpAgentTokenId])
   @@index([mcpGrantId])
   @@map("conversation")
+}
+
+/// A conversation its owner pinned to the home, in the owner's order
+/// (docs/product.md). Only the conversation's owner pins it, and reads join
+/// on `Conversation.ownerId = userId` too, so a pin never shows a
+/// conversation its user cannot see. Gone with the user or the conversation.
+model ConversationPin {
+  id             String       @id @default(cuid(2))
+  createdAt      DateTime     @default(now())
+  userId         String
+  User           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String
+  Conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// Ascending order on the home: a new pin goes last, `pins.reorder` renumbers from 0.
+  position       Int
+
+  @@unique([userId, conversationId])
+  @@index([conversationId])
+  @@map("conversation_pin")
 }
 
 /// MAIN runs answer the user; HELPER runs are `delegate_explore` children of a

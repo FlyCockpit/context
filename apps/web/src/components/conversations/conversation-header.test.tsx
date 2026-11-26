@@ -25,6 +25,11 @@ vi.mock("@/utils/orpc", () => ({
   orpc: { conversations: { delete: { mutationOptions: () => ({}) }, key: () => [] } },
 }));
 
+// The pin toggle reads the pins query; its states are covered in conversation-pin.test.tsx.
+vi.mock("@/components/conversations/conversation-pin", () => ({
+  ConversationPinButton: () => <button type="button" data-slot="pin-toggle" />,
+}));
+
 const { ConversationHeader } = await import("@/components/conversations/conversation-header");
 
 const NOW = new Date("2026-11-26T00:00:00Z");
@@ -82,5 +87,13 @@ describe("ConversationHeader commit link", () => {
       expect(html).toContain("0ccd60a");
       expect(html).not.toContain("/commit/");
     }
+  });
+});
+
+describe("ConversationHeader actions", () => {
+  it("offers the pin toggle beside Delete", () => {
+    const html = render({});
+    expect(html).toContain('data-slot="pin-toggle"');
+    expect(html).toContain('aria-label="dashboard:conversation.delete.action"');
   });
 });

@@ -16,6 +16,7 @@ An organization can run one instance for its developers. An agent harness can ru
 | SSH key / known host | Encrypted saved credentials and confirmed host fingerprints. |
 | MCP credential | A per-user API token or OAuth grant with proposal controls. |
 | Conversation / run / turn | An owner-only investigation thread, bounded execution and saved messages/tool results. |
+| Conversation pin | An owner's shortcut to one of their own conversations on the signed-in home, in their order (at most 12). Removed with the conversation or the account, and never shown for a conversation its user does not own. |
 | Job | Background work in PostgreSQL, executed within the app process. |
 
 ## Sharing and privacy

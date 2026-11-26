@@ -15,6 +15,7 @@ import { knownHostsRouter } from "./known-hosts";
 import { mcpConnectionsRouter } from "./mcp-connections";
 import { mcpTokensRouter } from "./mcp-tokens";
 import { packagesRouter } from "./packages";
+import { pinsRouter } from "./pins";
 import { proposalsRouter } from "./proposals";
 import { repositoriesRouter } from "./repositories";
 import { seedRouter } from "./seed";
@@ -81,6 +82,7 @@ export const appRouter = {
   mcpConnections: mcpConnectionsRouter,
   mcpTokens: mcpTokensRouter,
   packages: packagesRouter,
+  pins: pinsRouter,
   proposals: proposalsRouter,
   repositories: repositoriesRouter,
   settings: settingsRouter,

@@ -68,7 +68,10 @@
     "NOT_RETRYABLE": "This question was already answered. Ask a follow-up instead.",
     "SNAPSHOT_INTERRUPTED": "The server restarted before the snapshot finished, and your key is never stored. Update it with your SSH key again.",
     "SNAPSHOT_CANCELLED": "The snapshot update was cancelled.",
-    "PASSWORD_LINK_BUSY": "A password link for this user is still being sent. Try again in a moment."
+    "PASSWORD_LINK_BUSY": "A password link for this user is still being sent. Try again in a moment.",
+    "PIN_LIMIT": "You’ve pinned the most conversations allowed. Unpin one first.",
+    "PINS_CHANGED": "Your pins changed in another tab. The latest order is shown; try again.",
+    "PINS_BUSY": "Your pins were being changed at the same time. Try again."
   },
   "pageNotFound": {
     "title": "Page not found",

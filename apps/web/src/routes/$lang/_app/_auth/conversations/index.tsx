@@ -10,6 +10,7 @@ import { MessagesSquare, X } from "lucide-react";
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useTranslation } from "react-i18next";
 
+import { ConversationRowMenu } from "@/components/conversations/conversation-pin";
 import {
   ConversationRow,
   ConversationRowsSkeleton,
@@ -230,7 +231,12 @@ function ConversationsPage() {
               <ul className="divide-y">
                 {items.map((item) => (
                   <li key={item.id}>
-                    <ConversationRow item={item} lang={lang} now={now} />
+                    <ConversationRow
+                      item={item}
+                      lang={lang}
+                      now={now}
+                      actions={<ConversationRowMenu id={item.id} title={item.title} />}
+                    />
                   </li>
                 ))}
               </ul>

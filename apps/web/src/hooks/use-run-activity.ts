@@ -64,8 +64,8 @@ export function createRefreshCoalescer(flush: () => void) {
 
 /**
  * Keep the conversation lists live: subscribe to `conversations.activity`
- * (change hints for the viewer's own runs) and refetch `conversations.list`
- * and `home.status` when something changed — once on (re)subscribe too,
+ * (change hints for the viewer's own runs) and refetch `conversations.list`,
+ * `pins.list` and `home.status` when something changed — once on (re)subscribe too,
  * which covers anything that happened while disconnected.
  */
 export function useRunActivity() {
@@ -76,6 +76,7 @@ export function useRunActivity() {
     const refresh = createRefreshCoalescer(() => {
       void queryClient.invalidateQueries({ queryKey: orpc.conversations.list.key() });
       void queryClient.invalidateQueries({ queryKey: orpc.home.status.key() });
+      void queryClient.invalidateQueries({ queryKey: orpc.pins.list.key() });
     });
     void consumeWithReconnect<ActivityEvent>({
       signal: controller.signal,

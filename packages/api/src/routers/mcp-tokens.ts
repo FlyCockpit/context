@@ -12,6 +12,7 @@ import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagina
 import { createProcedureBudget } from "../lib/procedure-budget";
 import { cockpitContextRateBudget } from "../lib/rate-budgets";
 import { entityId, shortText } from "../lib/schemas";
+import { isSerializationFailure } from "../lib/serializable";
 
 /**
  * MCP API tokens (docs/mcp.md). ⚠️ Dangerous row: the plaintext
@@ -32,13 +33,6 @@ const MAX_TTL_MS = 365 * 86_400_000;
 
 /** Attempts at the Serializable create before giving up with CONFLICT. */
 const CREATE_ATTEMPTS = 3;
-
-/** Postgres refused a Serializable transaction (a concurrent one won); safe to retry. */
-function isSerializationFailure(error: unknown): boolean {
-  return (
-    typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2034"
-  );
-}
 
 /**
  * Run a Serializable transaction, again when Postgres aborts it for a

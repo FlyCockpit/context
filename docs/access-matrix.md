@@ -73,6 +73,10 @@ Public HTTPS repository clones, checkouts and generated overviews can be shared 
 | Steer a running run | implemented | none | own | own | `conversations.steer` |  |
 | Stop a running run | implemented | none | own | own | `conversations.stop` |  |
 | Delete a conversation | implemented | none | own | own | `conversations.delete` |  |
+| List own pinned conversations | implemented | none | own | own | `pins.list` | Only pins whose conversation the caller still owns. |
+| Pin an own conversation to the home | implemented | none | own | own | `pins.pin` | At most 12 pins. |
+| Unpin a conversation | implemented | none | own | own | `pins.unpin` |  |
+| Reorder own pins | implemented | none | own | own | `pins.reorder` |  |
 | Read the conversation retention period | implemented | none | read | read | `conversations.retention` |  |
 | Automatic deletion of inactive conversations | implemented | none | none | none | — |  |
 | List own dependencies over MCP | implemented | none | own | own | — |  |

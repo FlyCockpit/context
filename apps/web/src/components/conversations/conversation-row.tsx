@@ -1,6 +1,7 @@
 import { Skeleton } from "@cockpit-context/ui/components/skeleton";
 import { cn } from "@cockpit-context/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ConversationCost } from "@/components/conversations/conversation-cost";
@@ -23,11 +24,17 @@ export function ConversationRow({
   item,
   lang,
   now,
+  leading,
+  actions,
 }: {
   item: ConversationListItem;
   lang: string;
   /** The ticking clock for elapsed times (live rows only). */
   now: number;
+  /** Before the link, outside it (the Pinned section's drag handle). */
+  leading?: ReactNode;
+  /** After the link, outside it (the row menu). */
+  actions?: ReactNode;
 }) {
   const { t } = useTranslation(["dashboard"]);
   const run = item.latestRun;
@@ -39,13 +46,18 @@ export function ConversationRow({
       : t("dashboard:origin.web");
   const since = run?.startedAt ?? item.lastActivityAt;
 
-  return (
+  const link = (
     <Link
       to="/$lang/conversations/$conversationId"
       params={{ lang, conversationId: item.id }}
       // A stable handle for the browser checks: a finished conversation offers Delete.
       data-live={live ? "" : undefined}
-      className="flex min-w-0 items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      // Beside a handle or a menu the button already spaces the row: give the text the room.
+      className={cn(
+        "flex min-w-0 flex-1 items-start gap-3 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        leading === undefined ? "ps-4" : "ps-1",
+        actions === undefined ? "pe-4" : "pe-2",
+      )}
     >
       <span aria-hidden="true" className="relative mt-1.5 flex size-2.5 shrink-0">
         {live && run?.status === "running" ? (
@@ -113,6 +125,14 @@ export function ConversationRow({
         )}
       </span>
     </Link>
+  );
+  if (leading === undefined && actions === undefined) return link;
+  return (
+    <div className="flex min-w-0 items-center">
+      {leading}
+      {link}
+      {actions ? <div className="shrink-0 pe-1">{actions}</div> : null}
+    </div>
   );
 }
 
