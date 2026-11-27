@@ -52,6 +52,24 @@ export function isUserBanned(user: {
  * listener does it (packages/api/src/routers/users.ts). `session-revocation`:
  * password recovery; closes streams and MCP exchanges without stopping runs.
  */
+/** Verification identifier prefix holding an admin archive-undo snapshot. */
+export const ARCHIVE_UNDO_IDENTIFIER_PREFIX = "archive-undo:";
+
+/** Verification identifier for one user's pending admin archive-undo record. */
+export function archiveUndoIdentifier(userId: string): string {
+  return `${ARCHIVE_UNDO_IDENTIFIER_PREFIX}${userId}`;
+}
+
+/** Acquires the per-user credential advisory lock on an open transaction client. */
+export function lockUserCredentials(
+  tx: {
+    $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  },
+  userId: string,
+) {
+  return tx.$executeRaw`SELECT pg_advisory_xact_lock(1936028274, hashtext(${userId}))`;
+}
+
 export type BanOrigin = "application" | "auth-plugin" | "session-revocation";
 type BanListener = (userId: string, origin: BanOrigin) => void;
 const banListeners = new Set<BanListener>();

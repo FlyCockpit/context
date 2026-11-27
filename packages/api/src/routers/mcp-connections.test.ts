@@ -10,6 +10,9 @@ vi.mock("@cockpit-context/db", async () => {
   const { mockDeep } = await import("vitest-mock-extended");
   const db = mockDeep();
   db.appSetting.findMany.mockResolvedValue([]);
+  db.$transaction.mockImplementation(async (work: unknown) =>
+    typeof work === "function" ? work(db) : Promise.all(work as Promise<unknown>[]),
+  );
   return { default: db };
 });
 vi.mock("@cockpit-context/env/server", () => ({ env: {}, ADMIN_EMAILS: new Set<string>() }));
@@ -48,6 +51,9 @@ function client(context = sessionContext({ id: "user-a" })) {
 describe("mcpConnectionsRouter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    db.$transaction.mockImplementation(async (work: unknown) =>
+      typeof work === "function" ? work(db) : Promise.all(work as Promise<unknown>[]),
+    );
   });
 
   it("requires a session", async () => {

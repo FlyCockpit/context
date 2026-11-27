@@ -269,7 +269,7 @@
     "deleteAction": "Delete…",
     "roleUpdated": "Role updated",
     "roleUpdateFailed": "Couldn't update that role. Try again.",
-    "userArchived": "User archived. Their MCP connections were revoked.",
+    "userArchived": "User archived",
     "archiveFailed": "Couldn't archive that user. Try again.",
     "userRestored": "User restored",
     "restoreFailed": "Couldn't restore that user. Try again.",

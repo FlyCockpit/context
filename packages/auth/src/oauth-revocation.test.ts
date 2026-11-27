@@ -14,8 +14,12 @@ const { createMockContext } = await vi.importActual<{
 }>("../../test-utils/src/index");
 const tx = vi.mocked(createMockContext().db, { deep: true });
 const db = vi.mocked(prisma, { deep: true });
-const { lockUserCredentials, revokeUserCredentialsInTransaction, withUserCredentialTransaction } =
-  await import("./oauth-revocation");
+const {
+  archiveUndoIdentifier,
+  lockUserCredentials,
+  revokeUserCredentialsInTransaction,
+  withUserCredentialTransaction,
+} = await import("./oauth-revocation");
 const { withTransactionSlot } = await import("./lock-slots");
 beforeEach(() => {
   vi.clearAllMocks();
@@ -25,6 +29,7 @@ beforeEach(() => {
   tx.oauthAccessToken.deleteMany.mockResolvedValue({ count: 1 });
   tx.oauthRefreshToken.deleteMany.mockResolvedValue({ count: 1 });
   tx.oauthConsent.deleteMany.mockResolvedValue({ count: 1 });
+  tx.verification.deleteMany.mockResolvedValue({ count: 1 });
   tx.session.deleteMany.mockResolvedValue({ count: 1 });
 });
 it("locks and revokes on the supplied client, retaining grant tombstones and OAuth dependency order", async () => {
@@ -53,6 +58,9 @@ it("locks and revokes on the supplied client, retaining grant tombstones and OAu
   const order = writes.map((write) => write.mock.invocationCallOrder[0]!);
   expect(order).toEqual([...order].sort((a, b) => a - b));
   expect(tx.session.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { userId: "u" } });
+  expect(tx.verification.deleteMany).toHaveBeenCalledWith({
+    where: { identifier: archiveUndoIdentifier("u") },
+  });
   expect((tx.$executeRaw.mock.calls[1]![0] as TemplateStringsArray).join("?")).toContain(
     "WITH challenges",
   );

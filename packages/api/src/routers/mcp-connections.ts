@@ -1,9 +1,12 @@
 import { normalizeMcpFlags } from "@cockpit-context/auth/mcp-consent-flags";
-import { oauthRevocationWrites } from "@cockpit-context/auth/oauth-revocation";
+import {
+  oauthRevocationWrites,
+  withUserCredentialTransaction,
+} from "@cockpit-context/auth/oauth-revocation";
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { z } from "zod";
-
 import { protectedProcedure } from "../index";
+import { pruneArchiveUndoCredentials } from "../lib/archive-undo-credentials";
 import { reasonError } from "../lib/domain-errors";
 import { findOwnedOrThrow } from "../lib/ownership";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
@@ -121,9 +124,20 @@ export const mcpConnectionsRouter = {
       });
       // `(userId, clientId, referenceId)` is unique on McpGrant, so the
       // generation names exactly this grant.
-      await prisma.$transaction(
-        oauthRevocationWrites({ userId, clientId: grant.clientId, referenceId: grant.referenceId }),
-      );
+      await withUserCredentialTransaction(userId, async (tx) => {
+        for (const write of oauthRevocationWrites(
+          { userId, clientId: grant.clientId, referenceId: grant.referenceId },
+          new Date(),
+          tx,
+        )) {
+          await write;
+        }
+        await pruneArchiveUndoCredentials(tx, userId, {
+          mcpGrantId: grant.id,
+          clientId: grant.clientId,
+          referenceId: grant.referenceId,
+        });
+      });
       return { ok: true as const };
     }),
 };

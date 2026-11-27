@@ -119,7 +119,11 @@ it("bans, deletes sessions and announces the ban (closing live streams) before s
     stop();
   }
   expect(announced).toHaveBeenCalledWith("u", "application");
+  expect(prisma.$executeRaw).toHaveBeenCalled();
   expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "u" } });
+  expect(prisma.verification.deleteMany).toHaveBeenCalledWith({
+    where: { identifier: "archive-undo:u" },
+  });
   expect(db.user.update.mock.invocationCallOrder[0]).toBeLessThan(
     announced.mock.invocationCallOrder[0]!,
   );

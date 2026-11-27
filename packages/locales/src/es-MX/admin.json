@@ -269,7 +269,7 @@
     "deleteAction": "Eliminar…",
     "roleUpdated": "Rol actualizado",
     "roleUpdateFailed": "No se pudo actualizar ese rol. Intenta de nuevo.",
-    "userArchived": "Usuario archivado. Se revocaron sus conexiones MCP.",
+    "userArchived": "Usuario archivado",
     "archiveFailed": "No se pudo archivar ese usuario. Intenta de nuevo.",
     "userRestored": "Usuario restaurado",
     "restoreFailed": "No se pudo restaurar ese usuario. Intenta de nuevo.",

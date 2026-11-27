@@ -155,17 +155,27 @@ function AdminUsers() {
     { invalidateKey: orpc.users.key(), successMessage: t("admin:users.userRestored") },
   );
 
-  // Archive acts at once; its toast offers Undo, which is the row's Restore
-  // (users.unarchive).
+  // Archive acts at once. When this archive changed an active user, `undoToken`
+  // lets the toast Undo also restore the newly-revoked MCP/OAuth connections;
+  // double-archive on an already-archived user omits Undo so stale Undo cannot
+  // reverse an earlier admin's archive.
   const archive = useEntityMutation(
     {
       ...orpc.users.archive.mutationOptions({
-        onSuccess: (_data, variables) => {
+        onSuccess: (data, variables) => {
+          const undoToken = data.undoToken;
+          if (!undoToken) {
+            toast.success(t("admin:users.userArchived"));
+            return;
+          }
           announceArchivedWithUndo({
             message: t("admin:users.userArchived"),
             undoLabel: t("common:actions.undo"),
             onUndo: () => {
-              unarchive.mutate({ userId: variables.userId });
+              unarchive.mutate({
+                userId: variables.userId,
+                undoToken,
+              });
             },
           });
         },

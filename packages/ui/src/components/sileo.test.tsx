@@ -20,15 +20,18 @@ beforeEach(() => {
 });
 
 describe("toast facade", () => {
-  it("passes the message, duration and action through", () => {
+  it("passes the message, duration and renders action inside description", () => {
     const onClick = vi.fn();
     toast.error("Failed", { duration: 5000, action: { label: "Retry", onClick } });
-    expect(backend.error).toHaveBeenCalledWith({
-      id: expect.any(String),
-      title: "Failed",
-      duration: 5000,
-      button: { title: "Retry", onClick },
-    });
+    expect(backend.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.any(String),
+        title: "Failed",
+        duration: 5000,
+        description: expect.anything(),
+      }),
+    );
+    expect(backend.error.mock.calls[0]?.[0]).not.toHaveProperty("button");
   });
 
   it("gives every toast its own id so two toasts stack instead of merging", () => {

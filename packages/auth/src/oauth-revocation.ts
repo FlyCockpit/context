@@ -1,4 +1,5 @@
 import prisma, { type Prisma } from "@cockpit-context/db";
+import { archiveUndoIdentifier, lockUserCredentials } from "./ban.js";
 import { withLockSlot, withTransactionSlot } from "./lock-slots.js";
 
 /**
@@ -35,9 +36,7 @@ export function oauthRevocationWrites(
 }
 
 /** The existing two-key issuance lock, on the caller's transaction client. */
-export function lockUserCredentials(tx: Prisma.TransactionClient, userId: string) {
-  return tx.$executeRaw`SELECT pg_advisory_xact_lock(1936028274, hashtext(${userId}))`;
-}
+export { lockUserCredentials };
 
 /** Serialize credential issuance and recovery per user across DB connections.
  * READ COMMITTED is deliberate: the session read AFTER waiting for the lock
@@ -95,6 +94,8 @@ export async function revokeUserCredentials(
   }
 }
 
+export { archiveUndoIdentifier } from "./ban.js";
+
 /** Caller owns the existing credential lock; never opens another transaction. */
 export async function revokeUserCredentialsInTransaction(
   tx: Prisma.TransactionClient,
@@ -110,6 +111,7 @@ export async function revokeUserCredentialsInTransaction(
     data: { revokedAt: now },
   });
   for (const write of oauthRevocationWrites({ userId }, now, tx)) await write;
+  await tx.verification.deleteMany({ where: { identifier: archiveUndoIdentifier(userId) } });
   // Better Auth 1.7.18 two-factor: challenges and trusted devices store
   // the user ID as value; OTP hashes and attempt counters instead refer
   // to the challenge identifier. Delete all of them in one statement so

@@ -7,6 +7,9 @@
     ".": {
       "default": "./src/index.ts"
     },
+    "./archive-undo-snapshot": {
+      "default": "./src/archive-undo-snapshot.ts"
+    },
     "./ban": {
       "default": "./src/ban.ts"
     },

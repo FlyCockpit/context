@@ -1,8 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { auth } from "@cockpit-context/auth";
-import { announceUserBanned, onUserBanned } from "@cockpit-context/auth/ban";
+import { announceUserBanned, isUserBanned, onUserBanned } from "@cockpit-context/auth/ban";
 import { createSetPasswordToken } from "@cockpit-context/auth/invite-verification";
-import { oauthRevocationWrites } from "@cockpit-context/auth/oauth-revocation";
+import {
+  lockUserCredentials,
+  oauthRevocationWrites,
+  withUserCredentialTransaction,
+} from "@cockpit-context/auth/oauth-revocation";
 import {
   recordResetLinkMailed,
   withCredentialSetupLock,
@@ -31,6 +35,12 @@ import { z } from "zod";
 import { adminOr404Procedure } from "../index";
 import { recordAdminAudit } from "../lib/admin-audit";
 import { withAdminRemovalGuard } from "../lib/admin-presence";
+import {
+  captureArchiveUndoCredentials,
+  clearArchiveUndoRecords,
+  restoreArchiveUndoCredentials,
+  writeArchiveUndoRecord,
+} from "../lib/archive-undo-credentials";
 import { reasonError, withDomainErrors } from "../lib/domain-errors";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
 import { createProcedureBudget } from "../lib/procedure-budget";
@@ -443,9 +453,15 @@ export const usersRouter = {
         });
       }
       // Revoke the app's MCP tokens and OAuth grants with the archive, under
-      // the same last-active-admin transaction as role changes and deletion.
+      // the same last-active-admin + user-credential lock transaction. Capturing
+      // the exact newly-revoked connections lets the immediate toast Undo
+      // restore them without resurrecting previously-revoked or reset-wiped credentials.
       const now = new Date();
-      await withAdminRemovalGuard(input.userId, async (tx) => {
+      const undoToken = await withAdminRemovalGuard(input.userId, async (tx, target) => {
+        await lockUserCredentials(tx, input.userId);
+        const captured = isUserBanned(target)
+          ? null
+          : await captureArchiveUndoCredentials(tx, input.userId, now);
         await tx.user.update({
           where: { id: input.userId },
           data: { banned: true, banReason: input.reason ?? null, banExpires: null },
@@ -456,35 +472,63 @@ export const usersRouter = {
           data: { revokedAt: now },
         });
         for (const write of oauthRevocationWrites({ userId: input.userId }, now, tx)) await write;
+        if (!captured) {
+          await clearArchiveUndoRecords(tx, input.userId);
+          return undefined;
+        }
+        return writeArchiveUndoRecord(tx, input.userId, captured, now);
       });
       // After the commit: closes their open live streams (watch/activity),
       // which were admitted once and are not re-checked (lib/live-streams.ts).
       announceUserBanned(input.userId);
       await stopUserRuns(input.userId);
-      return { success: true };
+      return { success: true, undoToken };
     }),
 
-  unarchive: adminOr404Procedure.input(userIdInput).handler(async ({ input }) => {
-    const target = await prisma.user.findUnique({
-      where: { id: input.userId },
-      select: { id: true },
-    });
-    if (!target) throw new ORPCError("NOT_FOUND", { message: "User not found" });
+  unarchive: adminOr404Procedure
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        undoToken: z.string().min(1).optional(),
+      }),
+    )
+    .handler(async ({ input }) => {
+      const now = new Date();
+      const restoredConnections = await withUserCredentialTransaction(input.userId, async (tx) => {
+        const target = await tx.user.findUnique({
+          where: { id: input.userId },
+          select: { id: true },
+        });
+        if (!target) throw new ORPCError("NOT_FOUND", { message: "User not found" });
 
-    // Lifts the ban only. The MCP tokens and OAuth connections `archive`
-    // revoked stay revoked (OAuth tokens and consent were deleted outright):
-    // the user signs in again and creates new ones. Do NOT flip them back on
-    // from here: a row records that a credential IS revoked, not who revoked
-    // it, so a blanket re-enable would also resurrect one the user or an
-    // admin had deliberately killed earlier (a leaked token, a decommissioned
-    // integration). Restoring precisely needs a column recording that archive
-    // was the revoker.
-    await prisma.user.update({
-      where: { id: input.userId },
-      data: { banned: false, banReason: null, banExpires: null },
-    });
-    return { success: true };
-  }),
+        // Without the matching one-time `undoToken` from the archive response
+        // (i.e. row "Restore user"), lift the ban only and clear any pending undo
+        // record so revoked MCP tokens and OAuth connections stay revoked.
+        // With `undoToken`, fail closed if the undo record expired or was
+        // superseded (password reset, deletion, prior restore) so Undo cannot
+        // unban an account undergoing deletion or recovery.
+        let restored = false;
+        if (input.undoToken) {
+          restored = await restoreArchiveUndoCredentials(tx, input.userId, input.undoToken, now);
+          if (!restored) {
+            throw reasonError(
+              "CONFLICT",
+              "USER_CHANGE_CONFLICT",
+              "Archive undo expired or was superseded. Refresh the user list before restoring.",
+            );
+          }
+        } else {
+          await clearArchiveUndoRecords(tx, input.userId);
+        }
+
+        await tx.user.update({
+          where: { id: input.userId },
+          data: { banned: false, banReason: null, banExpires: null },
+        });
+        return restored;
+      });
+      return { success: true, restoredConnections };
+    }),
 
   /**
    * A one-time set-password link for an existing account (a locked-out user

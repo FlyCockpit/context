@@ -142,11 +142,12 @@ const db = prisma as unknown as {
   session: { deleteMany: MockInstance };
   verification: { create: MockInstance; deleteMany: MockInstance; findFirst: MockInstance };
   account: { findFirst: MockInstance };
-  mcpAgentToken: { updateMany: MockInstance };
-  mcpGrant: { updateMany: MockInstance };
-  oauthAccessToken: { deleteMany: MockInstance };
-  oauthRefreshToken: { deleteMany: MockInstance };
-  oauthConsent: { deleteMany: MockInstance };
+  mcpAgentToken: { updateMany: MockInstance; findMany: MockInstance };
+  mcpGrant: { updateMany: MockInstance; findMany: MockInstance };
+  oauthAccessToken: { deleteMany: MockInstance; findMany: MockInstance; createMany: MockInstance };
+  oauthRefreshToken: { deleteMany: MockInstance; findMany: MockInstance; createMany: MockInstance };
+  oauthConsent: { deleteMany: MockInstance; findMany: MockInstance; createMany: MockInstance };
+  oauthClient: { findMany: MockInstance };
   $queryRaw: MockInstance;
   $transaction: MockInstance;
 };
@@ -917,7 +918,11 @@ describe("usersRouter", () => {
 
       it("writes and revokes sessions on the same transaction after recounting", async () => {
         tx.$queryRaw.mockResolvedValue([{ count: 2 }]);
-        await expect(run()).resolves.toEqual({ success: true });
+        const expected =
+          operation === "archive"
+            ? { success: true, undoToken: expect.any(String) }
+            : { success: true };
+        await expect(run()).resolves.toEqual(expected);
         // Deletion first removes access transactionally, then cleans repositories.
         const write = tx.user.update;
         expect(write).toHaveBeenCalledOnce();
@@ -952,7 +957,11 @@ describe("usersRouter", () => {
           banned: false,
           banExpires: null,
         } as Awaited<ReturnType<typeof prisma.user.findUnique>>);
-        await expect(run()).resolves.toEqual({ success: true });
+        const expected =
+          operation === "archive"
+            ? { success: true, undoToken: expect.any(String) }
+            : { success: true };
+        await expect(run()).resolves.toEqual(expected);
         expect(tx.$queryRaw).not.toHaveBeenCalled();
       });
     },
@@ -1024,7 +1033,11 @@ describe("usersRouter", () => {
             ? client.setRole({ userId: targetId, role: "user" })
             : client[operation]({ userId: targetId });
         };
-        await expect(request("a", "b", first)).resolves.toEqual({ success: true });
+        const expectedFirst =
+          first === "archive"
+            ? { success: true, undoToken: expect.any(String) }
+            : { success: true };
+        await expect(request("a", "b", first)).resolves.toEqual(expectedFirst);
         await expect(request("b", "a", second)).rejects.toMatchObject({
           code: "FORBIDDEN",
           data: { reason: "LAST_ACTIVE_ADMIN" },
@@ -1050,7 +1063,7 @@ describe("usersRouter", () => {
         reason: "Inactive",
       });
 
-      expect(res).toEqual({ success: true });
+      expect(res).toEqual({ success: true, undoToken: expect.any(String) });
       expect(db.$transaction).toHaveBeenCalledOnce();
       expect(db.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "other-user-id" } });
     });
@@ -1148,23 +1161,160 @@ describe("usersRouter", () => {
       const client = createRouterClient(usersRouter, { context: buildContext() });
       const res = await client.unarchive({ userId: "other-user-id" });
 
-      expect(res).toEqual({ success: true });
+      expect(res).toEqual({ success: true, restoredConnections: false });
       expect(db.user.update).toHaveBeenCalledWith({
         where: { id: "other-user-id" },
         data: { banned: false, banReason: null, banExpires: null },
       });
     });
 
-    it("does not restore the MCP credentials archive revoked", async () => {
+    it("does not restore the MCP credentials archive revoked when no undoToken is passed", async () => {
       db.user.findUnique.mockResolvedValue({ id: "other-user-id" });
       db.user.update.mockResolvedValue({});
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
-      await client.unarchive({ userId: "other-user-id" });
+      const res = await client.unarchive({ userId: "other-user-id" });
 
+      expect(res).toEqual({ success: true, restoredConnections: false });
       expect(db.mcpAgentToken.updateMany).not.toHaveBeenCalled();
       expect(db.mcpGrant.updateMany).not.toHaveBeenCalled();
-      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.oauthConsent.createMany).not.toHaveBeenCalled();
+      expect(db.oauthRefreshToken.createMany).not.toHaveBeenCalled();
+      expect(db.oauthAccessToken.createMany).not.toHaveBeenCalled();
+      expect(db.verification.deleteMany).toHaveBeenCalledWith({
+        where: { identifier: "archive-undo:other-user-id" },
+      });
+    });
+
+    it("restores archive-revoked MCP and OAuth connections when called with the archive undoToken", async () => {
+      db.user.findUnique.mockResolvedValue({ id: "other-user-id", banned: false } as never);
+      db.mcpAgentToken.findMany.mockResolvedValue([{ id: "tok-1" }] as never);
+      db.mcpGrant.findMany.mockResolvedValue([{ id: "grant-1" }] as never);
+      db.oauthConsent.findMany.mockResolvedValue([
+        {
+          id: "consent-1",
+          clientId: "client-1",
+          referenceId: "ref-1",
+          resources: [],
+          requestedUserInfoClaims: [],
+          scopes: ["openid"],
+          createdAt: new Date("2026-11-26T00:00:00.000Z"),
+          updatedAt: new Date("2026-11-26T00:00:00.000Z"),
+        },
+      ] as never);
+      db.oauthRefreshToken.findMany.mockResolvedValue([] as never);
+      db.oauthAccessToken.findMany.mockResolvedValue([] as never);
+
+      let storedRecord: { identifier: string; value: string; expiresAt: Date } | null = null;
+      db.verification.create.mockImplementation((async ({
+        data,
+      }: {
+        data: { identifier: string; value: string; expiresAt: Date };
+      }) => {
+        storedRecord = data;
+        return data;
+      }) as never);
+      db.verification.findFirst.mockImplementation((async () => storedRecord) as never);
+      db.oauthClient.findMany.mockResolvedValue([{ clientId: "client-1" }] as never);
+      db.user.update.mockResolvedValue({} as never);
+
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      const archived = await client.archive({ userId: "other-user-id" });
+      expect(archived.undoToken).toEqual(expect.any(String));
+
+      const restored = await client.unarchive({
+        userId: "other-user-id",
+        undoToken: archived.undoToken,
+      });
+
+      expect(restored).toEqual({ success: true, restoredConnections: true });
+      expect(db.mcpAgentToken.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ["tok-1"] }, userId: "other-user-id", revokedAt: expect.any(Date) },
+        data: { revokedAt: null },
+      });
+      expect(db.mcpGrant.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ["grant-1"] }, userId: "other-user-id", revokedAt: expect.any(Date) },
+        data: { revokedAt: null },
+      });
+      expect(db.oauthConsent.createMany).toHaveBeenCalledOnce();
+    });
+
+    it("refuses undoToken unarchive when archive-undo snapshot was cleared or expired", async () => {
+      db.user.findUnique.mockResolvedValue({ id: "other-user-id" } as never);
+      db.verification.findFirst.mockResolvedValue(null as never);
+
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      await expect(
+        client.unarchive({ userId: "other-user-id", undoToken: "stale-token" }),
+      ).rejects.toSatisfy((e: ORPCError) => {
+        expect(e.code).toBe("CONFLICT");
+        return true;
+      });
+      expect(db.user.update).not.toHaveBeenCalled();
+    });
+
+    it("omits undoToken and invalidates any earlier undo snapshot when archiving an already-banned user", async () => {
+      db.user.findUnique.mockResolvedValue({
+        id: "other-user-id",
+        banned: true,
+        banExpires: null,
+      } as never);
+
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      const res = await client.archive({ userId: "other-user-id" });
+      expect(res.undoToken).toBeUndefined();
+      expect(db.verification.create).not.toHaveBeenCalled();
+      expect(db.verification.deleteMany).toHaveBeenCalledWith({
+        where: { identifier: "archive-undo:other-user-id" },
+      });
+    });
+
+    it("rejects the first admin's undoToken after a second admin re-archives the banned user", async () => {
+      let storedRecord: { identifier: string; value: string; expiresAt: Date } | null = null;
+      db.user.findUnique.mockResolvedValueOnce({
+        id: "other-user-id",
+        banned: false,
+        banExpires: null,
+      } as never);
+      db.mcpAgentToken.findMany.mockResolvedValue([{ id: "tok-1" }] as never);
+      db.mcpGrant.findMany.mockResolvedValue([] as never);
+      db.oauthConsent.findMany.mockResolvedValue([] as never);
+      db.oauthRefreshToken.findMany.mockResolvedValue([] as never);
+      db.oauthAccessToken.findMany.mockResolvedValue([] as never);
+      db.verification.create.mockImplementation((async ({
+        data,
+      }: {
+        data: { identifier: string; value: string; expiresAt: Date };
+      }) => {
+        storedRecord = data;
+        return data;
+      }) as never);
+      db.verification.deleteMany.mockImplementation((async () => {
+        storedRecord = null;
+        return { count: 1 };
+      }) as never);
+      db.verification.findFirst.mockImplementation((async () => storedRecord) as never);
+      db.user.update.mockResolvedValue({} as never);
+
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      const firstArchive = await client.archive({ userId: "other-user-id" });
+      expect(firstArchive.undoToken).toEqual(expect.any(String));
+
+      db.user.findUnique.mockResolvedValue({
+        id: "other-user-id",
+        banned: true,
+        banExpires: null,
+      } as never);
+      const secondArchive = await client.archive({ userId: "other-user-id" });
+      expect(secondArchive.undoToken).toBeUndefined();
+
+      await expect(
+        client.unarchive({ userId: "other-user-id", undoToken: firstArchive.undoToken }),
+      ).rejects.toSatisfy((e: ORPCError) => {
+        expect(e.code).toBe("CONFLICT");
+        return true;
+      });
+      expect(db.mcpAgentToken.updateMany).toHaveBeenCalledTimes(2);
     });
   });
 

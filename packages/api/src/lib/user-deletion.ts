@@ -1,4 +1,8 @@
-import { announceUserBanned } from "@cockpit-context/auth/ban";
+import {
+  announceUserBanned,
+  archiveUndoIdentifier,
+  lockUserCredentials,
+} from "@cockpit-context/auth/ban";
 import prisma from "@cockpit-context/db";
 import { deleteRepository, REQUEST_LOCK_WAIT_MS, RepoError } from "@cockpit-context/repos";
 import { getRunEngine } from "@cockpit-context/runs";
@@ -39,8 +43,10 @@ export async function prepareUserDeletion(userId: string): Promise<void> {
   // (closing open live streams and MCP exchanges) right after the commit: a
   // failing deletion can no longer leave a committed ban unannounced.
   await withAdminRemovalGuard(userId, async (tx) => {
+    await lockUserCredentials(tx, userId);
     await tx.user.update({ where: { id: userId }, data: { banned: true, banExpires: null } });
     await tx.session.deleteMany({ where: { userId } });
+    await tx.verification.deleteMany({ where: { identifier: archiveUndoIdentifier(userId) } });
   });
   announceUserBanned(userId);
   await stopUserRuns(userId);

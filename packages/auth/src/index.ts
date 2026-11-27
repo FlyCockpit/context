@@ -18,6 +18,13 @@ import {
   noteVerificationWrite,
 } from "./account-activation.js";
 import { adminPluginAccess } from "./admin-access.js";
+import {
+  enforceOauthRefreshRevokeFence,
+  type OauthRevokePrisma,
+  pruneArchiveUndoAfterOauthRevoke,
+  snapshotOauthRevokeCandidates,
+  snapshotOauthTokenRequest,
+} from "./archive-undo-snapshot.js";
 import { announceIfUserBanned, announceUserSessionsRevoked } from "./ban.js";
 import { bannedSessionGuard } from "./banned-session-guard.js";
 import { revokeBootstrapToken } from "./bootstrap-token.js";
@@ -29,6 +36,7 @@ import {
 } from "./credential-revocation.js";
 import { createCredentialSetupAdapter } from "./credential-setup-adapter.js";
 import { resolveMcpPlugins } from "./mcp-plugins.js";
+import { withUserCredentialTransaction } from "./oauth-revocation.js";
 import { createPasswordPepper } from "./password-pepper.js";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password-policy.js";
 import {
@@ -392,6 +400,20 @@ export const auth = betterAuth({
           isSignupOpen,
         });
       }
+
+      if (ctx.path === "/oauth2/revoke") {
+        await snapshotOauthRevokeCandidates({
+          prisma: prisma as unknown as OauthRevokePrisma,
+          ctx,
+        });
+      }
+
+      if (ctx.path === "/oauth2/token") {
+        await snapshotOauthTokenRequest({
+          prisma: prisma as unknown as OauthRevokePrisma,
+          ctx,
+        });
+      }
     }),
     after: createAuthMiddleware(async (ctx) => {
       const target = passwordChangeRevocationTarget({
@@ -416,6 +438,22 @@ export const auth = betterAuth({
 
       if (ctx.path === SIGN_UP_EMAIL_PATH) {
         return neutralizeSignUpResponse(ctx, { emailVerificationRequired: emailConfigured });
+      }
+
+      if (ctx.path === "/oauth2/revoke") {
+        await pruneArchiveUndoAfterOauthRevoke({
+          prisma: prisma as unknown as OauthRevokePrisma,
+          lockAndRun: withUserCredentialTransaction,
+          ctx,
+        });
+      }
+
+      if (ctx.path === "/oauth2/token") {
+        await enforceOauthRefreshRevokeFence({
+          prisma: prisma as unknown as OauthRevokePrisma,
+          lockAndRun: withUserCredentialTransaction,
+          ctx,
+        });
       }
     }),
   },

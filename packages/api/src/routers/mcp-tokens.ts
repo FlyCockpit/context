@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { protectedProcedure } from "../index";
 import { recordCredentialAudit } from "../lib/admin-audit";
+import { pruneArchiveUndoCredentials } from "../lib/archive-undo-credentials";
 import { reasonError } from "../lib/domain-errors";
 import { findOwnedOrThrow } from "../lib/ownership";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
@@ -340,9 +341,12 @@ export const mcpTokensRouter = {
         owner: { field: "userId", id: userId },
         notFound: "Token not found.",
       });
-      await prisma.mcpAgentToken.updateMany({
-        where: { id: token.id, userId, revokedAt: null },
-        data: { revokedAt: new Date() },
+      await withUserCredentialTransaction(userId, async (tx) => {
+        await tx.mcpAgentToken.updateMany({
+          where: { id: token.id, userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        await pruneArchiveUndoCredentials(tx, userId, { mcpTokenId: token.id });
       });
       return { ok: true as const };
     }),
