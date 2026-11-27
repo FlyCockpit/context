@@ -49,14 +49,15 @@ export function isUserBanned(user: {
  * Where a ban came from. `application`: `users.archive` and account removal,
  * which also stop the user's runs themselves. `auth-plugin`: the admin
  * plugin's `/admin/ban-user` / `/admin/update-user`, which stop nothing, so a
- * listener does it (packages/api/src/routers/users.ts).
+ * listener does it (packages/api/src/routers/users.ts). `session-revocation`:
+ * password recovery; closes streams and MCP exchanges without stopping runs.
  */
-export type BanOrigin = "application" | "auth-plugin";
+export type BanOrigin = "application" | "auth-plugin" | "session-revocation";
 type BanListener = (userId: string, origin: BanOrigin) => void;
 const banListeners = new Set<BanListener>();
 
 /**
- * Subscribe to "this user was just banned". The live-stream registry
+ * Subscribe to user access teardown (ban or session revocation). The live-stream registry
  * (`packages/api/src/lib/live-streams.ts`) uses it to close the user's open
  * `conversations.watch` / `conversations.activity` subscriptions, which are
  * admitted once when they open and are otherwise never re-checked.
@@ -105,4 +106,11 @@ export function announceIfUserBanned(user: {
   banExpires?: Date | string | null;
 }): void {
   if (isUserBanned(user)) announceUserBanned(user.id, "auth-plugin");
+}
+
+/** Recovery uses the same connection teardown as bans, without banning the user
+ * or stopping their runs. Existing MCP requests subscribe to this bus too.
+ */
+export function announceUserSessionsRevoked(userId: string): void {
+  announceUserBanned(userId, "session-revocation");
 }

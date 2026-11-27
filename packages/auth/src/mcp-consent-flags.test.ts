@@ -1,13 +1,26 @@
 import type { MockInstance } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@cockpit-context/db", () => {
-  const db = {
-    mcpGrant: { createMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
-    oauthClient: { findUnique: vi.fn() },
-    // Interactive transactions run against the same mock.
-    $transaction: vi.fn(async (run: (tx: unknown) => unknown) => run(db)),
-  };
+vi.mock("@cockpit-context/db", async () => {
+  const { createMockContext } = await vi.importActual<{
+    createMockContext: () => { db: typeof prisma };
+  }>("../../test-utils/src/index");
+  const db = createMockContext().db;
+  vi.mocked(db.$transaction).mockImplementation(async (run: unknown) => {
+    if (typeof run !== "function") throw new Error("Expected interactive transaction");
+    return run(db);
+  });
+  vi.mocked(db.session.findFirst).mockResolvedValue({
+    id: "s1",
+    userId: "u",
+    token: "session-token",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    ipAddress: null,
+    userAgent: null,
+    impersonatedBy: null,
+  });
   return { default: db };
 });
 
@@ -16,7 +29,9 @@ const { consentAccepts, consentFlagsOf, consentIssuedCode, recordConsentedMcpGra
   await import("./mcp-consent-flags");
 
 const db = prisma as unknown as {
-  mcpGrant: { createMany: MockInstance; findUnique: MockInstance; updateMany: MockInstance };
+  mcpGrant: { findUnique: MockInstance; createMany: MockInstance; updateMany: MockInstance };
+  oauthClient: { findUnique: MockInstance };
+  session: { findFirst: MockInstance };
 };
 
 describe("consentFlagsOf", () => {
@@ -62,6 +77,7 @@ describe("consent outcome predicates", () => {
 describe("recordConsentedMcpGrantFlags", () => {
   const input = {
     userId: "user-a",
+    sessionId: "s1",
     clientId: "client-1",
     referenceId: "ref-1",
     clientName: "Claude Code",

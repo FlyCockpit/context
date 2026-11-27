@@ -1,20 +1,37 @@
 import type { MockInstance } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@cockpit-context/db", () => ({
-  default: {
-    mcpGrant: { findUnique: vi.fn(), createMany: vi.fn() },
-    oauthClient: { findUnique: vi.fn() },
-  },
-}));
+vi.mock("@cockpit-context/db", async () => {
+  const { createMockContext } = await vi.importActual<{
+    createMockContext: () => { db: typeof prisma };
+  }>("../../test-utils/src/index");
+  const db = createMockContext().db;
+  vi.mocked(db.$transaction).mockImplementation(async (run: unknown) => {
+    if (typeof run !== "function") throw new Error("Expected interactive transaction");
+    return run(db);
+  });
+  vi.mocked(db.session.findFirst).mockResolvedValue({
+    id: "s1",
+    userId: "u",
+    token: "session-token",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    ipAddress: null,
+    userAgent: null,
+    impersonatedBy: null,
+  });
+  return { default: db };
+});
 
 const { default: prisma } = await import("@cockpit-context/db");
 const { deriveMcpConsentReferenceId, issueMcpGrantClaims, McpGrantError, resolveMcpGrantDecision } =
   await import("./mcp-grant");
 
 const db = prisma as unknown as {
-  mcpGrant: { findUnique: MockInstance; createMany: MockInstance };
+  mcpGrant: { findUnique: MockInstance; createMany: MockInstance; updateMany: MockInstance };
   oauthClient: { findUnique: MockInstance };
+  session: { findFirst: MockInstance };
 };
 
 const SECRET = "secret-for-tests-0123456789abcdef";
@@ -82,6 +99,7 @@ describe("issueMcpGrantClaims", () => {
     await expect(
       issueMcpGrantClaims({
         grantType: "authorization_code",
+        sessionId: "s1",
         userId: "u",
         clientId: "c",
         referenceId: "r",
@@ -96,6 +114,7 @@ describe("issueMcpGrantClaims", () => {
     await expect(
       issueMcpGrantClaims({
         grantType: "authorization_code",
+        sessionId: "s1",
         userId: "u",
         clientId: "c",
         referenceId: "r",

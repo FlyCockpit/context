@@ -8,7 +8,18 @@ const SECRET = "test-better-auth-secret-0123456789abcdef";
 
 vi.mock("@cockpit-context/db", async () => {
   const { mockDeep } = await import("vitest-mock-extended");
-  const db = mockDeep();
+  const db = mockDeep<typeof prisma>();
+  db.session.findFirst.mockResolvedValue({
+    id: "session-user-a",
+    userId: "user-a",
+    token: "test-token",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    ipAddress: null,
+    userAgent: null,
+    impersonatedBy: null,
+  });
   db.appSetting.findMany.mockResolvedValue([]);
   db.$transaction.mockImplementation(async (fn: unknown) =>
     typeof fn === "function" ? fn(db) : undefined,
@@ -34,6 +45,7 @@ const { mcpTokensRouter } = await import("./mcp-tokens");
 
 const db = prisma as unknown as {
   $transaction: MockInstance;
+  session: { findFirst: MockInstance };
   mcpAgentToken: {
     findMany: MockInstance;
     findFirst: MockInstance;
@@ -122,7 +134,7 @@ describe("mcpTokensRouter", () => {
       expect(db.mcpAgentToken.create.mock.calls[0]?.[0].select).not.toHaveProperty("secretDigest");
       expect(result.token).not.toHaveProperty("secretDigest");
       expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-        isolationLevel: "Serializable",
+        isolationLevel: "ReadCommitted",
       });
     });
 
@@ -267,7 +279,7 @@ describe("mcpTokensRouter", () => {
       });
       expect(revoke.data).toEqual({ revokedAt: expect.any(Date) });
       expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-        isolationLevel: "Serializable",
+        isolationLevel: "ReadCommitted",
       });
 
       const data = db.mcpAgentToken.create.mock.calls[0]?.[0].data;

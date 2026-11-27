@@ -5,6 +5,7 @@ import {
   createSetPasswordToken,
   recordResetLinkMailed,
 } from "@cockpit-context/auth/invite-verification";
+import { oauthRevocationWrites } from "@cockpit-context/auth/oauth-revocation";
 import { isAdminRole } from "@cockpit-context/auth/roles";
 import { invalidateSignupAvailabilityCache } from "@cockpit-context/auth/signup-availability";
 import {
@@ -26,13 +27,11 @@ import {
 } from "@cockpit-context/mailer";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-
 import { adminOr404Procedure } from "../index";
 import { recordAdminAudit } from "../lib/admin-audit";
 import { reasonError, withDomainErrors } from "../lib/domain-errors";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
 import { prepareUserDeletion, stopUserRuns } from "../lib/user-deletion";
-import { oauthRevocationWrites } from "./mcp-connections";
 
 // Wire Better-Auth admin/remove-user through the same cleanup as users.remove.
 registerUserDeletionCleanup(prepareUserDeletion);

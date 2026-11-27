@@ -1,4 +1,5 @@
 import { isUserBanned, onUserBanned } from "@cockpit-context/auth/ban";
+import { hasLiveSession } from "@cockpit-context/auth/oauth-revocation";
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { env } from "@cockpit-context/env/server";
 import { ORPCError } from "@orpc/server";
@@ -11,7 +12,7 @@ import { ORPCError } from "@orpc/server";
  * opened it. One tab holds one `activity` and at most one `watch`; the
  * default 20 is a person with ten tabs open.
  *
- * The registry also ends them on a ban. A stream is admitted once, when it
+ * The registry also ends them on a ban or password recovery. A stream is admitted once, when it
  * opens; nothing on the request path re-checks it afterwards. So every
  * application ban path announces the ban (`announceUserBanned`,
  * packages/auth/src/ban.ts) and {@link closeUserLiveStreams} aborts each of
@@ -56,7 +57,7 @@ const banStateSelect = { banned: true, banExpires: true } satisfies Prisma.UserS
  * `TOO_MANY_REQUESTS` (the web client retries with backoff, so a slot freed
  * by closing a tab is picked up).
  *
- * Then re-reads the user's ban state from the database, and refuses with
+ * Then re-reads the session and the user's ban state from the database, and refuses with
  * `UNAUTHORIZED` if they are banned or gone. The session that admitted the
  * request may be a signed cookie-cache copy from up to 60 s before a ban
  * (`checkSessionAccess`, packages/api/src/index.ts), so without this read a
@@ -67,6 +68,7 @@ const banStateSelect = { banned: true, banExpires: true } satisfies Prisma.UserS
  */
 export async function openLiveStream(
   userId: string,
+  sessionId: string,
   requestSignal?: AbortSignal,
 ): Promise<LiveStream> {
   const open = liveStreams.get(userId);
@@ -92,7 +94,8 @@ export async function openLiveStream(
 
   try {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: banStateSelect });
-    if (!user || isUserBanned(user)) throw new ORPCError("UNAUTHORIZED");
+    if (!user || isUserBanned(user) || !(await hasLiveSession(prisma, userId, sessionId)))
+      throw new ORPCError("UNAUTHORIZED");
   } catch (error) {
     release();
     throw error;

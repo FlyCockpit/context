@@ -554,7 +554,7 @@ export const conversationsRouter = {
     const ownerId = context.session.user.id;
     const conversation = await ownedConversation(context, input.id);
     const engine = getRunEngine();
-    const stream = await openLiveStream(ownerId, signal);
+    const stream = await openLiveStream(ownerId, context.session.session.id, signal);
     try {
       const events = engine.bus.iterate(conversation.id, { signal: stream.signal });
       try {
@@ -595,7 +595,7 @@ export const conversationsRouter = {
   activity: protectedProcedure.handler(async function* ({ context, signal }) {
     const userId = context.session.user.id;
     const engine = getRunEngine();
-    const stream = await openLiveStream(userId, signal);
+    const stream = await openLiveStream(userId, context.session.session.id, signal);
     try {
       const events = engine.activity.iterate(userId, { signal: stream.signal });
       try {

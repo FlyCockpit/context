@@ -39,10 +39,10 @@
     "currentPasswordLabel": "Contraseña actual",
     "newPasswordLabel": "Nueva contraseña",
     "confirmPasswordLabel": "Confirma la nueva contraseña",
-    "passwordSessionRevocation": "Después de que cambies tu contraseña, todos los demás dispositivos cerrarán sesión. Este dispositivo permanecerá con la sesión iniciada.",
+    "passwordSessionRevocation": "Al cambiar tu contraseña, se cerrará la sesión en los demás dispositivos y se revocarán todos tus tokens de CLI/API y conexiones OAuth. Este dispositivo mantendrá la sesión iniciada.",
     "changePassword": "Cambiar contraseña",
     "changingPassword": "Cambiando contraseña…",
-    "passwordChangedSuccess": "Contraseña cambiada. Los otros dispositivos han cerrado sesión.",
+    "passwordChangedSuccess": "Contraseña cambiada. Se cerró la sesión en los demás dispositivos y se revocaron tus tokens de CLI/API y conexiones OAuth.",
     "currentPasswordMismatch": "Tu contraseña actual no coincide.",
     "passwordChangeError": "No se pudo cambiar tu contraseña. Intenta de nuevo."
   },

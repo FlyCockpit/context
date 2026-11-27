@@ -10,14 +10,16 @@ import {
 } from "@cockpit-context/mailer";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { deleteSessionCookie } from "better-auth/cookies";
 import { admin, genericOAuth, twoFactor } from "better-auth/plugins";
 import { adminPluginAccess } from "./admin-access.js";
-import { announceIfUserBanned } from "./ban.js";
+import { announceIfUserBanned, announceUserSessionsRevoked } from "./ban.js";
 import { bannedSessionGuard } from "./banned-session-guard.js";
 import { revokeBootstrapToken } from "./bootstrap-token.js";
 import { createResetLinkHooks } from "./invite-verification.js";
 import { resolveMcpPlugins } from "./mcp-plugins.js";
+import { revokeUserCredentials } from "./oauth-revocation.js";
 import { createPasswordPepper } from "./password-pepper.js";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password-policy.js";
 import {
@@ -51,6 +53,10 @@ const emailConfigured = isEmailConfigured();
 // Which set-password links verify an address and who may spend them: only a
 // link mailed to the address proves it (./invite-verification.ts).
 const resetLinks = createResetLinkHooks({ emailConfigured });
+// Better Auth runs after-hooks for APIError, but skips them for other thrown
+// errors. Carry a failed post-sweep through that path so mailed-link verification
+// still finishes before the original revocation error reaches the caller.
+const resetRevocationFailures = new WeakMap<APIError, { error: unknown }>();
 
 // Better-Auth emits "user input failed validation" cases (wrong password, unknown
 // email, unverified email, etc.) at level=error. Those are normal end-user mistakes,
@@ -183,12 +189,32 @@ export const auth = betterAuth({
     // able to authenticate.
     minPasswordLength: PASSWORD_MIN_LENGTH,
     maxPasswordLength: PASSWORD_MAX_LENGTH,
+    revokeSessionsOnPasswordReset: true,
     ...(emailConfigured ? { sendResetPassword } : {}),
-    // The user just chose a password, so their other links die (one the
-    // admin was shown included). Runs after the password is committed, so a
-    // failure is logged, never surfaced (./invite-verification.ts).
     onPasswordReset: async ({ user }) => {
+      // Defense in depth after Better Auth commits the password and session deletion.
+      announceUserSessionsRevoked(user.id);
+      let revocationFailure: { error: unknown } | undefined;
+      try {
+        await revokeUserCredentials(user.id);
+      } catch (err) {
+        console.error(
+          "SECURITY password-reset after-sweep failed",
+          user.id,
+          err instanceof Error ? err.name : typeof err,
+        );
+        revocationFailure = { error: err };
+      }
+      // Upstream cleanup is best-effort after the password is committed, even
+      // when the post-sweep failed. Mailed-link verification runs in hooks.after.
       await resetLinks.afterPasswordReset((await auth.$context).adapter, user.id);
+      if (revocationFailure) {
+        const pending = new APIError("INTERNAL_SERVER_ERROR", {
+          message: "Password-reset credential revocation failed",
+        });
+        resetRevocationFailures.set(pending, revocationFailure);
+        throw pending;
+      }
     },
   },
   ...(emailConfigured ? { emailVerification } : {}),
@@ -244,24 +270,132 @@ export const auth = betterAuth({
     // Sign-up answers byte-identically for a free and a registered address,
     // so it is no account-existence oracle (./signup-response.ts).
     before: createAuthMiddleware(async (ctx) => {
+      // Run before plugin hooks can resolve a signed cache copy. Anonymous
+      // credential/token exchanges must still work with an old browser cookie.
+      // Mixed endpoints (e.g. 2FA verification) are checked when they carry a
+      // session token; without one, their anonymous challenge flow continues.
+      const anonymous =
+        ctx.path.startsWith("/sign-in/") ||
+        ctx.path.startsWith("/sign-up/") ||
+        ctx.path.startsWith("/callback/") ||
+        ctx.path.startsWith("/oauth2/callback/") ||
+        [
+          "/sign-out",
+          "/reset-password",
+          "/request-password-reset",
+          "/send-verification-email",
+          "/oauth2/token",
+          "/oauth2/register",
+          "/oauth2/introspect",
+          "/oauth2/revoke",
+        ].includes(ctx.path);
+      if (ctx.request && !["GET", "HEAD", "OPTIONS"].includes(ctx.method ?? "GET") && !anonymous) {
+        const token = await ctx.getSignedCookie(
+          ctx.context.authCookies.sessionToken.name,
+          ctx.context.secret,
+        );
+        if (token) {
+          // No secondaryStorage is configured: findSession reads the DB row.
+          // A failed lookup throws before any write or cookie renewal.
+          const live = await ctx.context.internalAdapter.findSession(token);
+          if (!live || live.session.expiresAt <= new Date()) {
+            ctx.context.session = null;
+            deleteSessionCookie(ctx);
+            // Before-hook errors bypass dispatch's normal header merge in 1.7.18.
+            throw new APIError(
+              "UNAUTHORIZED",
+              { message: "Unauthorized", code: "UNAUTHORIZED" },
+              ctx.responseHeaders,
+            );
+          }
+          ctx.context.session = live;
+        }
+      }
+
+      if (ctx.path === "/reset-password") {
+        // Mirror 1.7.18's body/query token fallback and expiry comparison.
+        const token = ctx.body?.token || ctx.query?.token;
+        if (typeof token === "string" && token) {
+          let userId: string | undefined;
+          try {
+            // Judge invite activation before the pre-sweep deletes live sessions:
+            // a shown link must not become redeemable because we signed its owner out.
+            await resetLinks.before(ctx);
+            const verification = await ctx.context.internalAdapter.findVerificationValue(
+              `reset-password:${token}`,
+            );
+            if (verification && !(verification.expiresAt < new Date())) {
+              userId = verification.value;
+              // Sessions and credentials are revoked under the same issuance lock.
+              // If reset fails before committing, the user is signed out
+              // everywhere with the password unchanged and reset link intact:
+              // the safe direction.
+              await revokeUserCredentials(userId, { revokeSessions: true });
+            }
+          } catch (error) {
+            if (error instanceof APIError) throw error;
+            console.error(
+              "SECURITY password-reset preflight failed",
+              userId ?? "unknown",
+              error instanceof Error ? error.name : typeof error,
+            );
+            throw new APIError("SERVICE_UNAVAILABLE", {
+              message:
+                "We couldn't finish securing your account. Nothing was changed — try the link again.",
+            });
+          }
+        }
+      }
+
       if (ctx.path === SIGN_UP_EMAIL_PATH) {
         await snapshotSignUpRequest(ctx, {
           emailVerificationRequired: emailConfigured,
           isSignupOpen,
         });
       }
-      // A link the admin was shown (not mailed) works only while the account
-      // is a pending invite, so one left over once the invitee activated the
-      // account another way is dead. Refused exactly like an expired token,
-      // which the reset page already handles (./invite-verification.ts).
-      await resetLinks.before(ctx);
     }),
     after: createAuthMiddleware(async (ctx) => {
+      if (
+        ctx.path === "/change-password" &&
+        ctx.body?.revokeOtherSessions === true &&
+        !(ctx.context.returned instanceof APIError) &&
+        ctx.context.session &&
+        ctx.context.returned &&
+        typeof ctx.context.returned === "object" &&
+        "user" in ctx.context.returned
+      ) {
+        const userId = ctx.context.session.user.id;
+        announceUserSessionsRevoked(userId);
+        try {
+          // Better Auth preserves the caller via a replacement session. Only
+          // standing credentials are swept here; no session rows are deleted.
+          await revokeUserCredentials(userId);
+        } catch (error) {
+          console.error(
+            "SECURITY change-password after-sweep failed",
+            userId,
+            error instanceof Error ? error.name : typeof error,
+          );
+          throw error;
+        }
+      }
+
       if (ctx.path === SIGN_UP_EMAIL_PATH) {
         return neutralizeSignUpResponse(ctx, { emailVerificationRequired: emailConfigured });
       }
-      // A spent mailed link verifies the address it went to.
-      await resetLinks.after(ctx);
+      const pending = ctx.context.returned;
+      const revocationFailure =
+        pending instanceof APIError ? resetRevocationFailures.get(pending) : undefined;
+      // The callback ran only after the password committed. Even if its sweep
+      // failed, finish upstream's per-token, mailbox-bound verification first.
+      await resetLinks.after(
+        revocationFailure
+          ? { ...ctx, context: { ...ctx.context, returned: { status: true } } }
+          : ctx,
+      );
+      if (revocationFailure) {
+        throw revocationFailure.error;
+      }
     }),
   },
   plugins: [

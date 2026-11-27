@@ -111,11 +111,13 @@ function ResetPasswordForm({
   onTokenRejected: () => void;
 }) {
   const navigate = useNavigate();
-  const { t } = useTranslation(["auth", "validation"]);
+  const { t } = useTranslation(["auth", "validation", "common"]);
+  const [submitError, setSubmitError] = useState<"retryable" | "failed" | null>(null);
 
   const form = useForm({
     defaultValues: { newPassword: "", confirmPassword: "" },
     onSubmit: async ({ value }) => {
+      setSubmitError(null);
       const result = await authClient.resetPassword({
         newPassword: value.newPassword,
         token,
@@ -125,11 +127,14 @@ function ResetPasswordForm({
           toast.error(friendly(result.error));
           return;
         }
-        // A rejected token (expired / already used) is the common failure here
-        // — surface the invalid state with a path back to forgot-password.
+        // 1.7.18 uses INVALID_TOKEN for both invalid and expired reset links.
+        // A retryable pre-sweep 503 leaves the password and token unchanged.
+        if (result.error.code === "INVALID_TOKEN") {
+          onTokenRejected();
+          return;
+        }
         console.error("[reset-password.reset]", result.error);
-        toast.error(t("auth:resetPassword.failed"));
-        onTokenRejected();
+        setSubmitError(result.error.status === 503 ? "retryable" : "failed");
         return;
       }
       toast.success(t(invite ? "auth:resetPassword.inviteSuccess" : "auth:resetPassword.success"));
@@ -184,6 +189,12 @@ function ResetPasswordForm({
         )}
       </form.Field>
 
+      {submitError && (
+        <p role="alert" className="text-sm text-destructive">
+          {t(`auth:resetPassword.${submitError}`)}
+        </p>
+      )}
+
       <form.Subscribe
         selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting })}
       >
@@ -195,7 +206,9 @@ function ResetPasswordForm({
           >
             {isSubmitting
               ? t("auth:resetPassword.resetting")
-              : t(invite ? "auth:resetPassword.inviteSubmit" : "auth:resetPassword.submit")}
+              : submitError
+                ? t("common:actions.retry")
+                : t(invite ? "auth:resetPassword.inviteSubmit" : "auth:resetPassword.submit")}
           </Button>
         )}
       </form.Subscribe>

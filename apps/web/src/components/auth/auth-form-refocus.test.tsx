@@ -1,6 +1,8 @@
 import enAuth from "@cockpit-context/locales/src/en-US/auth.json";
 import enCommon from "@cockpit-context/locales/src/en-US/common.json";
 import enNav from "@cockpit-context/locales/src/en-US/nav.json";
+import esAuth from "@cockpit-context/locales/src/es-MX/auth.json";
+import esCommon from "@cockpit-context/locales/src/es-MX/common.json";
 import { createInstance } from "i18next";
 import { act, type ComponentType, lazy, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -32,6 +34,9 @@ type Snapshot = {
 };
 
 const fixture = vi.hoisted(() => ({
+  lang: "en-US",
+  resetPassword: vi.fn(),
+  navigate: vi.fn(),
   snapshot: {
     data: null,
     isPending: true,
@@ -63,14 +68,14 @@ vi.mock("@tanstack/react-form", async (importOriginal) => {
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({
     options,
-    useParams: () => ({ lang: "en-US" }),
-    useSearch: () => ({}),
+    useParams: () => ({ lang: fixture.lang }),
+    useSearch: () => ({ token: "reset-token" }),
   }),
   lazyRouteComponent: (importer: () => Promise<Record<string, unknown>>, name = "default") =>
     lazy(async () => ({ default: (await importer())[name] as ComponentType })),
   redirect: (options: unknown) => ({ redirect: options }),
-  useNavigate: () => vi.fn(),
-  useParams: () => ({ lang: "en-US" }),
+  useNavigate: () => fixture.navigate,
+  useParams: () => ({ lang: fixture.lang }),
   Link: ({ to, className, children }: { to: string; className?: string; children: ReactNode }) => (
     <a data-to={to} className={className ?? ""}>
       {children}
@@ -88,7 +93,10 @@ vi.mock("@/utils/orpc", () => ({
   },
 }));
 vi.mock("@/lib/auth-client", () => ({
-  authClient: { useSession: () => ({ ...fixture.snapshot, refetch: vi.fn() }) },
+  authClient: {
+    useSession: () => ({ ...fixture.snapshot, refetch: vi.fn() }),
+    resetPassword: fixture.resetPassword,
+  },
 }));
 vi.mock("@/hooks/use-network-status", () => ({ useNetworkStatus: () => true }));
 vi.mock("@cockpit-context/env/web", () => ({ env: { VITE_APP_NAME: "Northwind" } }));
@@ -99,6 +107,7 @@ vi.mock("@/server/auth-session", () => ({
 
 const { resetAuthSessionMemoryForTests } = await import("@/hooks/use-auth-session");
 const { Route: LoginRoute } = await import("@/routes/$lang/_app/login");
+const { Route: ResetRoute } = await import("@/routes/$lang/_app/reset-password");
 const { Route: SignupRoute } = await import("@/routes/$lang/_app/signup");
 const { default: UserMenu } = await import("@/components/user-menu");
 
@@ -106,13 +115,20 @@ const i18n = createInstance();
 beforeAll(async () => {
   await i18n.init({
     lng: "en-US",
-    resources: { "en-US": { auth: enAuth, common: enCommon, nav: enNav } },
+    resources: {
+      "en-US": { auth: enAuth, common: enCommon, nav: enNav },
+      "es-MX": { auth: esAuth, common: esCommon },
+    },
     interpolation: { escapeValue: false },
     react: { useSuspense: false },
   });
   // Load the split route chunks once, before any test stubs `window`: their
   // imports read the real (absent) one at module load.
-  for (const Page of [page(LoginRoute).component, page(SignupRoute).component]) {
+  for (const Page of [
+    page(LoginRoute).component,
+    page(SignupRoute).component,
+    page(ResetRoute).component,
+  ]) {
     await render(Page, FIRST_LOAD);
   }
 });
@@ -441,5 +457,109 @@ describe.each([
     expect(remounted).not.toBe(email);
     expect(remounted?.value).toBe("");
     expect(formApis.size).toBe(2);
+  });
+});
+
+describe.each(["en-US", "es-MX"])("reset password recovery in %s", (lang) => {
+  let container: FakeElement;
+  let root: Root;
+  beforeEach(async () => {
+    const doc = new FakeDocument();
+    const classes = {
+      Node: FakeNode,
+      Element: FakeElement,
+      HTMLElement: FakeElement,
+      HTMLIFrameElement: class {},
+    };
+    const win = { ...classes, document: doc, addEventListener() {}, removeEventListener() {} };
+    doc.defaultView = win;
+    vi.stubGlobal("window", win);
+    vi.stubGlobal("document", doc);
+    for (const [name, value] of Object.entries(classes)) vi.stubGlobal(name, value);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    container = doc.body.appendChild(doc.createElement("div"));
+    root = createRoot(container as unknown as Element);
+    formApis.clear();
+    fixture.lang = lang;
+    fixture.resetPassword.mockReset();
+    fixture.navigate.mockReset();
+    await i18n.changeLanguage(lang);
+    const Page = page(ResetRoute).component;
+    await act(async () =>
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <Page />
+        </I18nextProvider>,
+      ),
+    );
+  });
+  afterEach(async () => {
+    act(() => root.unmount());
+    fixture.lang = "en-US";
+    await i18n.changeLanguage("en-US");
+  });
+
+  async function submit() {
+    const [form] = [...formApis] as (FormApi & {
+      handleSubmit: () => Promise<void>;
+      getFieldValue: (name: string) => string;
+    })[];
+    if (!form) throw new Error("Missing reset form");
+    await act(async () => {
+      form.setFieldValue("newPassword", "replacement-password-456");
+      form.setFieldValue("confirmPassword", "replacement-password-456");
+    });
+    await act(async () => form.handleSubmit());
+    return form;
+  }
+
+  it("keeps the typed password after 503 and retries the same token", async () => {
+    fixture.resetPassword.mockResolvedValueOnce({
+      error: { status: 503, message: "preflight failed" },
+    });
+    const input = findInput(container, "password");
+    const form = await submit();
+    expect(Boolean(findInput(container, "password"))).toBe(true);
+    expect(findInput(container, "password")).toBe(input);
+    expect(input?.value).toBe("replacement-password-456");
+    expect(form.getFieldValue("confirmPassword")).toBe("replacement-password-456");
+    const messages = lang === "es-MX" ? esAuth : enAuth;
+    expect(container.textContent).toContain(messages.resetPassword.retryable);
+    expect(container.textContent).toContain(i18n.t("common:actions.retry"));
+    expect(container.textContent).not.toContain(messages.resetPassword.invalidTitle);
+    expect(fixture.navigate).not.toHaveBeenCalled();
+    fixture.resetPassword.mockResolvedValueOnce({ error: null });
+    await act(async () => form.handleSubmit());
+    expect(fixture.resetPassword).toHaveBeenCalledTimes(2);
+    expect(fixture.resetPassword).toHaveBeenLastCalledWith({
+      token: "reset-token",
+      newPassword: "replacement-password-456",
+    });
+    expect(fixture.navigate).toHaveBeenCalledOnce();
+    expect(formApis.size).toBe(1);
+  });
+
+  it.each([400, 500])("keeps the form for a non-token error with status %s", async (status) => {
+    fixture.resetPassword.mockResolvedValueOnce({ error: { status, code: "OTHER_ERROR" } });
+    await submit();
+    expect(Boolean(findInput(container, "password"))).toBe(true);
+    expect(container.textContent).toContain(
+      (lang === "es-MX" ? esAuth : enAuth).resetPassword.failed,
+    );
+    expect(container.textContent).not.toContain(
+      (lang === "es-MX" ? esAuth : enAuth).resetPassword.invalidTitle,
+    );
+  });
+
+  it("shows an invalid link for the pinned invalid/expired token code", async () => {
+    fixture.resetPassword.mockResolvedValueOnce({ error: { status: 400, code: "INVALID_TOKEN" } });
+    await submit();
+    expect(findInput(container, "password")).toBeUndefined();
+    expect(container.textContent).toContain(
+      (lang === "es-MX" ? esAuth : enAuth).resetPassword.invalidTitle,
+    );
+    expect(container.textContent).toContain(
+      (lang === "es-MX" ? esAuth : enAuth).resetPassword.requestNewLink,
+    );
   });
 });

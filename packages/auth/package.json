@@ -25,6 +25,9 @@
     "./mcp-grant": {
       "default": "./src/mcp-grant.ts"
     },
+    "./oauth-revocation": {
+      "default": "./src/oauth-revocation.ts"
+    },
     "./password-pepper-store": {
       "default": "./src/password-pepper-store.ts"
     },

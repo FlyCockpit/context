@@ -1,7 +1,12 @@
 import { normalizeMcpFlags as flags } from "@cockpit-context/auth/mcp-consent-flags";
+import {
+  hasLiveSession,
+  withUserCredentialTransaction,
+} from "@cockpit-context/auth/oauth-revocation";
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { mintMcpAgentToken } from "@cockpit-context/db/mcp-agent-token";
 import { env } from "@cockpit-context/env/server";
+import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 
 import { protectedProcedure } from "../index";
@@ -31,11 +36,11 @@ const MCP_TOKEN_MAX_ACTIVE_PER_USER = 50;
 /** A token may expire at most this far ahead (or never). */
 const MAX_TTL_MS = 365 * 86_400_000;
 
-/** Attempts at the Serializable create before giving up with CONFLICT. */
+/** Attempts at the locked create before giving up with CONFLICT. */
 const CREATE_ATTEMPTS = 3;
 
 /**
- * Run a Serializable transaction, again when Postgres aborts it for a
+ * Run a per-user locked transaction, again when Postgres aborts it for a
  * concurrent one (P2034). Nothing was written, so a re-run re-reads and the
  * limits it checks still hold; after a few losses say CONFLICT rather than a 500.
  */
@@ -151,30 +156,30 @@ export const mcpTokensRouter = {
       await consumeCreateBudget(`user:${userId}`);
       const minted = mintMcpAgentToken(env.BETTER_AUTH_SECRET);
       const insert = () =>
-        prisma.$transaction(
-          async (tx) => {
-            const active = await tx.mcpAgentToken.count({ where: activeWhere(userId, now) });
-            if (active >= MCP_TOKEN_MAX_ACTIVE_PER_USER) {
-              throw reasonError(
-                "CONFLICT",
-                "TOKEN_LIMIT",
-                "Active token limit reached. Revoke a token before creating another.",
-              );
-            }
-            return tx.mcpAgentToken.create({
-              data: {
-                userId,
-                name: input.name,
-                lookupPrefix: minted.lookupPrefix,
-                secretDigest: minted.secretDigest,
-                expiresAt,
-                ...flags(input.allowPropose, input.autoApprove),
-              },
-              select: mcpTokenSelect,
-            });
-          },
-          { isolationLevel: "Serializable" },
-        );
+        withUserCredentialTransaction(userId, async (tx) => {
+          if (!(await hasLiveSession(tx, userId, context.session.session.id))) {
+            throw new ORPCError("UNAUTHORIZED");
+          }
+          const active = await tx.mcpAgentToken.count({ where: activeWhere(userId, now) });
+          if (active >= MCP_TOKEN_MAX_ACTIVE_PER_USER) {
+            throw reasonError(
+              "CONFLICT",
+              "TOKEN_LIMIT",
+              "Active token limit reached. Revoke a token before creating another.",
+            );
+          }
+          return tx.mcpAgentToken.create({
+            data: {
+              userId,
+              name: input.name,
+              lookupPrefix: minted.lookupPrefix,
+              secretDigest: minted.secretDigest,
+              expiresAt,
+              ...flags(input.allowPropose, input.autoApprove),
+            },
+            select: mcpTokenSelect,
+          });
+        });
       const row = await withSerializableRetry(
         insert,
         "Another token was being created at the same time. Try again.",
@@ -239,7 +244,7 @@ export const mcpTokensRouter = {
     }),
 
   /**
-   * Regenerate (rotate) a token: in one Serializable transaction the old row is
+   * Regenerate (rotate) a token: in one per-user locked transaction the old row is
    * revoked and a new row with a new secret, the same name, flags and expiry
    * is created. The `/mcp` resolver reads the row on every request (no cache),
    * so the old secret is refused from the next request on. The old row stays,
@@ -271,44 +276,44 @@ export const mcpTokensRouter = {
       await consumeCreateBudget(`user:${userId}`);
       const minted = mintMcpAgentToken(env.BETTER_AUTH_SECRET);
       const rotate = () =>
-        prisma.$transaction(
-          async (tx) => {
-            // Revoke only the live row exactly as it was read (name and flags are
-            // copied from that read); a concurrent revoke, rotation, rename or
-            // flag change makes this a no-op and the rotation stops.
-            const { count } = await tx.mcpAgentToken.updateMany({
-              where: {
-                id: current.id,
-                userId,
-                revokedAt: null,
-                name: current.name,
-                allowPropose: current.allowPropose,
-                autoApprove: current.autoApprove,
-                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-              },
-              data: { revokedAt: now },
-            });
-            if (count !== 1) {
-              throw reasonError(
-                "CONFLICT",
-                "TOKEN_CHANGED",
-                "That token changed or was revoked. Reload and try again.",
-              );
-            }
-            return tx.mcpAgentToken.create({
-              data: {
-                userId,
-                name: current.name,
-                lookupPrefix: minted.lookupPrefix,
-                secretDigest: minted.secretDigest,
-                expiresAt: current.expiresAt,
-                ...flags(current.allowPropose, current.autoApprove),
-              },
-              select: mcpTokenSelect,
-            });
-          },
-          { isolationLevel: "Serializable" },
-        );
+        withUserCredentialTransaction(userId, async (tx) => {
+          if (!(await hasLiveSession(tx, userId, context.session.session.id))) {
+            throw new ORPCError("UNAUTHORIZED");
+          }
+          // Revoke only the live row exactly as it was read (name and flags are
+          // copied from that read); a concurrent revoke, rotation, rename or
+          // flag change makes this a no-op and the rotation stops.
+          const { count } = await tx.mcpAgentToken.updateMany({
+            where: {
+              id: current.id,
+              userId,
+              revokedAt: null,
+              name: current.name,
+              allowPropose: current.allowPropose,
+              autoApprove: current.autoApprove,
+              OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            },
+            data: { revokedAt: now },
+          });
+          if (count !== 1) {
+            throw reasonError(
+              "CONFLICT",
+              "TOKEN_CHANGED",
+              "That token changed or was revoked. Reload and try again.",
+            );
+          }
+          return tx.mcpAgentToken.create({
+            data: {
+              userId,
+              name: current.name,
+              lookupPrefix: minted.lookupPrefix,
+              secretDigest: minted.secretDigest,
+              expiresAt: current.expiresAt,
+              ...flags(current.allowPropose, current.autoApprove),
+            },
+            select: mcpTokenSelect,
+          });
+        });
       const row = await withSerializableRetry(
         rotate,
         "That token was being changed at the same time. Try again.",

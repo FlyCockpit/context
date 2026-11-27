@@ -1,4 +1,5 @@
 import { normalizeMcpFlags } from "@cockpit-context/auth/mcp-consent-flags";
+import { oauthRevocationWrites } from "@cockpit-context/auth/oauth-revocation";
 import prisma, { type Prisma } from "@cockpit-context/db";
 import { z } from "zod";
 
@@ -29,35 +30,6 @@ const grantSelect = {
 } satisfies Prisma.McpGrantSelect;
 
 type GrantRow = Prisma.McpGrantGetPayload<{ select: typeof grantSelect }>;
-
-/**
- * Which OAuth MCP access a revocation ends: one generation (the user, client
- * and consent reference a grant belongs to), or, with `userId` alone, every
- * generation the user holds.
- */
-type OauthRevocationScope = { userId: string; clientId?: string; referenceId?: string };
-
-/**
- * The writes that end OAuth MCP access for `scope`, to run in one
- * `$transaction`: the matching grants become tombstones (`/mcp` refuses them
- * at once, even for an access JWT that has not expired yet, and token
- * issuance refuses them), and the stored access tokens, refresh tokens and
- * remembered consent are deleted, so reconnecting means a new sign-in and a
- * new consent. Shared by `revoke` (one generation) and `users.archive` (all of
- * a user's).
- */
-export function oauthRevocationWrites(scope: OauthRevocationScope, now = new Date()) {
-  return [
-    prisma.mcpGrant.updateMany({
-      where: { ...scope, revokedAt: null },
-      data: { revokedAt: now },
-    }),
-    // Access tokens first: they reference refresh tokens.
-    prisma.oauthAccessToken.deleteMany({ where: scope }),
-    prisma.oauthRefreshToken.deleteMany({ where: scope }),
-    prisma.oauthConsent.deleteMany({ where: scope }),
-  ];
-}
 
 function serializeGrant(row: GrantRow) {
   return {

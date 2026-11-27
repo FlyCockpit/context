@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
 import { getOAuthProviderState } from "@better-auth/oauth-provider";
-import prisma from "@cockpit-context/db";
+import prisma, { type Prisma } from "@cockpit-context/db";
+import { APIError } from "better-auth/api";
+import { hasLiveSession, withUserCredentialTransaction } from "./oauth-revocation";
 
 /**
  * Application-owned MCP grant generations (`McpGrant`), ported from
@@ -127,9 +129,10 @@ function findGrantByReference(
   userId: string,
   clientId: string,
   referenceId: string,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<McpGrantRecord | null> {
   return sanitizedGrantStorage("findGrantByReference", () =>
-    prisma.mcpGrant.findUnique({
+    db.mcpGrant.findUnique({
       where: { userId_clientId_referenceId: { userId, clientId, referenceId } },
       select: GRANT_SELECT,
     }),
@@ -174,36 +177,45 @@ export async function issueMcpGrantClaims({
   }
 
   if (grantType === "authorization_code" || grantType === "refresh_token") {
-    const existing = await findGrantByReference(userId, clientId, reference);
-    const decision = resolveMcpGrantDecision({
-      grantType,
-      userId,
-      referenceId: reference,
-      existing,
-    });
-    if (decision.action === "reject") {
-      throw new McpGrantError(
-        decision.reason,
-        `MCP grant decision rejected token issuance: ${decision.reason}`,
+    return withUserCredentialTransaction(userId, async (tx) => {
+      // Delayed code exchanges must never recreate a swept grant. Refreshes
+      // only reuse an existing generation; its tombstone fences late writes.
+      if (grantType === "authorization_code" && !(await hasLiveSession(tx, userId, sessionId))) {
+        throw new APIError("UNAUTHORIZED");
+      }
+      const existing = await findGrantByReference(userId, clientId, reference, tx);
+      const decision = resolveMcpGrantDecision({
+        grantType,
+        userId,
+        referenceId: reference,
+        existing,
+      });
+      if (decision.action === "reject") {
+        throw new McpGrantError(
+          decision.reason,
+          `MCP grant decision rejected token issuance: ${decision.reason}`,
+        );
+      }
+      if (decision.action === "reuse") return { [MCP_GRANT_ID_CLAIM]: decision.grant.id };
+      const clientName = await sanitizedGrantStorage("findClientName", () =>
+        tx.oauthClient.findUnique({ where: { clientId }, select: { name: true } }),
       );
-    }
-    if (decision.action === "reuse") return { [MCP_GRANT_ID_CLAIM]: decision.grant.id };
-    const clientName = await sanitizedGrantStorage("findClientName", () =>
-      prisma.oauthClient.findUnique({ where: { clientId }, select: { name: true } }),
-    );
-    // `skipDuplicates`: a racing creation (the consent hook) is not an error;
-    // the row is then read like any other.
-    await sanitizedGrantStorage("createMcpGrant", () =>
-      prisma.mcpGrant.createMany({
-        data: [{ userId, clientId, referenceId: reference, clientName: clientName?.name ?? null }],
-        skipDuplicates: true,
-      }),
-    );
-    const created = await findGrantByReference(userId, clientId, reference);
-    if (created === null || created.revokedAt !== null) {
-      throw new McpGrantError("tombstone", "MCP grant is not active");
-    }
-    return { [MCP_GRANT_ID_CLAIM]: created.id };
+      // `skipDuplicates`: a racing creation (the consent hook) is not an error;
+      // the row is then read like any other.
+      await sanitizedGrantStorage("createMcpGrant", () =>
+        tx.mcpGrant.createMany({
+          data: [
+            { userId, clientId, referenceId: reference, clientName: clientName?.name ?? null },
+          ],
+          skipDuplicates: true,
+        }),
+      );
+      const created = await findGrantByReference(userId, clientId, reference, tx);
+      if (created === null || created.revokedAt !== null) {
+        throw new McpGrantError("tombstone", "MCP grant is not active");
+      }
+      return { [MCP_GRANT_ID_CLAIM]: created.id };
+    });
   }
 
   const exact = await findGrantByReference(userId, clientId, reference);

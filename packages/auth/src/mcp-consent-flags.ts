@@ -30,6 +30,7 @@ import prisma from "@cockpit-context/db";
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { deriveMcpConsentReferenceId } from "./mcp-grant";
+import { hasLiveSession, withUserCredentialTransaction } from "./oauth-revocation";
 
 /** Better-Auth's consent endpoint path (router-relative). */
 export const MCP_CONSENT_ENDPOINT_PATH = "/oauth2/consent";
@@ -103,6 +104,7 @@ function invalidFlags(): APIError {
  */
 export async function recordConsentedMcpGrantFlags(input: {
   userId: string;
+  sessionId: string;
   clientId: string;
   referenceId: string;
   clientName: string | null;
@@ -115,7 +117,10 @@ export async function recordConsentedMcpGrantFlags(input: {
       referenceId: input.referenceId,
     },
   };
-  return prisma.$transaction(async (tx) => {
+  return withUserCredentialTransaction(input.userId, async (tx) => {
+    if (!(await hasLiveSession(tx, input.userId, input.sessionId))) {
+      throw new APIError("UNAUTHORIZED");
+    }
     // ON CONFLICT DO NOTHING: a racing create never aborts this transaction.
     const inserted = await tx.mcpGrant.createMany({
       data: [
@@ -193,6 +198,7 @@ export function mcpConsentFlags({ secret }: { secret: string }) {
               });
               await recordConsentedMcpGrantFlags({
                 userId: session.user.id,
+                sessionId: session.session.id,
                 clientId,
                 referenceId,
                 clientName: client?.name ?? null,
@@ -215,6 +221,7 @@ export function mcpConsentFlags({ secret }: { secret: string }) {
                   errorClass(forgetError),
                 );
               }
+              if (error instanceof APIError && error.status === "UNAUTHORIZED") throw error;
               throw new APIError("INTERNAL_SERVER_ERROR", { error: "server_error" });
             }
           }),

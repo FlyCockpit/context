@@ -8,7 +8,7 @@ import { anonymousContext, sessionContext } from "../test-support/context";
 
 vi.mock("@cockpit-context/db", async () => {
   const { mockDeep } = await import("vitest-mock-extended");
-  const db = mockDeep();
+  const db = mockDeep<typeof prisma>();
   db.appSetting.findMany.mockResolvedValue([]);
   return { default: db };
 });
@@ -45,7 +45,9 @@ vi.mock("@cockpit-context/runs", async () => ({
 const { default: prisma } = await import("@cockpit-context/db");
 const { RunEngineError } = await import("@cockpit-context/runs/errors");
 const { conversationsRouter } = await import("./conversations");
-const { announceUserBanned } = await import("@cockpit-context/auth/ban");
+const { announceUserBanned, announceUserSessionsRevoked } = await import(
+  "@cockpit-context/auth/ban"
+);
 const { liveStreamCount } = await import("../lib/live-streams");
 
 const db = prisma as unknown as {
@@ -54,6 +56,7 @@ const db = prisma as unknown as {
   runTurn: { findMany: MockInstance };
   package: { findFirst: MockInstance };
   user: { findUnique: MockInstance };
+  session: { findFirst: MockInstance };
 };
 
 const NOW = new Date("2026-10-01T00:00:00Z");
@@ -120,6 +123,7 @@ describe("conversationsRouter", () => {
     db.runTurn.findMany.mockResolvedValue([]);
     // The live-stream registry re-reads the ban state on every open.
     db.user.findUnique.mockResolvedValue({ banned: false, banExpires: null });
+    db.session.findFirst.mockResolvedValue({ id: "session-user-a" });
   });
 
   it("requires a session", async () => {
@@ -846,6 +850,45 @@ describe("conversationsRouter", () => {
       expect((await pending).value).toMatchObject({ type: "activity", conversationId: "c-2" });
       await other.return?.();
       expect(liveStreamCount("user-b")).toBe(0);
+    });
+
+    it("password recovery closes watch and activity, drops buffered events, and refuses cached-session reopen", async () => {
+      const watch = await openWatch();
+      const feed = await openActivity();
+      const other = await openActivity("user-b");
+      activity.publish("user-a", { conversationId: "c-1", runId: "r-1", change: "progress" });
+      db.session.findFirst.mockResolvedValue(null);
+      announceUserSessionsRevoked("user-a");
+      await expect(watch.next()).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      await expect(feed.next()).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      expect(liveStreamCount("user-a")).toBe(0);
+      await expect((await client().activity()).next()).rejects.toSatisfy(
+        expectReason("UNAUTHORIZED"),
+      );
+      db.conversation.findFirst.mockResolvedValueOnce({ id: "c-1" });
+      await expect((await client().watch({ id: "c-1" })).next()).rejects.toSatisfy(
+        expectReason("UNAUTHORIZED"),
+      );
+      const pending = other.next();
+      activity.publish("user-b", { conversationId: "c-2", runId: "r-2", change: "finished" });
+      expect((await pending).value).toMatchObject({ type: "activity", conversationId: "c-2" });
+      await other.return?.();
+    });
+
+    it("a reset announced during the authoritative session read prevents a stream slipping through", async () => {
+      let resolveRead: (value: unknown) => void = () => {};
+      db.session.findFirst.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRead = resolve;
+        }),
+      );
+      const iterator = await client().activity();
+      const first = iterator.next();
+      await vi.waitFor(() => expect(db.session.findFirst).toHaveBeenCalled());
+      announceUserSessionsRevoked("user-a");
+      resolveRead({ id: "session-user-a" });
+      await expect(first).rejects.toSatisfy(expectReason("UNAUTHORIZED"));
+      expect(liveStreamCount("user-a")).toBe(0);
     });
 
     it("delivers nothing the bus had buffered once the ban lands", async () => {
