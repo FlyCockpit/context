@@ -408,6 +408,8 @@ export function retryQueryAfterFailure(failureCount: number, error: unknown): bo
 }
 
 export function reportSessionRejected(error?: unknown): void {
+  // This module is process-wide on the server; only a browser owns this state.
+  if (typeof window === "undefined") return;
   // The RPC interceptor and QueryCache receive the same decoded error. That
   // final callback must not invalidate the authoritative probe it just started.
   if (error && typeof error === "object") {

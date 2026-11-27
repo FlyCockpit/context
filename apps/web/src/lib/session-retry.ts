@@ -1,4 +1,8 @@
-import { identityVerificationGeneration, isDocumentReplaced } from "./document-identity";
+import {
+  identityVerificationGeneration,
+  isDocumentIdentityUnverified,
+  isDocumentReplaced,
+} from "./document-identity";
 
 // One scheduler and one imperative check in flight for the whole document,
 // shared by headers, the identity watcher, and manual Retry actions.
@@ -24,7 +28,14 @@ function cancelTimer(): void {
 }
 
 function schedule(): void {
-  if (!clients.size || !failed || timer !== undefined || inFlight || nativeCheck || !available())
+  if (
+    !clients.size ||
+    (!failed && !isDocumentIdentityUnverified()) ||
+    timer !== undefined ||
+    inFlight ||
+    nativeCheck ||
+    !available()
+  )
     return;
   const delay = Math.max(
     Math.min(2_000 * 2 ** Math.min(attempt, 5), 60_000),
@@ -33,7 +44,8 @@ function schedule(): void {
   timer = setTimeout(() => {
     timer = undefined;
     const check = clients.values().next().value;
-    if (check && available()) void runSessionCheck(check, { automatic: true }).catch(() => {});
+    if (check && (failed || isDocumentIdentityUnverified()) && available())
+      void runSessionCheck(check, { automatic: true }).catch(() => {});
   }, delay);
 }
 
@@ -181,7 +193,9 @@ export async function waitForSessionCooldown(signal?: AbortSignal | null): Promi
 
 function resume(): void {
   cancelTimer();
-  if (!failed || !available()) return;
+  // A hint deferred by cooldown may have no failed snapshot yet. Keep its
+  // verification obligation in the same scheduler and coalesced request slot.
+  if ((!failed && !isDocumentIdentityUnverified()) || !available()) return;
   if (Date.now() < notBefore) {
     schedule();
     return;

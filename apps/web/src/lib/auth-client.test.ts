@@ -523,6 +523,40 @@ describe("lazy verifier lifecycle", () => {
 });
 
 describe("production decoded RPC401 and QueryCache path", () => {
+  it("propagates a decoded SSR 401 without mutating document identity state", async () => {
+    const { ORPCError, os } = await import("@orpc/server");
+    const { RPCHandler } = await import("@orpc/server/fetch");
+    const { identityVerificationGeneration, needsAuthoritativeSessionCheck } = await import(
+      "./document-identity"
+    );
+    const handler = new RPCHandler({
+      settings: {
+        getAll: os.handler(() => {
+          throw new ORPCError("UNAUTHORIZED");
+        }),
+      },
+    });
+    fetchMock.mockImplementation(async (input, init) => {
+      const result = await handler.handle(new Request(input, init), { prefix: "/rpc" });
+      if (!result.response) throw new Error("Unmatched fixture RPC");
+      return result.response;
+    });
+    const browser = window;
+    const since = identityVerificationGeneration();
+    vi.stubGlobal("window", undefined);
+    try {
+      const promise = orpc.settings.getAll.call();
+      const rejection = expect(promise).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+      await vi.advanceTimersByTimeAsync(0);
+      await rejection;
+      expect(needsAuthoritativeSessionCheck()).toBe(false);
+      expect(isDocumentIdentityUnverified()).toBe(false);
+      expect(identityVerificationGeneration()).toBe(since);
+      expect(mounted.refetch).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal("window", browser);
+    }
+  });
   it.each([false, true])(
     "reconciles first401 before retries (batched=%s), deduplicating final cache callbacks and burst errors",
     async (batched) => {
@@ -816,6 +850,96 @@ describe("delayed batch401 during an authoritative failure retry", () => {
       expect(reload).toHaveBeenCalledTimes(freshIdentity === "a" ? 0 : 1);
       if (freshIdentity === "a") expect(isDocumentIdentityUnverified()).toBe(false);
       client.clear();
+    },
+  );
+});
+
+describe("public deferred identity wake and server isolation", () => {
+  it.each(["hidden", "offline"])(
+    "preserves immediate public peer reconciliation while %s",
+    async (mode) => {
+      for (const cleanup of mounted.cleanups.splice(0)) cleanup();
+      resetDocumentIdentityForTests(() => peer);
+      Object.assign(window.location, { pathname: "/en-US/missing" });
+      Object.assign(document, { visibilityState: mode === "hidden" ? "hidden" : "visible" });
+      vi.stubGlobal("navigator", { onLine: mode !== "offline" });
+      const { watchDocumentRestore } = await import("./document-identity");
+      watchDocumentRestore();
+      expect(fetchMock).not.toHaveBeenCalled();
+      fetchMock.mockResolvedValue(
+        Response.json({ user: { id: "b" }, session: { expiresAt: "2099-01-01T00:00:00.000Z" } }),
+      );
+      peer.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(reload).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ["focus", false],
+    ["focus", true],
+    ["online", false],
+    ["online", true],
+    ["visibilitychange", false],
+    ["visibilitychange", true],
+  ] as const)(
+    "resumes a public obligation on %s (before cooldown expires=%s) without a failed snapshot",
+    async (event, early) => {
+      for (const cleanup of mounted.cleanups.splice(0)) cleanup();
+      resetDocumentIdentityForTests(() => peer);
+      Object.assign(window.location, { pathname: "/en-US/" });
+      Object.assign(document, { visibilityState: "visible" });
+      vi.stubGlobal("navigator", { onLine: true });
+      const { watchDocumentRestore } = await import("./document-identity");
+      const { recordSessionRetryAfter } = await import("./session-retry");
+      watchDocumentRestore();
+      window.dispatchEvent(new Event("focus"));
+      await settle();
+      expect(fetchMock).not.toHaveBeenCalled(); // public zero boot/focus probe
+      // A429 response establishes cooldown before its atom/error snapshot
+      // settles. No request has failed in this coordinator yet.
+      recordSessionRetryAfter(
+        new Response(null, { status: 429, headers: { "Retry-After": "60" } }),
+      );
+      Object.assign(document, { visibilityState: "hidden" });
+      peer.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+      await settle();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(isDocumentIdentityUnverified()).toBe(true);
+      let respond!: (response: Response) => void;
+      fetchMock.mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            respond = resolve;
+          }),
+      );
+      await vi.advanceTimersByTimeAsync(early ? 30_000 : 60_000);
+      expect(fetchMock).not.toHaveBeenCalled();
+      Object.assign(document, { visibilityState: "visible" });
+      const target = event === "visibilitychange" ? document : window;
+      target.dispatchEvent(new Event(event));
+      await settle();
+      if (early) {
+        expect(fetchMock).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(fetchMock).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // Burst wake events must join the same generation's pending request.
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("online"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      respond(
+        Response.json({ user: { id: "b" }, session: { expiresAt: "2099-01-01T00:00:00.000Z" } }),
+      );
+      await settle();
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     },
   );
 });
