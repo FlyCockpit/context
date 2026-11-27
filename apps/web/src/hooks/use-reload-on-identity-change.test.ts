@@ -500,6 +500,31 @@ describe("useReloadOnIdentityChange", () => {
     },
   );
 
+  it.each(["focus", "visibilitychange", "online"])(
+    "settled anonymous ignores %s until a peer invalidates its identity",
+    async (event) => {
+      await admitRouteIdentity({ status: "resolved", session: null });
+      boundary.checked = null;
+      useRenderWith({ status: "anonymous" });
+      fire(event);
+      await settle();
+      expect(boundary.refetch).not.toHaveBeenCalled();
+      const [channel] = FakeChannel.open;
+      boundary.checked = undefined;
+      channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+      await settle();
+      expect(boundary.refetch).toHaveBeenCalledTimes(1);
+      boundary.checked = null;
+      fire(event);
+      await settle();
+      expect(boundary.refetch).toHaveBeenCalledTimes(2);
+      expect(isDocumentIdentityUnverified()).toBe(false);
+      fire(event);
+      await settle();
+      expect(boundary.refetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it("a fresh check that confirms the same account lifts the neutral chrome", async () => {
     useRenderWith(user("a"));
     const [channel] = FakeChannel.open;

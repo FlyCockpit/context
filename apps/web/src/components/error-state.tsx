@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { useNetworkStatus } from "@/hooks/use-network-status";
 import { useRetryOnReconnect } from "@/hooks/use-retry-on-reconnect";
+import { markRouteIdentityUnconfirmed } from "@/lib/document-identity";
 import { isFetchFailure } from "@/lib/network-failure";
 
 import { friendly } from "../utils/friendly-error";
@@ -23,7 +24,13 @@ export default function ErrorState({ error }: ErrorComponentProps) {
   // and gives them new identities, which resets this boundary.
   // Hold successful ancestors pending before recovering a child boundary.
   // Every recovery reruns guards before private route context can render.
-  const retry = () => void router.invalidate({ forcePending: true });
+  const retry = () => {
+    const confirmRecovery = markRouteIdentityUnconfirmed();
+    void router
+      .invalidate({ forcePending: true })
+      .then(confirmRecovery)
+      .catch(() => {});
+  };
   useRetryOnReconnect(retry, !online);
 
   if (!online || isFetchFailure(error)) {
