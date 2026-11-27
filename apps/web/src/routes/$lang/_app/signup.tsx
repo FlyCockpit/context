@@ -127,14 +127,16 @@ function SignupPage() {
     // Terminal state after a successful signup: the account exists but is inert
     // until the emailed link is clicked, so say that plainly instead of dropping
     // the user back on a form or bouncing them off an authenticated route.
+    // A sign-up without a session only happens with SMTP on (without it the
+    // account is created verified and signed in), so a new address was sent a
+    // link: say so even if the config refetched since says mail is off, and let
+    // only the resend control follow the current config. The copy reads the
+    // same for a registered address (Better-Auth answers it identically and
+    // sends nothing), so it names both cases without telling them apart.
     body = (
       <AuthCard
-        title={canResend ? t("auth:verifyEmail.sentTitle") : t("auth:verifyEmail.pendingTitle")}
-        description={
-          canResend
-            ? t("auth:verifyEmail.sentDescription", { email: pendingEmail })
-            : t("auth:verifyEmail.accountCreatedNoEmail", { email: pendingEmail })
-        }
+        title={t("auth:verifyEmail.sentTitle")}
+        description={t("auth:verifyEmail.sentDescription", { email: pendingEmail })}
       >
         <Link
           to="/$lang/login"

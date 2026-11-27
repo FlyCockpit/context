@@ -76,13 +76,29 @@ function VerifyEmailPage() {
   // `error` wins over `ok`: a failed hop arrives as `?ok=1&error=<CODE>`,
   // since Better-Auth appends its code to the callbackURL we already built.
   if (error || !ok) {
+    // An SSO-only server confirms addresses through the identity provider and
+    // has no email form here: point at sign-in, not at a link or email setup.
+    const ssoOnly = configData?.forceSso === true;
+    // Without mail there is no email field either: say what gets the address
+    // verified instead of asking for an email the page cannot take.
+    const mailOff = configData !== undefined && !canResend && !ssoOnly;
     return (
       <AuthCard
-        title={error ? t("auth:verifyEmail.invalidTitle") : t("auth:verifyEmail.pendingTitle")}
-        description={
+        title={
           error
-            ? t("auth:verifyEmail.invalidDescription")
-            : t("auth:verifyEmail.pendingDescription")
+            ? t("auth:verifyEmail.invalidTitle")
+            : ssoOnly
+              ? t("auth:login.ssoRequiredTitle")
+              : t("auth:verifyEmail.pendingTitle")
+        }
+        description={
+          ssoOnly
+            ? t("auth:login.ssoRequiredDescription")
+            : mailOff
+              ? t("auth:verifyEmail.emailUnavailable")
+              : error
+                ? t("auth:verifyEmail.invalidDescription")
+                : t("auth:verifyEmail.pendingDescription")
         }
       >
         {configPending ? (
@@ -107,11 +123,7 @@ function VerifyEmailPage() {
           </div>
         ) : canResend ? (
           <ResendVerification />
-        ) : (
-          <p className="text-center text-sm text-muted-foreground">
-            {t("auth:verifyEmail.emailUnavailable")}
-          </p>
-        )}
+        ) : null}
         <div className="text-center">
           <Link
             to="/$lang/login"

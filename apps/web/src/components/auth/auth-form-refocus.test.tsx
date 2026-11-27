@@ -618,6 +618,46 @@ describe("sign-up page mounted in React DOM when the request cannot be sent", ()
       hide.mockRestore();
     }
   });
+
+  // A sign-up without a session happens only with SMTP on, so the link went
+  // out: a config refetched after mail was turned off must not deny that.
+  it("after sign-up says a link was sent to a new address, even if mail is off by now", async () => {
+    fixture.snapshot = ANONYMOUS;
+    const SignupPage = page(SignupRoute).component;
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <SignupPage />
+        </I18nextProvider>,
+      );
+    });
+    const [form] = [...formApis] as FormApi[];
+    await act(async () => {
+      form?.setFieldValue("name", "Ada");
+      form?.setFieldValue("email", "ada@example.com");
+      form?.setFieldValue("password", "correct horse battery");
+    });
+    signUpEmail.mockResolvedValue({ data: { token: null, user: null }, error: null });
+    const config = fixture.config;
+    fixture.config = { ...config, emailConfigured: false };
+    try {
+      await act(async () => {
+        await form?.handleSubmit();
+      });
+      const text = container.textContent;
+      expect(text).toContain(enAuth.verifyEmail.sentTitle);
+      expect(text).toContain(
+        enAuth.verifyEmail.sentDescription.replace("{{email}}", "ada@example.com"),
+      );
+      expect(text).toContain(enAuth.verifyEmail.emailUnavailable);
+      // A registered address gets the same answer and no mail, so the card
+      // must not promise one: it names both cases.
+      expect(enAuth.verifyEmail.sentDescription).toMatch(/^If .* If it already had one, /);
+      expect(esAuth.verifyEmail.sentDescription).toMatch(/^Si .* Si ya tenía una, /);
+    } finally {
+      fixture.config = config;
+    }
+  });
 });
 
 describe.each(["en-US", "es-MX"])("reset password recovery in %s", (lang) => {

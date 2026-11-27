@@ -1,6 +1,7 @@
 import enAuth from "@cockpit-context/locales/src/en-US/auth.json";
 import enCommon from "@cockpit-context/locales/src/en-US/common.json";
 import enPrivacy from "@cockpit-context/locales/src/en-US/privacy.json";
+import esAuth from "@cockpit-context/locales/src/es-MX/auth.json";
 import { createInstance } from "i18next";
 import { type ComponentType, lazy, type ReactNode } from "react";
 import { prerender } from "react-dom/static";
@@ -277,5 +278,50 @@ describe("one h1 per auth page: the card's title", () => {
     );
     const html = await new Response(prelude).text();
     expect(h1s(html)).toEqual([enAuth.twoFactor.requiredTitle]);
+  });
+});
+
+// Only mailbox proof verifies an address (docs/access-matrix.md): no admin can
+// mark an account verified, so the no-email state must name what works.
+describe("verify email without a way to resend", () => {
+  it.each([
+    ["pending", {}, enAuth.verifyEmail.pendingTitle],
+    ["invalid link", { ok: true, error: "INVALID_TOKEN" }, enAuth.verifyEmail.invalidTitle],
+  ])("asks for email setup and a new link when mail is off (%s)", async (_, search, title) => {
+    fixture.config = { ...OPEN, emailConfigured: false };
+    fixture.search = search;
+    const html = (await render(VerifyEmailRoute)).replaceAll("&#x27;", "'");
+    expect(h1s(html)).toEqual([title]);
+    expect(html).toContain(enAuth.verifyEmail.emailUnavailable);
+    // No email field without mail, so nothing may ask for one.
+    expect(html).not.toContain(enAuth.verifyEmail.pendingDescription);
+    expect(html).not.toContain(enAuth.verifyEmail.invalidDescription);
+    expect(enAuth.verifyEmail.emailUnavailable).toMatch(
+      /set up email, then request a new verification link/,
+    );
+    expect(esAuth.verifyEmail.emailUnavailable).toMatch(
+      /configure el correo y luego solicita un nuevo enlace de verificación/,
+    );
+    for (const text of [JSON.stringify(enAuth), JSON.stringify(esAuth)]) {
+      expect(text).not.toMatch(/verify your account|verifique tu cuenta/i);
+    }
+  });
+
+  it.each([
+    ["pending", {}, enAuth.login.ssoRequiredTitle],
+    ["invalid link", { ok: true, error: "INVALID_TOKEN" }, enAuth.verifyEmail.invalidTitle],
+  ])("points an SSO-only server at sign-in (%s)", async (_, search, title) => {
+    fixture.config = FORCE_SSO;
+    fixture.search = search;
+    const html = (await render(VerifyEmailRoute)).replaceAll("&#x27;", "'");
+    expect(h1s(html)).toEqual([title]);
+    expect(html).toContain(enAuth.login.ssoRequiredDescription);
+    for (const text of [
+      enAuth.verifyEmail.emailUnavailable,
+      enAuth.verifyEmail.pendingDescription,
+      enAuth.verifyEmail.invalidDescription,
+    ]) {
+      expect(html).not.toContain(text);
+    }
   });
 });
