@@ -34,7 +34,7 @@
       "undo": "Deshacer",
       "connect": {
         "title": "Conecta tu agente de programación",
-        "body": "Usa estos ejemplos de OAuth. Falta verificarlos con clientes reales.",
+        "body": "Configuración de OAuth probada con Claude Code 2.1.332 y Codex CLI 0.172.0.",
         "copy": "Copiar el comando de Claude Code",
         "authenticate": "Luego ejecuta /mcp en Claude Code, elige cockpit-context y selecciona Authenticate.",
         "token": "Usar un token de API",
@@ -150,7 +150,7 @@
       },
       "created": {
         "title": "Tu nuevo token",
-        "description": "Guarda el token antes de cerrar. Falta verificar estos ejemplos con clientes reales.",
+        "description": "Guarda este token antes de cerrar. Configuración del cliente probada con Claude Code 2.1.332 y Codex CLI 0.172.0.",
         "copyToken": "Copiar token",
         "claudeCode": "Claude Code",
         "claudeCodeHint": "Agrega --scope user para usarlo en todos tus proyectos. No guardes un token en un .mcp.json compartido.",
@@ -208,7 +208,7 @@
       },
       "guide": {
         "title": "Conecta tu agente de programación con OAuth",
-        "description": "Usa estos ejemplos de OAuth. Falta verificarlos con clientes reales.",
+        "description": "Configuración de OAuth probada con Claude Code 2.1.332 y Codex CLI 0.172.0.",
         "add": "Agrega cockpit-context en una terminal",
         "copyCommand": "Copiar el comando de Claude Code",
         "authenticate": "Inicia sesión desde tu agente",

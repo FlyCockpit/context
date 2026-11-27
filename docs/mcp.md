@@ -2,7 +2,7 @@
 
 Cockpit Context exposes its investigation agent to coding agents over the Model Context Protocol at `/mcp` on your Cockpit Context origin, for example `https://context.example.com/mcp`. A client connects as you, with either an **API token** or **OAuth**, and can only use the MCP tools below. It never reaches the web app's procedures, settings, keys or tokens.
 
-The client instructions below are setup examples: smoke tests with Codex 0.172.0 and Claude Code 2.1.332 covered only a recreated SDK transport with fixture tools; full application OAuth and persisted-data verification is pending.
+OAuth registration, consent, revocation and `list_dependencies` tool calls are verified against the live server with Claude Code 2.1.332 and Codex CLI 0.172.0; API token setup commands were verified with the same clients over stateless Streamable HTTP.
 
 See the [product model](./product.md) and [access matrix](./access-matrix.md) for ownership boundaries.
 

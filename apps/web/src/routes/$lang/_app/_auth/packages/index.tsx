@@ -63,6 +63,7 @@ function PackagesPage() {
   } | null>(null);
   const debouncedSearch = useDebounce(search.trim(), 300);
   const filtered = debouncedSearch !== "" || ecosystem !== "all";
+  const homeStatus = useHomeStatus();
 
   const list = useInfiniteQuery(
     orpc.packages.list.infiniteOptions({
@@ -99,96 +100,115 @@ function PackagesPage() {
         }
       />
 
-      <PendingProposalsBanner lang={lang} />
+      {/* Wait for the initial active home-status fetch before mounting the
+          controls and list so a pending-proposals banner never shifts painted
+          controls on narrow screens, without blocking offline-paused loads. */}
+      {homeStatus.isLoading ? (
+        <div key="loading" className="space-y-6" aria-hidden="true">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Skeleton className="h-10 w-72 max-w-full rounded-lg" />
+            <Skeleton className="h-[44px] w-full rounded-md sm:max-w-xs" />
+          </div>
+          <Card className="py-0">
+            <CardContent className="p-0">
+              <PackageRowsSkeleton />
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <div key="ready" className="space-y-6">
+          <PendingProposalsBanner lang={lang} />
 
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <SegmentedControl
-          ariaLabel={t("dashboard:packages.filters.ecosystem")}
-          value={ecosystem}
-          onChange={(next) => void setEcosystem(next === "all" ? null : next)}
-          items={FILTERS.map((value) => ({
-            value,
-            label:
-              value === "all"
-                ? t("dashboard:packages.filters.all")
-                : t(`dashboard:packages.ecosystems.${value}`),
-          }))}
-        />
-        <Input
-          type="search"
-          inputMode="search"
-          autoComplete="off"
-          aria-label={t("dashboard:packages.filters.search")}
-          placeholder={t("dashboard:packages.filters.searchPlaceholder")}
-          value={search}
-          onChange={(event) => void setSearch(event.target.value || null)}
-          className="min-h-[44px] sm:max-w-xs"
-        />
-      </div>
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SegmentedControl
+              ariaLabel={t("dashboard:packages.filters.ecosystem")}
+              value={ecosystem}
+              onChange={(next) => void setEcosystem(next === "all" ? null : next)}
+              items={FILTERS.map((value) => ({
+                value,
+                label:
+                  value === "all"
+                    ? t("dashboard:packages.filters.all")
+                    : t(`dashboard:packages.ecosystems.${value}`),
+              }))}
+            />
+            <Input
+              type="search"
+              inputMode="search"
+              autoComplete="off"
+              aria-label={t("dashboard:packages.filters.search")}
+              placeholder={t("dashboard:packages.filters.searchPlaceholder")}
+              value={search}
+              onChange={(event) => void setSearch(event.target.value || null)}
+              className="min-h-[44px] sm:max-w-xs"
+            />
+          </div>
 
-      <Card className="py-0">
-        <CardContent className="p-0">
-          <QueryBoundary
-            query={list}
-            skeleton={<PackageRowsSkeleton />}
-            errorMessage={t("dashboard:packages.loadFailed")}
-            errorClassName="py-12"
-            isEmpty={(data) => data.pages.every((page) => page.items.length === 0)}
-            empty={
-              filtered ? (
-                <EmptyState
-                  title={t("dashboard:packages.empty.noMatch")}
-                  description={t("dashboard:packages.empty.noMatchBody")}
-                  action={
-                    <Button variant="outline" size="touch" onClick={clearFilters}>
-                      {t("dashboard:packages.filters.clear")}
-                    </Button>
-                  }
-                />
-              ) : (
-                <EmptyState
-                  icon={Package}
-                  title={t("dashboard:packages.empty.title")}
-                  description={t("dashboard:packages.empty.body")}
-                  action={
-                    <Button size="touch" onClick={() => setCreateOpen(true)}>
-                      <Plus aria-hidden="true" className="size-4" />
-                      {t("dashboard:packages.add")}
-                    </Button>
-                  }
-                />
-              )
-            }
-          >
-            {() => (
-              <>
-                <ul className="divide-y">
-                  {packages.map((pkg) => (
-                    <PackageRow
-                      key={pkg.id}
-                      pkg={pkg}
-                      lang={lang}
-                      onEdit={() => setEditId(pkg.id)}
-                      onDelete={() =>
-                        setDeleteTarget({
-                          id: pkg.id,
-                          identifier: pkg.identifier,
-                          isSnapshot: pkg.isSnapshot,
-                        })
+          <Card className="py-0">
+            <CardContent className="p-0">
+              <QueryBoundary
+                query={list}
+                skeleton={<PackageRowsSkeleton />}
+                errorMessage={t("dashboard:packages.loadFailed")}
+                errorClassName="py-12"
+                isEmpty={(data) => data.pages.every((page) => page.items.length === 0)}
+                empty={
+                  filtered ? (
+                    <EmptyState
+                      title={t("dashboard:packages.empty.noMatch")}
+                      description={t("dashboard:packages.empty.noMatchBody")}
+                      action={
+                        <Button variant="outline" size="touch" onClick={clearFilters}>
+                          {t("dashboard:packages.filters.clear")}
+                        </Button>
                       }
                     />
-                  ))}
-                </ul>
-                <LoadMore
-                  hasNextPage={list.hasNextPage}
-                  isFetchingNextPage={list.isFetchingNextPage}
-                  onLoadMore={() => void list.fetchNextPage()}
-                />
-              </>
-            )}
-          </QueryBoundary>
-        </CardContent>
-      </Card>
+                  ) : (
+                    <EmptyState
+                      icon={Package}
+                      title={t("dashboard:packages.empty.title")}
+                      description={t("dashboard:packages.empty.body")}
+                      action={
+                        <Button size="touch" onClick={() => setCreateOpen(true)}>
+                          <Plus aria-hidden="true" className="size-4" />
+                          {t("dashboard:packages.add")}
+                        </Button>
+                      }
+                    />
+                  )
+                }
+              >
+                {() => (
+                  <>
+                    <ul className="divide-y">
+                      {packages.map((pkg) => (
+                        <PackageRow
+                          key={pkg.id}
+                          pkg={pkg}
+                          lang={lang}
+                          onEdit={() => setEditId(pkg.id)}
+                          onDelete={() =>
+                            setDeleteTarget({
+                              id: pkg.id,
+                              identifier: pkg.identifier,
+                              isSnapshot: pkg.isSnapshot,
+                            })
+                          }
+                        />
+                      ))}
+                    </ul>
+                    <LoadMore
+                      hasNextPage={list.hasNextPage}
+                      isFetchingNextPage={list.isFetchingNextPage}
+                      onLoadMore={() => void list.fetchNextPage()}
+                    />
+                  </>
+                )}
+              </QueryBoundary>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <CreatePackageSheet
         open={createOpen}

@@ -34,7 +34,7 @@
       "undo": "Undo",
       "connect": {
         "title": "Connect your coding agent",
-        "body": "Use these OAuth setup examples. Live client verification is pending.",
+        "body": "OAuth setup tested with Claude Code 2.1.332 and Codex CLI 0.172.0.",
         "copy": "Copy the Claude Code command",
         "authenticate": "Then run /mcp in Claude Code, pick cockpit-context and choose Authenticate.",
         "token": "Use an API token instead",
@@ -150,7 +150,7 @@
       },
       "created": {
         "title": "Your new token",
-        "description": "Save this token before closing. Live client verification of these setup examples is pending.",
+        "description": "Save this token before closing. Client setup tested with Claude Code 2.1.332 and Codex CLI 0.172.0.",
         "copyToken": "Copy token",
         "claudeCode": "Claude Code",
         "claudeCodeHint": "Add --scope user to use it in every project. Don’t commit a token to a shared .mcp.json.",
@@ -208,7 +208,7 @@
       },
       "guide": {
         "title": "Connect your coding agent with OAuth",
-        "description": "Use these OAuth setup examples. Live client verification is pending.",
+        "description": "OAuth setup tested with Claude Code 2.1.332 and Codex CLI 0.172.0.",
         "add": "Add cockpit-context in a terminal",
         "copyCommand": "Copy the Claude Code command",
         "authenticate": "Sign in from your agent",

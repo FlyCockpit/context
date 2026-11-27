@@ -127,7 +127,15 @@ function OperatorContact({
   return (
     <QueryBoundary
       query={config}
-      skeleton={<Skeleton aria-hidden="true" className="h-5 w-64 max-w-full" />}
+      skeleton={
+        // Sized by the unpublished text so long narrow screens keep the notice
+        // height steady until `appConfig` loads. (`div`, never `p`, since
+        // `<Skeleton>` itself renders a `div`.)
+        <div aria-hidden="true" className="relative text-pretty">
+          <span className="invisible">{t(`${base}.unpublished`)}</span>
+          <Skeleton className="absolute inset-0" />
+        </div>
+      }
       errorMessage={t(`${base}.loadFailed`)}
     >
       {({ operator }) => {
