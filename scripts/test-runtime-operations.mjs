@@ -135,6 +135,284 @@ async function runtimeCheck() {
 }
 
 /**
+ * The actual password sign-in handler, paused at both sides of its last
+ * pre-insert fence check, against the actual PostgreSQL adapter. The password
+ * writer must finish (including its post-commit sweep) before we release the
+ * sign-in; a timer never establishes the interleaving.
+ */
+async function passwordSignInRaceCheck() {
+  assert.equal(process.env.DATABASE_POOL_MAX, "3");
+  const [{ auth }, { handlePasswordAuthRequest }, links, { default: prisma }] = await Promise.all([
+    import("../packages/auth/src/index.ts"),
+    import("../packages/auth/src/password-auth-handler.ts"),
+    import("../packages/auth/src/password-reset-links.ts"),
+    import("../packages/db/src/index.ts"),
+  ]);
+  const context = await auth.$context;
+  const oldPassword = "disposable-old-proof-password-13579";
+  const newPassword = "disposable-new-proof-password-24680";
+  const oldHash = await context.password.hash(oldPassword);
+  const created = [];
+  const hooks = context.options.databaseHooks.session.create;
+  const originalBefore = hooks.before;
+  const originalVerify = context.password.verify;
+  const request = (path, body, cookie = "") =>
+    new Request(`${process.env.BETTER_AUTH_URL}/api/auth${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: process.env.BETTER_AUTH_URL,
+        cookie,
+      },
+      body: JSON.stringify(body),
+    });
+  const send = (path, body, cookie) => handlePasswordAuthRequest(auth, request(path, body, cookie));
+  const fixtureUser = async (label) => {
+    const id = `password-race-${label}-${randomUUID()}`;
+    created.push(id);
+    const email = `${id}@example.test`;
+    await prisma.user.create({
+      data: { id, name: "Password race", email, emailVerified: true },
+    });
+    await prisma.account.create({
+      data: {
+        id: randomUUID(),
+        accountId: id,
+        userId: id,
+        providerId: "credential",
+        password: oldHash,
+      },
+    });
+    return { id, email };
+  };
+  const signedIn = async (user) => {
+    const response = await send("/sign-in/email", { email: user.email, password: oldPassword });
+    assert.equal(response.status, 200, "fixture's normal sign-in succeeds");
+    const cookie = response.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; ");
+    assert.ok(cookie.includes("session_token="));
+    return cookie;
+  };
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  try {
+    for (const writer of ["change-keep", "change-revoke", "reset"]) {
+      for (const point of ["verified", "before-insert"]) {
+        const user = await fixtureUser(`${writer}-${point}`);
+        const writerCookie = await signedIn(user);
+        await prisma.session.createMany({
+          data: [
+            {
+              id: randomUUID(),
+              userId: user.id,
+              token: randomUUID(),
+              expiresAt: new Date(Date.now() + 60_000),
+            },
+            {
+              id: randomUUID(),
+              userId: user.id,
+              token: randomUUID(),
+              expiresAt: new Date(Date.now() + 60_000),
+            },
+          ],
+        });
+        await prisma.mcpAgentToken.create({
+          data: {
+            userId: user.id,
+            name: "race",
+            lookupPrefix: randomUUID(),
+            secretDigest: randomUUID(),
+          },
+        });
+        const clientId = randomUUID();
+        await prisma.oauthClient.create({
+          data: {
+            clientId,
+            userId: user.id,
+            scopes: [],
+            contacts: [],
+            redirectUris: [],
+            postLogoutRedirectUris: [],
+            grantTypes: [],
+            responseTypes: [],
+          },
+        });
+        await prisma.mcpGrant.create({ data: { userId: user.id, clientId, referenceId: "race" } });
+        await prisma.oauthRefreshToken.create({
+          data: {
+            token: randomUUID(),
+            clientId,
+            userId: user.id,
+            expiresAt: new Date(Date.now() + 60_000),
+            resources: [],
+            requestedUserInfoClaims: [],
+            scopes: [],
+          },
+        });
+        await prisma.oauthAccessToken.create({
+          data: {
+            token: randomUUID(),
+            clientId,
+            userId: user.id,
+            expiresAt: new Date(Date.now() + 60_000),
+            resources: [],
+            requestedUserInfoClaims: [],
+            scopes: [],
+          },
+        });
+        await prisma.oauthConsent.create({
+          data: {
+            clientId,
+            userId: user.id,
+            resources: [],
+            requestedUserInfoClaims: [],
+            scopes: [],
+          },
+        });
+        const challenge = `2fa-${randomUUID()}`;
+        await prisma.verification.create({
+          data: { identifier: challenge, value: user.id, expiresAt: new Date(Date.now() + 60_000) },
+        });
+        const reached = deferred();
+        const released = deferred();
+        let armed = true;
+        if (point === "verified") {
+          context.password.verify = async (input) => {
+            const valid = await originalVerify(input);
+            if (armed && valid && input.hash === oldHash && input.password === oldPassword) {
+              armed = false;
+              reached.resolve();
+              await released.promise;
+            }
+            return valid;
+          };
+        } else {
+          hooks.before = async (session, endpoint) => {
+            const result = await originalBefore(session, endpoint);
+            if (armed && session.userId === user.id && endpoint?.path === "/sign-in/email") {
+              armed = false;
+              reached.resolve();
+              await released.promise;
+            }
+            return result;
+          };
+        }
+        const signingIn = send("/sign-in/email", { email: user.email, password: oldPassword });
+        try {
+          // A failure before the pause must fail promptly instead of hanging.
+          await Promise.race([
+            reached.promise,
+            signingIn.then(() => {
+              throw new Error("Sign-in finished before its pause point");
+            }),
+          ]);
+          let changed;
+          if (writer.startsWith("change-")) {
+            changed = await send(
+              "/change-password",
+              {
+                currentPassword: oldPassword,
+                newPassword,
+                revokeOtherSessions: writer === "change-revoke",
+              },
+              writerCookie,
+            );
+          } else if (writer === "reset") {
+            const token = randomUUID();
+            await prisma.verification.create({
+              data: {
+                identifier: `reset-password:${token}`,
+                value: user.id,
+                expiresAt: new Date(Date.now() + 60_000),
+              },
+            });
+            assert.equal(
+              await links.recordResetLinkMailed({ token, userId: user.id, email: user.email }),
+              true,
+            );
+            changed = await send("/reset-password", { token, newPassword });
+          }
+          assert.equal(changed.status, 200, `${writer} completes while old proof is paused`);
+          const credential = await prisma.account.findFirstOrThrow({
+            where: { userId: user.id, providerId: "credential" },
+          });
+          assert.notEqual(credential.password, oldHash, "the password write is committed");
+          assert.equal(
+            await originalVerify({ hash: credential.password, password: newPassword }),
+            true,
+          );
+          const isReset = writer === "reset";
+          const revoked = isReset || writer === "change-revoke";
+          const expectedSessions = isReset ? 0 : writer === "change-revoke" ? 1 : 3;
+          assert.equal(
+            await prisma.session.count({ where: { userId: user.id } }),
+            expectedSessions,
+            `${writer}: established sessions follow policy`,
+          );
+          const token = await prisma.mcpAgentToken.findFirstOrThrow({ where: { userId: user.id } });
+          const grant = await prisma.mcpGrant.findFirstOrThrow({ where: { userId: user.id } });
+          assert.equal(token.revokedAt !== null, revoked, `${writer}: MCP token follows policy`);
+          assert.equal(grant.revokedAt !== null, revoked, `${writer}: MCP grant follows policy`);
+          for (const delegate of [
+            prisma.oauthAccessToken,
+            prisma.oauthRefreshToken,
+            prisma.oauthConsent,
+          ]) {
+            assert.equal(
+              await delegate.count({ where: { userId: user.id } }),
+              revoked ? 0 : 1,
+              `${writer}: OAuth credentials follow policy`,
+            );
+          }
+          if (isReset) {
+            assert.equal(
+              await prisma.verification.count({ where: { identifier: challenge } }),
+              0,
+              `${writer}: pending second-factor proof is revoked`,
+            );
+          }
+          released.resolve();
+          const raced = await signingIn;
+          assert.equal(raced.status, 401, `${writer}/${point}: old proof is refused`);
+          assert.equal((await raced.json()).code, "INVALID_EMAIL_OR_PASSWORD");
+          assert.deepEqual(
+            raced.headers.getSetCookie(),
+            [],
+            "a refused sign-in returns no cookies",
+          );
+          assert.equal(
+            await prisma.session.count({ where: { userId: user.id } }),
+            expectedSessions,
+            "the delayed insert leaves no extra session",
+          );
+          console.log(
+            `password sign-in: ${writer}/${point} refused the old proof on real PostgreSQL.`,
+          );
+        } finally {
+          released.resolve();
+          await signingIn.catch(() => {});
+          context.password.verify = originalVerify;
+          hooks.before = originalBefore;
+        }
+      }
+    }
+  } finally {
+    context.password.verify = originalVerify;
+    hooks.before = originalBefore;
+    await prisma.verification.deleteMany({ where: { value: { in: created } } });
+    await prisma.user.deleteMany({ where: { id: { in: created } } });
+    await prisma.$disconnect();
+  }
+}
+
+/**
  * Actual pinned Better Auth, production password mount/hooks/selective adapter,
  * and migrated PostgreSQL at the minimum pool size. SMTP is configured but no
  * mail/provider endpoint is invoked: token delivery proof is a fixture fact.
@@ -663,7 +941,9 @@ async function main() {
   }
   if (process.argv[2] === "--auth-child") {
     assert.equal(process.env.RUNTIME_OPERATIONS_CHILD, "owned-disposable-services");
-    await inviteRaceCheck();
+    if (process.argv[3] === "password-signin-race") await passwordSignInRaceCheck();
+    else if (process.argv[3] === "invite-race") await inviteRaceCheck();
+    else throw new Error("Unknown auth child");
     return;
   }
   if (process.argv[2] !== "--disposable-services") {
@@ -771,25 +1051,31 @@ async function main() {
       encoding: "utf8",
     });
     process.stdout.write(result);
-    const authResult = execFileSync(process.execPath, ["--import", "tsx", file, "--auth-child"], {
-      cwd: root,
-      env: {
-        ...fixtureEnv,
-        RUNTIME_OPERATIONS_CHILD: "owned-disposable-services",
-        DATABASE_POOL_MAX: "3",
-        BETTER_AUTH_URL: "https://app.example.test",
-        BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
-        ADMIN_EMAILS: "ops-admin@example.test",
-        COCKPIT_CONTEXT_DATA_DIR: resolve(temporary, "data"),
-        COCKPIT_CONTEXT_ENCRYPTION_KEYS: `v1:${randomBytes(32).toString("base64")}`,
-        SMTP_HOST: "smtp.invalid",
-        SMTP_FROM: "ops@example.test",
-      },
-      timeout: 180_000,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8",
-    });
-    process.stdout.write(authResult);
+    for (const child of ["invite-race", "password-signin-race"]) {
+      const authResult = execFileSync(
+        process.execPath,
+        ["--import", "tsx", file, "--auth-child", child],
+        {
+          cwd: root,
+          env: {
+            ...fixtureEnv,
+            RUNTIME_OPERATIONS_CHILD: "owned-disposable-services",
+            DATABASE_POOL_MAX: "3",
+            BETTER_AUTH_URL: "https://app.example.test",
+            BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
+            ADMIN_EMAILS: "ops-admin@example.test",
+            COCKPIT_CONTEXT_DATA_DIR: resolve(temporary, "data"),
+            COCKPIT_CONTEXT_ENCRYPTION_KEYS: `v1:${randomBytes(32).toString("base64")}`,
+            SMTP_HOST: "smtp.invalid",
+            SMTP_FROM: "ops@example.test",
+          },
+          timeout: 180_000,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      process.stdout.write(authResult);
+    }
   } finally {
     const cleanupErrors = [];
     for (const id of containers.reverse()) {

@@ -118,9 +118,9 @@ so a previous private route context cannot remount before fresh admission.
 The oRPC interceptor reports the first decoded private 401, including errors
 inside a batch, before query retries or final cache callbacks. It invalidates
 answers requested before that rejection and coalesces the same decoded error and
-concurrent failures into one fresh session verification. That verification alone
-uses `disableCookieCache`; ordinary session requests keep the existing 60-second
-cookie cache. A failed verification keeps the targeted bypass and honors
+concurrent failures into one fresh session verification. Session cookie caching is
+disabled globally, so ordinary session reads also consult the database. A failed
+verification keeps the targeted bypass and honors
 `Retry-After`. Queries do not retry 401s; unrelated errors retain their normal
 retry policy. A 403 does not trigger identity reconciliation. Live subscription
 rejections share this same coordinator.

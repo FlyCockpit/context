@@ -247,15 +247,10 @@ export const auth = betterAuth({
     // session:30d, refresh every 1d
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
-    // Short-lived signed cookie cache: skips the session DB lookup on most
-    // requests; revocations/role changes propagate within 60s. That is also
-    // the bound on a ban: every ban path deletes the user's sessions, but a
-    // request carrying a cache cookie signed before the ban still resolves
-    // the pre-ban user for up to `maxAge`. Closing it would need an
-    // authoritative DB read per request or no cache (docs/access-matrix.md).
+    // Session consumers must see revocations and role changes on the next request,
+    // including requests carrying previously issued cache cookies.
     cookieCache: {
-      enabled: true,
-      maxAge: 60,
+      enabled: false,
     },
   },
   advanced: {

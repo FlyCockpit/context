@@ -178,9 +178,9 @@ describe("production auth wiring", () => {
     expect(auth.options.emailAndPassword?.password?.verify).toBe(passwordPepper.verify);
   });
 
-  it("revokes every session on password reset and keeps the 60-second cookie cache", () => {
+  it("revokes every session on password reset and disables the cookie cache", () => {
     expect(auth.options.emailAndPassword?.revokeSessionsOnPasswordReset).toBe(true);
-    expect(auth.options.session?.cookieCache).toEqual({ enabled: true, maxAge: 60 });
+    expect(auth.options.session?.cookieCache).toEqual({ enabled: false });
     // Direct transactional session deletion relies on there being no second
     // authoritative store whose entries could outlive the database rows.
     expect(auth.options).not.toHaveProperty("secondaryStorage");
@@ -314,7 +314,8 @@ async function resetFixture(onResetHash: () => void | Promise<void> = () => {}) 
     database: createCredentialSetupAdapter({ emailConfigured: true }),
     logger: { disabled: true },
     rateLimit: { enabled: false },
-    session: auth.options.session,
+    // Exercise the write guard against previously issued signed cache cookies.
+    session: { ...auth.options.session, cookieCache: { enabled: true, maxAge: 60 } },
     hooks: auth.options.hooks,
     plugins: [
       twoFactor({
@@ -739,6 +740,38 @@ describe("password reset revocation", { timeout: 30_000 }, () => {
     },
   );
 
+  it.each(["revoked", "expired"])(
+    "production reads immediately refuse a %s session with a previously issued cache cookie",
+    async (state) => {
+      const { cookies, memory, userId } = await resetFixture();
+      const productionRead = betterAuth({
+        secret: "test-secret-that-is-long-enough-for-better-auth-0123456789",
+        baseURL: "http://localhost:3000",
+        database: createCredentialSetupAdapter({ emailConfigured: true }),
+        logger: { disabled: true },
+        session: auth.options.session,
+      });
+      const headers = cookies[0]!;
+      expect(headers.get("cookie")).toContain("session_data=");
+      expect(await productionRead.api.getSession({ headers })).toMatchObject({
+        user: { id: userId },
+      });
+      if (state === "revoked") {
+        memory.session = (memory.session ?? []).filter((row) => row.userId !== userId);
+      } else {
+        for (const row of memory.session ?? []) {
+          if (row.userId === userId) row.expiresAt = new Date(0);
+        }
+      }
+      expect(await productionRead.api.getSession({ headers })).toBeNull();
+      const response = await productionRead.handler(
+        new Request("http://localhost:3000/api/auth/get-session", { headers }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toBeNull();
+    },
+  );
+
   it.each(["revoked", "expired"])("blocks a %s session's cache renewal chain", async (state) => {
     const start = new Date("2026-11-26T12:00:00Z");
     vi.useFakeTimers({ toFake: ["Date"], now: start });
@@ -1069,7 +1102,7 @@ describe("password reset revocation", { timeout: 30_000 }, () => {
     expect(memory.session?.filter((row) => row.userId === other.userId)).toHaveLength(1);
   });
 
-  it("revokes all sessions and CLI/API credentials, with cached sessions refused within 60 seconds", async () => {
+  it("revokes all sessions and CLI/API credentials with the synthetic cache enabled", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-26T12:00:00Z") });
     const { current, memory, cookies, userId, other, reset } = await resetFixture();
     for (const headers of cookies) {
@@ -1080,8 +1113,7 @@ describe("password reset revocation", { timeout: 30_000 }, () => {
     expect(memory.session?.filter((row) => row.userId === userId)).toHaveLength(0);
     expectCredentialRevocation(userId);
     expect(memory.user?.find((row) => row.id === userId)).toMatchObject({ emailVerified: true });
-    // The deliberate cache trade-off matches a deleted session: a signed
-    // cookie can resolve until its original 60-second lifetime elapses.
+    // This synthetic cached reader models an already-issued signed cache.
     for (const headers of cookies) {
       expect(await current.api.getSession({ headers })).toMatchObject({ user: { id: userId } });
     }
