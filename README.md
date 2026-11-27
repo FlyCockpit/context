@@ -67,7 +67,7 @@ Keep signup closed by default and invite developers. Configure storage/concurren
 
 ## Usage
 
-Add packages with their source URL, version/ref and optional monorepo subdirectory. Connect Claude Code or Codex through OAuth or a revocable API token, call `list_dependencies`, then `query_dependency`. Retain the query ID and poll `get_query_result` if the wait ends before completion. Watch, steer or stop runs in the web dashboard.
+Add packages with their source URL, version/ref and optional monorepo subdirectory. Connect an MCP client through OAuth or a revocable API token using [the MCP guide](./docs/mcp.md), call `list_dependencies`, then `query_dependency`. Retain the query ID and poll `get_query_result` if the wait ends before completion. Watch, steer or stop runs in the web dashboard.
 
 An organization can serve all its developers from one instance, but package lists and conversations remain per user. For a harness with many sandboxed agents, create a dedicated ordinary user account and its own token. Tokens are per user and share that user's limits. Public clones, checkouts and generated overviews are reused; completed answers are not cached. See [product limits](./docs/product.md#limits) and [harness setup](./docs/mcp.md#agent-harnesses).
 

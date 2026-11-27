@@ -1,6 +1,8 @@
 # Connecting coding agents (MCP)
 
-Cockpit Context exposes its investigation agent to coding agents (Claude Code, Codex, Cursor, …) over the Model Context Protocol at `/mcp` on your Cockpit Context origin, for example `https://context.example.com/mcp`. A client connects as you, with either an **API token** or **OAuth**, and can only use the MCP tools below. It never reaches the web app's procedures, settings, keys or tokens.
+Cockpit Context exposes its investigation agent to coding agents over the Model Context Protocol at `/mcp` on your Cockpit Context origin, for example `https://context.example.com/mcp`. A client connects as you, with either an **API token** or **OAuth**, and can only use the MCP tools below. It never reaches the web app's procedures, settings, keys or tokens.
+
+The client instructions below are setup examples: smoke tests with Codex 0.172.0 and Claude Code 2.1.332 covered only a recreated SDK transport with fixture tools; full application OAuth and persisted-data verification is pending.
 
 See the [product model](./product.md) and [access matrix](./access-matrix.md) for ownership boundaries.
 
