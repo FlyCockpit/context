@@ -14,8 +14,8 @@
  * (`useReloadOnIdentityChange`), for a change while a page is open.
  * docs/development.md § Query cache follows identity.
  *
- * No runtime imports, so the router and the route guards use it without
- * loading Better Auth.
+ * No eager runtime imports: public loads open the peer channel without
+ * loading Better Auth. An event without a watcher loads its verifier lazily.
  */
 import type { QueryClient } from "@tanstack/react-query";
 
@@ -237,6 +237,11 @@ export async function admitRouteIdentity(
   since: number = verificationGeneration,
 ): Promise<void> {
   if (resolution.status !== "resolved" || since !== verificationGeneration) return;
+  if (authoritativeSessionRequired) {
+    await (await import("./auth-client")).checkDocumentSession();
+    if (authoritativeSessionRequired) throw new Error("Route session unavailable");
+    if (since !== verificationGeneration) return;
+  }
   const identity = resolution.session?.user.id ?? null;
   if (!observeDocumentIdentity(identity)) {
     // The server just confirmed this document's own identity.
@@ -280,6 +285,9 @@ let restoreWatched = false;
 export function watchDocumentRestore(): void {
   if (typeof window === "undefined" || restoreWatched) return;
   restoreWatched = true;
+  // Listen even on fresh public/404 loads, without loading Better Auth or
+  // probing a session until another tab actually announces a change.
+  peerChannel();
   const holdsPrivateState = () => documentIdentity.heldPrivateState || documentIdentity.replaced;
   window.addEventListener("pagehide", (event) => {
     if (event.persisted && holdsPrivateState()) hidePage();
@@ -311,18 +319,14 @@ export function skipErrorToastForIdentity(error: unknown, kind: "query" | "mutat
   if (isIdentityChangedError(error)) replaceDocument();
   if (documentIdentity.replaced) return true;
   if (!isSessionRejection(error)) return false;
-  reportSessionRejected();
+  reportSessionRejected(error);
   return kind === "query";
 }
 
-/**
- * For request paths outside the query and mutation caches (the live
- * subscriptions in `lib/stream-reconnect.ts`): a rejection for having no
- * session queues the same one session check. True when it was one.
- */
+/** Live subscriptions use the same decoded rejection and coalescing path. */
 export function reportIfSessionRejected(error: unknown): boolean {
   if (!isSessionRejection(error)) return false;
-  reportSessionRejected();
+  reportSessionRejected(error);
   return true;
 }
 
@@ -381,29 +385,75 @@ export function subscribeIdentityVerification(listener: () => void): () => void 
 
 let sessionCheck: (() => unknown) | undefined;
 let sessionCheckPending = false;
-let externalCheckPending: (() => boolean) | undefined;
 
 /**
  * A request was rejected for having no session: ask Better Auth to check the
  * session once (however many queries failed together), so a session lost
  * elsewhere replaces the document instead of leaving one error toast per
- * query. Does nothing while no watcher is mounted.
+ * query. Without an app watcher, the lazy document verifier handles it.
  */
-export function reportSessionRejected(): void {
-  const check = sessionCheck;
-  if (!check) {
+let authoritativeSessionRequired = false;
+export function needsAuthoritativeSessionCheck(): boolean {
+  return authoritativeSessionRequired;
+}
+export function confirmAuthoritativeSessionCheck(since: number): void {
+  if (since === verificationGeneration) authoritativeSessionRequired = false;
+}
+
+let reportedRejections = new WeakSet<object>();
+
+/** Keep normal query retry limits, but reconcile the first decoded auth failure. */
+export function retryQueryAfterFailure(failureCount: number, error: unknown): boolean {
+  return !isSessionRejection(error) && failureCount < (typeof window === "undefined" ? 0 : 3);
+}
+
+export function reportSessionRejected(error?: unknown): void {
+  // The RPC interceptor and QueryCache receive the same decoded error. That
+  // final callback must not invalidate the authoritative probe it just started.
+  if (error && typeof error === "object") {
+    if (reportedRejections.has(error)) return;
+    reportedRejections.add(error);
+  }
+  // A private401 is stronger than the cookie cache: reject pre-rejection
+  // answers and bypass that cache only until an authoritative check succeeds.
+  // Delayed batch items and a failure retry belong to that same obligation;
+  // they must join, rather than invalidate, its fresh authoritative probe.
+  if (!authoritativeSessionRequired) {
+    authoritativeSessionRequired = true;
     markIdentityUnverified();
+  }
+  requestSessionCheck();
+}
+
+function requestSessionCheck(): void {
+  if (sessionCheckPending) return;
+  sessionCheckPending = true;
+  const check =
+    sessionCheck ??
+    (() => import("./auth-client").then(({ checkDocumentSession }) => checkDocumentSession()));
+  let result: unknown;
+  try {
+    result = check();
+  } catch {
+    sessionCheckPending = false;
     return;
   }
-  if (sessionCheckPending) return;
-  // One check at a time, until it settles: 401s that arrive in separate
-  // network tasks while it runs share it.
-  sessionCheckPending = true;
-  void Promise.resolve(check())
+  void Promise.resolve(result)
     .catch(() => {})
     .finally(() => {
       sessionCheckPending = false;
     });
+}
+
+/** A lazy verifier may finish (or retry) after the app watcher has mounted. */
+export function confirmOutsideAppIdentity(identity: string | null, since: number): void {
+  if (since !== verificationGeneration) return;
+  if (observeDocumentIdentity(identity) || (!sessionCheck && peerChangePending)) {
+    replaceDocument();
+  } else {
+    confirmDocumentIdentityFresh(since);
+    announceDocumentIdentity(identity);
+  }
 }
 
 /** The channel the open tabs use to tell each other the signed-in identity changed. */
@@ -447,15 +497,11 @@ function peerChannel(): IdentityChannel | undefined {
           // A peer's unversioned confirmation may predate our own. Let the
           // coalesced server check decide whether this document must reload.
         } else if (message?.kind !== "session-changed") return;
-        // Both message kinds share the current check and its retry cooldown.
-        if (!sessionCheckPending) {
-          // Only a native request started after an observed invalidation can
-          // share it. A mount/reconnect request may still answer the old cookie.
-          if (peerChangePending && externalCheckPending?.()) setIdentityUnverified(true);
-          else markIdentityUnverified();
-        }
         peerChangePending = true;
-        reportSessionRejected();
+        // Coalescing cannot make a request started before this announcement
+        // fresh: invalidate even while a watcher or native check is pending.
+        markIdentityUnverified();
+        requestSessionCheck();
       };
     }
   }
@@ -467,45 +513,12 @@ function peerChannel(): IdentityChannel | undefined {
  * announcement and for a 401 (`reportSessionRejected`). Returns the
  * disconnect.
  */
-export function connectIdentityPeers(
-  checkSession: () => unknown,
-  isCheckPending?: () => boolean,
-): () => void {
+export function connectIdentityPeers(checkSession: () => unknown): () => void {
   sessionCheck = checkSession;
-  externalCheckPending = isCheckPending;
-  const storage = new AbortController();
-  // Capture runs before Better Auth's storage listener, even if it mounted
-  // first: its ensuing request belongs to this invalidation, not the old one.
-  window.addEventListener(
-    "storage",
-    (event) => {
-      if (isDocumentReplaced() || event.key !== "better-auth.message") return;
-      let message: unknown;
-      try {
-        message = JSON.parse(event.newValue ?? "{}");
-      } catch {
-        return;
-      }
-      if (
-        !message ||
-        typeof message !== "object" ||
-        !("event" in message) ||
-        message.event !== "session" ||
-        !("data" in message) ||
-        !message.data
-      )
-        return;
-      peerChangePending = true;
-      if (!sessionCheckPending) markIdentityUnverified();
-    },
-    { capture: true, signal: storage.signal },
-  );
   peerChannel();
   return () => {
-    storage.abort();
     if (sessionCheck === checkSession) {
       sessionCheck = undefined;
-      externalCheckPending = undefined;
     }
   };
 }
@@ -552,7 +565,6 @@ export function resetDocumentIdentityForTests(
   verificationListeners.clear();
   sessionCheck = undefined;
   sessionCheckPending = false;
-  externalCheckPending = undefined;
   openChannel = open;
   peers = undefined;
   peersOpened = false;
@@ -560,4 +572,6 @@ export function resetDocumentIdentityForTests(
   restoreWatched = false;
   anonymousOnlyPath = undefined;
   peerChangePending = false;
+  authoritativeSessionRequired = false;
+  reportedRejections = new WeakSet<object>();
 }

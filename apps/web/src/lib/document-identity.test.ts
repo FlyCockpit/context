@@ -571,7 +571,7 @@ describe("confirmed peer messages", () => {
     expect(isDocumentIdentityUnverified()).toBe(true);
     expect(withExpectedIdentity().get("X-Expected-User")).toBe("a");
   });
-  it("one switch shares one check across hints and conflicting identities", async () => {
+  it("coalesces checks but invalidates pre-announcement answers for every conflicting peer", async () => {
     const peer = channel();
     observeDocumentIdentity("a");
     let finish!: () => void;
@@ -588,7 +588,7 @@ describe("confirmed peer messages", () => {
     const since = identityVerificationGeneration();
     peer.receive({ kind: "identity", id: "b" });
     expect(reload).not.toHaveBeenCalled();
-    expect(identityVerificationGeneration()).toBe(since);
+    expect(identityVerificationGeneration()).toBe(since + 1);
     expect(check).toHaveBeenCalledTimes(1);
     finish();
     await Promise.resolve();

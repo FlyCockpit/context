@@ -105,6 +105,26 @@ The router also covers the back/forward cache: a document that ever held a signe
 
 Why a full load, not `queryClient.clear()` or a fresh `QueryClient`: clearing the cache under mounted observers can leave a page stuck on a skeleton, `resetQueries()` refetches active queries as the wrong identity, and neither stops an in-flight mutation whose late `onSuccess` writes the old identity's data back; a swapped client still leaves Zustand stores and module state behind. A full load drops all of it. Persisted browser storage survives a load, so it holds no private data: the sidebar state and the device locale are not personal, and the getting-started "hidden" flag is keyed by user id (`lib/getting-started.ts`). Keep it that way, or scope new persisted state to the user.
 
+The router opens the document's existing peer channel on public-only pages and
+404s as well. It loads the session verifier lazily after a peer event; an ordinary
+public load makes no session probe. When no app watcher is mounted, the verifier
+uses the same session atom, coordinator and retry scheduler. A successful retry
+still reconciles the document owner if the app mounts while that retry is pending.
+
+Generic error recovery reruns route guards with `invalidate({ forcePending: true })`.
+Successful parent matches stay pending before a child render boundary recovers,
+so a previous private route context cannot remount before fresh admission.
+
+The oRPC interceptor reports the first decoded private 401, including errors
+inside a batch, before query retries or final cache callbacks. It invalidates
+answers requested before that rejection and coalesces the same decoded error and
+concurrent failures into one fresh session verification. That verification alone
+uses `disableCookieCache`; ordinary session requests keep the existing 60-second
+cookie cache. A failed verification keeps the targeted bypass and honors
+`Retry-After`. Queries do not retry 401s; unrelated errors retain their normal
+retry policy. A 403 does not trigger identity reconciliation. Live subscription
+rejections share this same coordinator.
+
 ### Expected identity and session availability
 
 Document-owned requests carry `X-Expected-User` from the document baseline. oRPC

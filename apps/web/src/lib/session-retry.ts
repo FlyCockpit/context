@@ -1,9 +1,4 @@
-import {
-  identityVerificationGeneration,
-  isDocumentIdentityUnverified,
-  isDocumentReplaced,
-  reportSessionRejected,
-} from "./document-identity";
+import { identityVerificationGeneration, isDocumentReplaced } from "./document-identity";
 
 // One scheduler and one imperative check in flight for the whole document,
 // shared by headers, the identity watcher, and manual Retry actions.
@@ -11,6 +6,7 @@ const clients = new Map<symbol, () => unknown>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let inFlight: Promise<boolean> | undefined;
 let inFlightGeneration = 0;
+let inFlightCancellable = false;
 let nativeCheck: { generation: number; promise: Promise<boolean> } | undefined;
 let failed = false;
 let attempt = 0;
@@ -41,40 +37,54 @@ function schedule(): void {
   }, delay);
 }
 
-/** Coalesces checks; automatic callers respect Retry-After. False means no check ran. */
+/**
+ * Coalesces checks; automatic callers respect Retry-After. Cancellation is
+ * checked again after waiting and immediately before the callback starts.
+ * False means no check ran.
+ */
 export function runSessionCheck(
   check: () => unknown,
-  { automatic = false }: { automatic?: boolean } = {},
+  options: { automatic?: boolean; cancelled?: () => boolean } = {},
 ): Promise<boolean> {
+  const { automatic = false, cancelled } = options;
+  if (cancelled?.()) return Promise.resolve(false);
   if (inFlight) {
     // An older request cannot verify a newer invalidation across a remount.
     if (inFlightGeneration !== identityVerificationGeneration()) {
-      return inFlight.then(() => runSessionCheck(check, { automatic }));
+      return inFlight.then(() => runSessionCheck(check, options));
     }
-    return inFlight;
+    // A cancelled caller may have reserved the slot before its callback runs.
+    // A live caller still needs its own probe if that callback never started.
+    return inFlightCancellable
+      ? inFlight.then((ran) => (ran ? true : runSessionCheck(check, options)))
+      : inFlight;
   }
   if (nativeCheck) {
     // Native refreshes settle only after Better Auth updates its atom. A
     // watcher must await that answer instead of aborting it with refetch().
     if (nativeCheck.generation !== identityVerificationGeneration()) {
-      return nativeCheck.promise.then(() => runSessionCheck(check, { automatic }));
+      return nativeCheck.promise.then(() => runSessionCheck(check, options));
     }
     return nativeCheck.promise;
   }
   if (isDocumentReplaced()) return Promise.resolve(false);
-  // Peer identity checks run while hidden/offline; only error retries pause for availability.
   if (automatic && Date.now() < notBefore) {
     schedule();
     return Promise.resolve(false);
   }
   cancelTimer();
   inFlightGeneration = identityVerificationGeneration();
+  inFlightCancellable = cancelled !== undefined;
+  let started = false;
   inFlight = Promise.resolve()
-    .then(check)
-    .then(() => true)
+    .then(() => {
+      if (cancelled?.()) return false;
+      started = true;
+      return Promise.resolve(check()).then(() => true);
+    })
     .finally(() => {
       inFlight = undefined;
-      if (failed) attempt++;
+      if (failed && started) attempt++;
       schedule();
     });
   return inFlight;
@@ -91,9 +101,6 @@ export function trackNativeSessionCheck(): () => void {
   };
   nativeCheck = current;
   cancelTimer();
-  // A storage event invalidates before its native fetch starts. Have the
-  // watcher join that fetch even if the BroadcastChannel hint arrives later.
-  if (isDocumentIdentityUnverified()) reportSessionRejected();
   return () => {
     if (nativeCheck === current) nativeCheck = undefined;
     finish(true);

@@ -57,6 +57,31 @@ function fail() {
 }
 
 describe("document session retry", () => {
+  it("checks cancellation when a reserved callback actually starts", async () => {
+    let cancelled = false;
+    const cancelledCheck = vi.fn();
+    const first = runSessionCheck(cancelledCheck, { cancelled: () => cancelled });
+    const live = runSessionCheck(check);
+    cancelled = true;
+    expect(await first).toBe(false);
+    expect(await live).toBe(true);
+    expect(cancelledCheck).not.toHaveBeenCalled();
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cancelled callback does not advance failure backoff", async () => {
+    mount();
+    fail();
+    let cancelled = false;
+    const pending = runSessionCheck(check, { cancelled: () => cancelled });
+    cancelled = true;
+    expect(await pending).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(check).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
   it("shares a native atom refresh until it settles", async () => {
     const finish = trackNativeSessionCheck();
     const first = runSessionCheck(check);

@@ -18,7 +18,7 @@ import {
   type SessionIdentity,
 } from "@/lib/document-identity";
 
-import { isNativeSessionCheckPending, runSessionCheck } from "@/lib/session-retry";
+import { runSessionCheck } from "@/lib/session-retry";
 
 /**
  * `undefined` (session pending or errored) is never acted on: a flaky session
@@ -41,32 +41,49 @@ export function sessionIdentity(
  * refetch wrapper also verifies retries started by the header or scheduler.
  * A failed check is retried with backoff and when the tab regains focus,
  * visibility or the network; one superseded by another fetch still running is
- * followed up (at most 3 times, 250 ms apart). `stop()` drops every pending
- * completion, timer and listener.
+ * followed up (at most 3 times, 250 ms apart), with one timer shared by all
+ * callers. A current-generation confirmation makes its queued follow-up
+ * unnecessary. Peer checks also run while hidden or offline; availability
+ * gates only focus/visibility/reconnect checks and scheduled failure retries.
+ * `stop()` drops every pending completion, deferred probe, timer and listener.
  */
 function startIdentityChecks(refetch: () => unknown): { stop: () => void } {
   let connected = true;
   let followUp: ReturnType<typeof setTimeout> | undefined;
-  const check = (superseded = 0): Promise<void> => {
-    if (isDocumentReplaced()) return Promise.resolve();
-    const since = identityVerificationGeneration();
-    return runSessionCheck(refetch, { automatic: true }).then((ran) => {
+  const queueFollowUp = (superseded: number) => {
+    if (superseded >= 3 || followUp !== undefined) return;
+    const unverifiedOnly = isDocumentIdentityUnverified();
+    followUp = setTimeout(() => {
+      followUp = undefined;
+      void check(superseded + 1, unverifiedOnly).catch(() => {});
+    }, 250);
+  };
+  const check = (superseded = 0, unverifiedOnly = false): Promise<void> => {
+    const cancelled = () =>
+      !connected || isDocumentReplaced() || (unverifiedOnly && !isDocumentIdentityUnverified());
+    if (cancelled()) return Promise.resolve();
+    let since = identityVerificationGeneration();
+    return runSessionCheck(
+      () => {
+        // The coordinator may wait for an older native refresh before starting
+        // this fresh probe. Verify the generation it actually starts in.
+        since = identityVerificationGeneration();
+        return refetch();
+      },
+      { automatic: true, cancelled },
+    ).then((ran) => {
       if (!ran || !connected || isDocumentReplaced()) return;
       if (since !== identityVerificationGeneration()) {
-        if (superseded < 3) {
-          clearTimeout(followUp);
-          followUp = setTimeout(() => void check(superseded + 1).catch(() => {}), 250);
-        }
+        if (isDocumentIdentityUnverified()) queueFollowUp(superseded);
         return;
       }
       const checked = readSessionIdentity();
       if (checked === undefined) {
-        if (isSessionFetchInFlight() && superseded < 3) {
-          clearTimeout(followUp);
-          followUp = setTimeout(() => void check(superseded + 1).catch(() => {}), 250);
-        }
+        if (isSessionFetchInFlight()) queueFollowUp(superseded);
         return;
       }
+      clearTimeout(followUp);
+      followUp = undefined;
       if (observeDocumentIdentity(checked)) replaceDocument();
       else {
         confirmDocumentIdentityFresh(since);
@@ -78,7 +95,7 @@ function startIdentityChecks(refetch: () => unknown): { stop: () => void } {
     if (document.visibilityState !== "hidden" && navigator.onLine !== false)
       void check().catch(() => {});
   };
-  const disconnectPeers = connectIdentityPeers(() => check(), isNativeSessionCheckPending);
+  const disconnectPeers = connectIdentityPeers(() => check());
   if (isDocumentIdentityUnverified()) void check().catch(() => {});
   window.addEventListener("focus", retry);
   window.addEventListener("online", retry);

@@ -152,8 +152,10 @@ describe("failed initial session", () => {
   it("a retry superseded by an invalidation never confirms or announces its retained account", async () => {
     const identity = await import("@/lib/document-identity");
     const postMessage = vi.fn();
-    identity.resetDocumentIdentityForTests(() => ({ postMessage, onmessage: null }));
+    const peer = { postMessage, onmessage: null as ((event: MessageEvent) => void) | null };
+    identity.resetDocumentIdentityForTests(() => peer);
     vi.stubGlobal("window", {});
+    identity.connectIdentityPeers(() => Promise.resolve());
     let finish!: () => void;
     atom.refetch.mockImplementationOnce(
       () =>
@@ -172,12 +174,53 @@ describe("failed initial session", () => {
       identity.reportSessionRejected();
       renderToStaticMarkup(<RetrySession />);
       const retry = retrySession?.();
-      identity.reportSessionRejected();
+      peer.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
       finish();
       await retry;
       expect(identity.isDocumentIdentityUnverified()).toBe(true);
       expect(postMessage).not.toHaveBeenCalled();
       expect(identity.withExpectedIdentity().has("X-Expected-User")).toBe(false);
+    } finally {
+      atom.snapshot = undefined;
+      identity.resetDocumentIdentityForTests(() => undefined);
+      vi.unstubAllGlobals();
+    }
+  });
+  it("a peer announcement during a coalesced retry cannot unmask its stale account", async () => {
+    const identity = await import("@/lib/document-identity");
+    const peer = {
+      postMessage: vi.fn(),
+      onmessage: null as ((event: MessageEvent) => void) | null,
+    };
+    identity.resetDocumentIdentityForTests(() => peer);
+    vi.stubGlobal("window", {});
+    let finish!: () => void;
+    atom.refetch.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    atom.snapshot = {
+      data: { user: { id: "a" } },
+      error: null,
+      isPending: false,
+      isRefetching: false,
+    };
+    try {
+      identity.observeDocumentIdentity("a");
+      renderToStaticMarkup(<RetrySession />);
+      const check = vi.fn(() => retrySession?.());
+      identity.connectIdentityPeers(check);
+      peer.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+      const pending = check.mock.results[0]?.value;
+      peer.onmessage?.({ data: { kind: "identity", id: "b" } } as MessageEvent);
+      finish();
+      await pending;
+      expect(identity.isDocumentIdentityUnverified()).toBe(true);
+      expect(renderToStaticMarkup(<Who />)).not.toContain("Previous Account");
+      expect(peer.postMessage).not.toHaveBeenCalled();
+      expect(check).toHaveBeenCalledTimes(1);
     } finally {
       atom.snapshot = undefined;
       identity.resetDocumentIdentityForTests(() => undefined);

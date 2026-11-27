@@ -1,7 +1,7 @@
 import type { AppRouterClient } from "@cockpit-context/api/routers/index";
 import { ORPC_BATCH_MAX_SIZE } from "@cockpit-context/config/orpc-batch";
 import { env } from "@cockpit-context/env/web";
-import { createORPCClient } from "@orpc/client";
+import { createORPCClient, onError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import {
   BatchLinkPlugin,
@@ -11,7 +11,7 @@ import {
 } from "@orpc/client/plugins";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 
-import { fetchWithExpectedIdentity } from "@/lib/document-identity";
+import { fetchWithExpectedIdentity, reportSessionRejected } from "@/lib/document-identity";
 
 /**
  * Event-iterator procedures: one long-lived streamed response each. A batch
@@ -22,6 +22,19 @@ const STREAMING_PROCEDURES = new Set(["conversations.watch", "conversations.acti
 
 const link = new RPCLink({
   url: `${env.VITE_SERVER_URL}/rpc`,
+  // Runs after individual RPC decoding, including streaming batch items, and
+  // before Query retry/final-error callbacks. No HTTP-envelope assumptions.
+  interceptors: [
+    onError((error) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        (("code" in error && error.code === "UNAUTHORIZED") ||
+          ("status" in error && error.status === 401))
+      )
+        reportSessionRejected(error);
+    }),
+  ],
   plugins: [
     new SimpleCsrfProtectionLinkPlugin(),
     // `maxSize` must stay in sync with the server's `BatchHandlerPlugin` —

@@ -56,6 +56,7 @@ import {
   admitRouteIdentity,
   isDocumentIdentityUnverified,
   markExplicitSignOut,
+  replaceDocument,
   resetDocumentIdentityForTests,
 } from "@/lib/document-identity";
 
@@ -64,6 +65,7 @@ import {
   observeSessionRetry,
   recordSessionRetryAfter,
   resetSessionRetryForTests,
+  trackNativeSessionCheck,
 } from "@/lib/session-retry";
 
 import { sessionIdentity, useReloadOnIdentityChange } from "./use-reload-on-identity-change";
@@ -315,28 +317,145 @@ describe("useReloadOnIdentityChange", () => {
     expect(boundary.reload).toHaveBeenCalledTimes(1);
   });
 
-  it("a conflicting peer identity shares an in-flight hint check and waits for its answer", async () => {
-    let finish!: () => void;
+  it.each(["a", "b"])(
+    "rejects a pre-announcement watcher answer and runs one fresh probe answering %s",
+    async (freshIdentity) => {
+      vi.useFakeTimers();
+      const answers: (() => void)[] = [];
+      boundary.refetch.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            answers.push(resolve);
+          }),
+      );
+      useRenderWith(user("a"));
+      const [channel] = FakeChannel.open;
+      channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+      channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+      await settle();
+      expect(boundary.refetch).toHaveBeenCalledTimes(1);
+      channel?.onmessage?.({ data: { kind: "identity", id: "b" } } as MessageEvent);
+      channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+      expect(boundary.reload).not.toHaveBeenCalled();
+      // The check read A before the conflicting announcement arrived.
+      boundary.checked = "a";
+      answers[0]?.();
+      await settle();
+      useRenderWith(user("a"));
+      expect(isDocumentIdentityUnverified()).toBe(true);
+      expect(boundary.reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(249);
+      expect(boundary.refetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(boundary.refetch).toHaveBeenCalledTimes(2);
+      boundary.checked = freshIdentity;
+      answers[1]?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(boundary.reload).toHaveBeenCalledTimes(freshIdentity === "b" ? 1 : 0);
+      if (freshIdentity === "a") expect(isDocumentIdentityUnverified()).toBe(false);
+      expect(boundary.refetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("skips the queued follow-up after a focus probe verifies its generation", async () => {
+    vi.useFakeTimers();
+    const answers: (() => void)[] = [];
     boundary.refetch.mockImplementation(
+      () => new Promise<void>((resolve) => answers.push(resolve)),
+    );
+    useRenderWith(user("a"));
+    const [channel] = FakeChannel.open;
+    channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+    await settle();
+    channel?.onmessage?.({ data: { kind: "identity", id: "b" } } as MessageEvent);
+    fire("focus");
+    boundary.checked = "a";
+    answers[0]?.();
+    await settle();
+    expect(boundary.refetch).toHaveBeenCalledTimes(2);
+    expect(isDocumentIdentityUnverified()).toBe(true);
+    answers[1]?.();
+    await settle();
+    expect(isDocumentIdentityUnverified()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(boundary.refetch).toHaveBeenCalledTimes(2);
+    expect(boundary.reload).not.toHaveBeenCalled();
+  });
+
+  it("coalesces superseded callers into one follow-up timer and cancels it on unmount", async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    boundary.refetch.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           finish = resolve;
         }),
     );
     useRenderWith(user("a"));
-    const [channel] = FakeChannel.open;
-    channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
-    channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+    FakeChannel.open[0]?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+    fire("focus");
+    fire("focus");
     await settle();
-    expect(boundary.refetch).toHaveBeenCalledTimes(1);
-    channel?.onmessage?.({ data: { kind: "identity", id: "b" } } as MessageEvent);
-    expect(boundary.reload).not.toHaveBeenCalled();
-    boundary.checked = "b";
+    FakeChannel.open[0]?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
+    boundary.checked = "a";
     finish();
+    await settle();
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(boundary.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["unmount", "replace"])(
+    "cancels a peer probe deferred behind a native refresh on %s",
+    async (cancel) => {
+      useRenderWith(user("a"));
+      const finishNative = trackNativeSessionCheck();
+      FakeChannel.open[0]?.onmessage?.({ data: { kind: "identity", id: "b" } } as MessageEvent);
+      await settle();
+      expect(boundary.refetch).not.toHaveBeenCalled();
+      if (cancel === "unmount") unmount();
+      else replaceDocument();
+      boundary.checked = "a";
+      finishNative();
+      await settle();
+      expect(boundary.refetch).not.toHaveBeenCalled();
+      expect(isDocumentIdentityUnverified()).toBe(true);
+    },
+  );
+
+  it("a remount owns the deferred probe when the previous watcher was cancelled", async () => {
+    useRenderWith(user("a"));
+    const finishNative = trackNativeSessionCheck();
+    FakeChannel.open[0]?.onmessage?.({ data: { kind: "identity", id: "b" } } as MessageEvent);
+    await settle();
+    unmount();
+    // The live watcher must not treat a cancelled callback as verification.
+    useRenderWith(user("a"));
+    boundary.checked = "b";
+    finishNative();
     await settle();
     expect(boundary.refetch).toHaveBeenCalledTimes(1);
     expect(boundary.reload).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["hidden", "offline"])(
+    "still runs a deferred peer probe when the tab becomes %s",
+    async (availability) => {
+      useRenderWith(user("a"));
+      const finishNative = trackNativeSessionCheck();
+      FakeChannel.open[0]?.onmessage?.({ data: { kind: "identity", id: "b" } } as MessageEvent);
+      await settle();
+      if (availability === "hidden") Object.assign(document, { visibilityState: "hidden" });
+      else vi.stubGlobal("navigator", { onLine: false });
+      boundary.checked = "b";
+      finishNative();
+      await settle();
+      expect(boundary.refetch).toHaveBeenCalledTimes(1);
+      expect(boundary.reload).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each([
     { checked: "b", reloads: 0 },
@@ -346,6 +465,7 @@ describe("useReloadOnIdentityChange", () => {
   ])(
     "crossed confirmations: B receives stale A, server answers $checked, reloads $reloads times",
     async ({ checked, reloads }) => {
+      vi.useFakeTimers();
       // B has confirmed locally; another tab's older A probe finishes before
       // that tab receives B's announcement and sends its crossed confirmation.
       await admitRouteIdentity({ status: "resolved", session: { user: { id: "b" } } });
@@ -369,8 +489,11 @@ describe("useReloadOnIdentityChange", () => {
       boundary.checked = checked;
       finish();
       await settle();
+      expect(isDocumentIdentityUnverified()).toBe(true);
+      expect(boundary.reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(250);
       expect(boundary.reload).toHaveBeenCalledTimes(reloads);
-      expect(boundary.refetch).toHaveBeenCalledTimes(1);
+      expect(boundary.refetch).toHaveBeenCalledTimes(2);
       if (checked === "b") expect(isDocumentIdentityUnverified()).toBe(false);
       if (checked === undefined) expect(isDocumentIdentityUnverified()).toBe(true);
       expect(channel?.messages).not.toContainEqual({ kind: "identity", id: "a" });
@@ -513,30 +636,6 @@ describe("useReloadOnIdentityChange", () => {
     answers[1]?.();
     await settle();
     expect(isDocumentIdentityUnverified()).toBe(false);
-  });
-
-  it("overlapping superseded checks leave one follow-up, and none after unmount", async () => {
-    vi.useFakeTimers();
-    useRenderWith(user("a"));
-    const [channel] = FakeChannel.open;
-    unmount();
-    channel?.onmessage?.({ data: { kind: "session-changed" } } as MessageEvent);
-    // Every check is superseded by a refresh still running.
-    boundary.checked = undefined;
-    boundary.inFlight = true;
-    useRenderWith(user("a")); // mount check
-    fire("focus");
-    fire("visibilitychange");
-    await settle();
-    expect(boundary.refetch).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(250);
-    await settle();
-    // Coalesced checks, one follow-up.
-    expect(boundary.refetch).toHaveBeenCalledTimes(2);
-    unmount();
-    await vi.advanceTimersByTimeAsync(1000);
-    await settle();
-    expect(boundary.refetch).toHaveBeenCalledTimes(2);
   });
 
   it("a check superseded by an automatic refresh checks again once that settles", async () => {
