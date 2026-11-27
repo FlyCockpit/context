@@ -34,7 +34,7 @@
       "undo": "Undo",
       "connect": {
         "title": "Connect your coding agent",
-        "body": "Add the cockpit-context server to Claude Code or Codex. It signs in with OAuth, so there is no token to copy.",
+        "body": "Use these OAuth setup examples. Live client verification is pending.",
         "copy": "Copy the Claude Code command",
         "authenticate": "Then run /mcp in Claude Code, pick cockpit-context and choose Authenticate.",
         "token": "Use an API token instead",
@@ -150,7 +150,7 @@
       },
       "created": {
         "title": "Your new token",
-        "description": "Add it to your agent, then close this dialog.",
+        "description": "Save this token before closing. Live client verification of these setup examples is pending.",
         "copyToken": "Copy token",
         "claudeCode": "Claude Code",
         "claudeCodeHint": "Add --scope user to use it in every project. Don’t commit a token to a shared .mcp.json.",
@@ -208,7 +208,7 @@
       },
       "guide": {
         "title": "Connect your coding agent with OAuth",
-        "description": "No token to copy: Claude Code and Codex sign in through your browser.",
+        "description": "Use these OAuth setup examples. Live client verification is pending.",
         "add": "Add cockpit-context in a terminal",
         "copyCommand": "Copy the Claude Code command",
         "authenticate": "Sign in from your agent",
