@@ -2,9 +2,8 @@ import { randomBytes } from "node:crypto";
 import { auth } from "@cockpit-context/auth";
 import { announceUserBanned, onUserBanned } from "@cockpit-context/auth/ban";
 import {
-  clearInviteEmailDelivered,
   createSetPasswordToken,
-  recordInviteEmailDelivered,
+  recordResetLinkMailed,
 } from "@cockpit-context/auth/invite-verification";
 import { isAdminRole } from "@cockpit-context/auth/roles";
 import { invalidateSignupAvailabilityCache } from "@cockpit-context/auth/signup-availability";
@@ -113,6 +112,24 @@ async function mintSetPasswordLink(
   url.searchParams.set("token", token);
   if (options.invite) url.searchParams.set("invite", "1");
   return { url: url.toString(), token, expiresAt };
+}
+
+/**
+ * Records that the link for `token` was mailed, after the mail was accepted.
+ * Only a mailed link verifies the address when spent, and only a mailed link
+ * stays spendable once the account is active
+ * (@cockpit-context/auth/invite-verification). The mail is already out, so a
+ * failed record is logged, not surfaced: the link then counts as shown (it
+ * still works for a pending invitee, who verifies by email at first sign-in).
+ */
+async function recordMailed(token: string, email: string, source: string): Promise<void> {
+  try {
+    const ctx = await auth.$context;
+    await recordResetLinkMailed(ctx.internalAdapter, { token, email });
+  } catch (err) {
+    const errLabel = err instanceof Error ? `${err.name}: ${err.message}` : "unknown error";
+    console.warn(`[${source}] recording the mailed link failed:`, errLabel);
+  }
 }
 
 // Per-user issuance gate for `users.passwordLink`. In-process is enough:
@@ -288,7 +305,7 @@ export const usersRouter = {
       // One link, two ways to deliver it. A failure here leaves an account
       // nobody can sign in to, so say so: the admin deletes it and invites
       // again (a fresh invitee has no content, so the delete succeeds).
-      let link: { url: string; expiresAt: Date };
+      let link: { url: string; token: string; expiresAt: Date };
       try {
         link = await mintSetPasswordLink(userId, recipientLocale, { invite: true });
       } catch (err) {
@@ -324,21 +341,10 @@ export const usersRouter = {
       }
 
       // Only an emailed link proves the invitee controls the address, so only
-      // then does using it verify the email (@cockpit-context/auth/invite-verification).
-      // If this write fails the invite still works; the invitee just verifies
-      // through the normal email after choosing a password.
-      if (emailSent) {
-        try {
-          await recordInviteEmailDelivered({
-            userId,
-            email: input.email,
-            expiresAt: link.expiresAt,
-          });
-        } catch (err) {
-          const errLabel = err instanceof Error ? `${err.name}: ${err.message}` : "unknown error";
-          console.warn("[users.invite] recording the emailed invite failed:", errLabel);
-        }
-      }
+      // then does using it verify the email. A link the admin is shown sets the
+      // password and verifies nothing: the invitee confirms their address by
+      // email at first sign-in, and the link dies once the account is active.
+      if (emailSent) await recordMailed(link.token, input.email, "users.invite");
 
       if (emailSent) {
         return { userId, emailSent: true as const, setPasswordExpiresAt: link.expiresAt };
@@ -513,12 +519,11 @@ export const usersRouter = {
       }
 
       // One live link per user: drop earlier reset links (the value of a
-      // `reset-password:` row is the user id) and the emailed-invite marker, so
-      // an un-emailed link can never redeem an older emailed invite's verification.
+      // `reset-password:` row is the user id). Whether a link verifies the
+      // address is recorded per token, so no earlier record can carry over.
       await prisma.verification.deleteMany({
         where: { identifier: { startsWith: "reset-password:" }, value: target.id },
       });
-      await clearInviteEmailDelivered(target.id);
       const link = await mintSetPasswordLink(target.id, target.locale, { invite: false });
 
       if (!isEmailConfigured()) {
@@ -559,17 +564,9 @@ export const usersRouter = {
           "The password link email could not be sent. No link was issued; try again later.",
         );
       }
-      // As with an invite: only an emailed link proves the user controls the address.
-      try {
-        await recordInviteEmailDelivered({
-          userId: target.id,
-          email: target.email,
-          expiresAt: link.expiresAt,
-        });
-      } catch (err) {
-        const errLabel = err instanceof Error ? `${err.name}: ${err.message}` : "unknown error";
-        console.warn("[users.passwordLink] recording the emailed link failed:", errLabel);
-      }
+      // As with an invite: only an emailed link proves the user controls the
+      // address, and only it stays spendable for an active account.
+      await recordMailed(link.token, target.email, "users.passwordLink");
       recordAdminAudit({
         action: "users.passwordLink",
         actorUserId: context.session.user.id,

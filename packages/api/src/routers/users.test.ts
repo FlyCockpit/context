@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Session } from "@cockpit-context/auth";
 import { createRouterClient, ORPCError } from "@orpc/server";
 import type { MockInstance } from "vitest";
@@ -51,7 +52,7 @@ vi.mock("@cockpit-context/repos", async () => {
 vi.mock("@cockpit-context/auth", () => {
   const authContext = {
     options: { emailAndPassword: {} as { resetPasswordTokenExpiresIn?: number } },
-    internalAdapter: { createVerificationValue: vi.fn() },
+    internalAdapter: { createVerificationValue: vi.fn(), findVerificationValue: vi.fn() },
   };
   return {
     auth: {
@@ -126,18 +127,37 @@ const authApi = auth as unknown as {
   api: { createUser: MockInstance };
   __authContext: {
     options: { emailAndPassword: { resetPasswordTokenExpiresIn?: number } };
-    internalAdapter: { createVerificationValue: MockInstance };
+    internalAdapter: { createVerificationValue: MockInstance; findVerificationValue: MockInstance };
   };
 };
 const createVerificationValue = authApi.__authContext.internalAdapter.createVerificationValue;
+const findVerificationValue = authApi.__authContext.internalAdapter.findVerificationValue;
+
+/** The "this link was mailed" row the router recorded for `token`, if any. */
+function mailedRecordFor(token: string) {
+  const identifier = `reset-password-mailed:${createHash("sha256").update(token).digest("base64url")}`;
+  return createVerificationValue.mock.calls
+    .map((call) => call[0] as { identifier: string; value: string; expiresAt: Date })
+    .find((row) => row.identifier === identifier);
+}
 const mutableEnv = env as { CORS_ORIGIN?: string };
 const sendEmailMock = sendEmail as unknown as MockInstance;
 const isEmailConfiguredMock = isEmailConfigured as unknown as MockInstance;
 const renderInviteUserMock = renderInviteUser as unknown as MockInstance;
 
+/** The `reset-password:` row the mint wrote (an invite also writes its tag first). */
+function resetRow(): { identifier: string; value: string; expiresAt: Date } {
+  const rows = createVerificationValue.mock.calls.map(
+    (call) => call[0] as { identifier: string; value: string; expiresAt: Date },
+  );
+  const row = rows.find((r) => r.identifier.startsWith("reset-password:"));
+  expect(row).toBeDefined();
+  return row!;
+}
+
 /** The token the invite stored, read back from the verification row it wrote. */
 function mintedToken(): string {
-  const row = createVerificationValue.mock.calls[0]?.[0] as { identifier: string };
+  const row = resetRow();
   expect(row.identifier).toMatch(/^reset-password:[A-Za-z0-9_-]{32}$/);
   return row.identifier.slice("reset-password:".length);
 }
@@ -199,6 +219,13 @@ describe("usersRouter", () => {
     db.repository.findMany.mockResolvedValue([]);
     isEmailConfiguredMock.mockReturnValue(true);
     createVerificationValue.mockResolvedValue({});
+    // Reads back what the mint wrote (the mailed record takes user and expiry from the link).
+    findVerificationValue.mockImplementation(
+      async (identifier: string) =>
+        createVerificationValue.mock.calls
+          .map((call) => call[0] as { identifier: string })
+          .find((row) => row.identifier === identifier) ?? null,
+    );
     authApi.__authContext.options.emailAndPassword = {};
     mutableEnv.CORS_ORIGIN = undefined;
   });
@@ -383,10 +410,7 @@ describe("usersRouter", () => {
 
       // Better-Auth's own reset token: the row its reset endpoint consumes,
       // for this user, with the invite's seven-day lifetime.
-      const row = createVerificationValue.mock.calls[0]?.[0] as {
-        value: string;
-        expiresAt: Date;
-      };
+      const row = resetRow();
       expect(row.value).toBe("new-user-id");
       const ttl = row.expiresAt.getTime() - before;
       expect(ttl).toBeGreaterThan(SEVEN_DAYS_MS - 10_000);
@@ -404,20 +428,23 @@ describe("usersRouter", () => {
       expect(sent.to).toBe("new@example.com");
       expect(sent.html).not.toContain(password);
 
-      // The link was emailed, so using it will verify the address.
-      expect(db.verification.create).toHaveBeenCalledWith({
-        data: {
-          identifier: "invite-email-delivered:new-user-id",
-          value: "new@example.com",
-          expiresAt: row.expiresAt,
-        },
+      // The link was emailed, so using it will verify the address: recorded
+      // per token (hash only), bound to the user and address, after the send.
+      expect(mailedRecordFor(token)).toEqual({
+        identifier: expect.stringMatching(/^reset-password-mailed:/),
+        value: JSON.stringify({ userId: "new-user-id", email: "new@example.com" }),
+        expiresAt: row.expiresAt,
       });
+      expect(createVerificationValue).toHaveBeenCalledTimes(2);
+      expect(createVerificationValue.mock.invocationCallOrder[1]).toBeGreaterThan(
+        sendEmailMock.mock.invocationCallOrder[0]!,
+      );
     });
 
     it("still succeeds when recording the emailed invite fails", async () => {
       authApi.api.createUser.mockResolvedValue({ user: { id: "new-user-id" } });
       sendEmailMock.mockResolvedValue(undefined);
-      db.verification.create.mockRejectedValueOnce(new Error("db down"));
+      createVerificationValue.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("db down"));
 
       const client = createRouterClient(usersRouter, { context: buildContext() });
       const res = await client.invite({
@@ -444,8 +471,8 @@ describe("usersRouter", () => {
       expect(sendEmailMock).not.toHaveBeenCalled();
       expect(res.emailSent).toBe(false);
       // A link the admin passes on proves nothing about the mailbox.
-      expect(db.verification.create).not.toHaveBeenCalled();
       const token = mintedToken();
+      expect(mailedRecordFor(token)).toBeUndefined();
       expect(res).toMatchObject({
         userId: "new-user-id",
         setPasswordUrl: `http://localhost:3000/en-US/reset-password?token=${token}&invite=1`,
@@ -930,22 +957,21 @@ describe("usersRouter", () => {
       expect(url.searchParams.has("invite")).toBe(false);
       const row = createVerificationValue.mock.calls[0]?.[0] as { value: string; expiresAt: Date };
       expect(row.value).toBe("other-user-id");
+      // Shown, not mailed: only the reset row, no mailed record.
+      expect(createVerificationValue).toHaveBeenCalledTimes(1);
       // Same lifetime as an invite link.
       expect(row.expiresAt.getTime()).toBeGreaterThanOrEqual(before + SEVEN_DAYS_MS);
       expect(row.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + SEVEN_DAYS_MS);
-      // Older reset links and the emailed-invite marker die first.
+      // Older reset links die first.
       expect(db.verification.deleteMany).toHaveBeenCalledWith({
         where: { identifier: { startsWith: "reset-password:" }, value: "other-user-id" },
-      });
-      expect(db.verification.deleteMany).toHaveBeenCalledWith({
-        where: { identifier: "invite-email-delivered:other-user-id" },
       });
       expect(db.verification.deleteMany.mock.invocationCallOrder.at(-1)).toBeLessThan(
         createVerificationValue.mock.invocationCallOrder[0]!,
       );
       expect(sendEmailMock).not.toHaveBeenCalled();
-      // An un-emailed link records no marker (it proves nothing about the mailbox).
-      expect(db.verification.create).not.toHaveBeenCalled();
+      // An un-emailed link records nothing (it proves nothing about the mailbox).
+      expect(mailedRecordFor(token)).toBeUndefined();
     });
 
     it("writes an audit entry that never carries the link", async () => {
@@ -974,11 +1000,8 @@ describe("usersRouter", () => {
       expect(sendEmailMock).toHaveBeenCalledWith(
         expect.objectContaining({ to: "alice@example.com", subject: "Reset your password" }),
       );
-      expect(db.verification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          identifier: "invite-email-delivered:other-user-id",
-          value: "alice@example.com",
-        }),
+      expect(mailedRecordFor(mintedToken())).toMatchObject({
+        value: JSON.stringify({ userId: "other-user-id", email: "alice@example.com" }),
       });
       expect(audits()[0]?.details.delivery).toBe("email");
     });
@@ -1003,7 +1026,7 @@ describe("usersRouter", () => {
       expect(db.verification.deleteMany).toHaveBeenLastCalledWith({
         where: { identifier: `reset-password:${token}` },
       });
-      expect(db.verification.create).not.toHaveBeenCalled();
+      expect(mailedRecordFor(token)).toBeUndefined();
       expect(audits()[0]?.details).toEqual({ delivery: "failed" });
       for (const call of warn.mock.calls) expect(String(call[0])).not.toContain(token);
     });

@@ -5,6 +5,7 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin } from "better-auth/plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { adminPluginAccess } from "./admin-access";
 import { issueBootstrapToken, revokeBootstrapToken } from "./bootstrap-token";
 import { createUserCreateBeforeHook } from "./user-create-hook";
 import { runWithAllowedUserCreation, serializeSignup } from "./user-creation-policy";
@@ -31,7 +32,13 @@ const fastPassword = {
     hash === `test-sha256:${createHash("sha256").update(password).digest("hex")}`,
 };
 
-function buildAuth(opts: { emailConfigured: boolean; signupOpen: boolean; usersExist?: boolean }) {
+function buildAuth(opts: {
+  emailConfigured: boolean;
+  signupOpen: boolean;
+  usersExist?: boolean;
+  /** Cockpit Context's admin-plugin roles (./admin-access.ts) instead of the plugin's defaults. */
+  appAdminAccess?: boolean;
+}) {
   const db: Record<string, unknown[]> & { user: unknown[] } = {
     user: [],
     session: [],
@@ -59,7 +66,7 @@ function buildAuth(opts: { emailConfigured: boolean; signupOpen: boolean; usersE
     ...(opts.emailConfigured
       ? { emailVerification: { sendVerificationEmail, sendOnSignUp: true, sendOnSignIn: true } }
       : {}),
-    plugins: [admin({ defaultRole: "user" })],
+    plugins: [admin({ defaultRole: "user", ...(opts.appAdminAccess ? adminPluginAccess : {}) })],
     databaseHooks: {
       user: {
         create: {
@@ -298,4 +305,117 @@ describe("first account with open signup", () => {
       expect(db.user).toHaveLength(2);
     },
   );
+});
+
+// Better-Auth's own `/admin/create-user` route, reached over HTTP with a real
+// admin session: it would take an admin-chosen password and
+// `data: { emailVerified: true }`. Only `users.invite` (server side, under the
+// admin-invite grant) may create users through the admin plugin.
+describe("Better-Auth's admin create-user route", () => {
+  async function adminRequest(auth: ReturnType<typeof buildAuth>["auth"], body: unknown) {
+    await bootstrapSignUp(auth, OWNER, issueBootstrapToken());
+    return post(auth, "/admin/create-user", await sessionCookie(auth, OWNER), body);
+  }
+
+  it.each([
+    [true, {}],
+    [true, { data: { emailVerified: true } }],
+    [false, { data: { emailVerified: true } }],
+  ])("refuses an admin's HTTP call (open signup %s, extra %o)", async (signupOpen, extra) => {
+    const { auth, db } = buildAuth({ emailConfigured: false, signupOpen });
+    const res = await adminRequest(auth, {
+      email: "chosen@example.com",
+      password: "admin-chosen-password",
+      name: "Chosen",
+      ...extra,
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "ADMIN_CREATE_USER_UNSUPPORTED" });
+    expect(db.user).toHaveLength(1);
+  });
+
+  it("refuses a verified row even under the invite grant", async () => {
+    const { auth, db } = buildAuth({ emailConfigured: true, signupOpen: false, usersExist: true });
+    await expect(
+      runWithAllowedUserCreation("admin-invite", () =>
+        auth.api.createUser({
+          body: {
+            email: "invitee@example.com",
+            password: PASSWORD,
+            name: "Invitee",
+            data: { emailVerified: true },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ body: { code: "EMAIL_VERIFICATION_BY_MAIL_ONLY" } });
+    expect(db.user).toHaveLength(0);
+  });
+});
+
+async function sessionCookie(auth: ReturnType<typeof buildAuth>["auth"], email: string) {
+  const signIn = await auth.api.signInEmail({
+    body: { email, password: PASSWORD },
+    returnHeaders: true,
+  });
+  return signIn.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+}
+
+function post(
+  auth: ReturnType<typeof buildAuth>["auth"],
+  path: string,
+  cookie: string,
+  body: unknown,
+) {
+  return auth.handler(
+    new Request(`http://localhost:3000/api/auth${path}`, {
+      method: "POST",
+      headers: { cookie, origin: "http://localhost:3000", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+// No Better-Auth route changes an address or asserts it verified: `/update-user`
+// refuses `email` itself, `/change-email` is not configured, and the app's admin
+// role lacks `set-email`, which `/admin/update-user` requires for `email` and
+// `emailVerified` (./admin-access.ts). An admin's word is not mailbox proof.
+describe("email changes", () => {
+  it("refuses an admin's email or verification change through /admin/update-user", async () => {
+    const { auth, db } = buildAuth({
+      emailConfigured: false,
+      signupOpen: true,
+      appAdminAccess: true,
+    });
+    await bootstrapSignUp(auth, OWNER, issueBootstrapToken());
+    const member = await signUp(auth, "member@example.com");
+    const cookie = await sessionCookie(auth, OWNER);
+    for (const data of [{ email: "new@example.com" }, { emailVerified: true }]) {
+      const res = await post(auth, "/admin/update-user", cookie, { userId: member.user.id, data });
+      expect(res.status).toBe(403);
+    }
+    const renamed = await post(auth, "/admin/update-user", cookie, {
+      userId: member.user.id,
+      data: { name: "Renamed" },
+    });
+    expect(renamed.status).toBe(200);
+    expect(db.user.find((u) => (u as { id: string }).id === member.user.id)).toMatchObject({
+      email: "member@example.com",
+      name: "Renamed",
+    });
+  });
+
+  it("refuses a user's own email change through /update-user", async () => {
+    const { auth, db } = buildAuth({ emailConfigured: false, signupOpen: true, usersExist: true });
+    const member = await signUp(auth, "member@example.com");
+    const res = await post(auth, "/update-user", await sessionCookie(auth, "member@example.com"), {
+      email: "new@example.com",
+    });
+    expect(res.status).toBe(400);
+    expect(db.user.find((u) => (u as { id: string }).id === member.user.id)).toMatchObject({
+      email: "member@example.com",
+    });
+  });
 });

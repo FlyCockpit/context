@@ -5,11 +5,12 @@ import {
   getAllowedUserCreationMode,
   getBootstrapTokenCandidate,
   getGrantedUserLocale,
+  refuseUnprovedUserCreation,
 } from "./user-creation-policy.js";
 
 /** The endpoint context Better-Auth hands a database hook (absent for internal writes). */
 export type UserCreateHookContext =
-  | { headers?: Headers | null; context?: object }
+  | { headers?: Headers | null; context?: object; path?: string }
   | null
   | undefined;
 
@@ -38,7 +39,13 @@ export type UserCreateHookDeps = {
  * exercised in tests against an in-memory adapter.
  */
 export function createUserCreateBeforeHook(deps: UserCreateHookDeps) {
-  return async <U extends { email?: string | null }>(user: U, context: UserCreateHookContext) => {
+  return async <U extends { email?: string | null; emailVerified?: unknown }>(
+    user: U,
+    context: UserCreateHookContext,
+  ) => {
+    // Only users.invite reaches /admin/create-user, and only an IdP sign-in
+    // hands over a verified row (./user-creation-policy.ts).
+    refuseUnprovedUserCreation(user, context);
     const email = user.email?.toLowerCase();
     // The account-existence read runs for EVERY creation (not only for
     // allowlisted addresses), so its latency cannot tell a listed address from

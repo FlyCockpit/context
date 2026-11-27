@@ -16,7 +16,7 @@ import { adminPluginAccess } from "./admin-access.js";
 import { announceIfUserBanned } from "./ban.js";
 import { bannedSessionGuard } from "./banned-session-guard.js";
 import { revokeBootstrapToken } from "./bootstrap-token.js";
-import { verifyInvitedEmailOnPasswordReset } from "./invite-verification.js";
+import { createResetLinkHooks } from "./invite-verification.js";
 import { resolveMcpPlugins } from "./mcp-plugins.js";
 import { createPasswordPepper } from "./password-pepper.js";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password-policy.js";
@@ -48,6 +48,10 @@ const isCrossOrigin = !!env.CORS_ORIGIN;
 // verification flow applies unchanged.
 const emailConfigured = isEmailConfigured();
 
+// Which set-password links verify an address and who may spend them: only a
+// link mailed to the address proves it (./invite-verification.ts).
+const resetLinks = createResetLinkHooks({ emailConfigured });
+
 // Better-Auth emits "user input failed validation" cases (wrong password, unknown
 // email, unverified email, etc.) at level=error. Those are normal end-user mistakes,
 // not server faults — downgrade them to warn so production error dashboards stay
@@ -57,7 +61,7 @@ const USER_INPUT_ERROR_PATTERN =
 
 type SendResetPassword = NonNullable<BetterAuthOptions["emailAndPassword"]>["sendResetPassword"];
 
-const sendResetPassword: SendResetPassword = async ({ user, url }) => {
+const sendResetPassword: SendResetPassword = async ({ user, url, token }) => {
   // Same locale-resolution dance as sendVerificationEmail: Better-Auth's
   // callback `user` is typed against the base user shape, so `locale`
   // (an additionalField) isn't on it. Fetch the row via Prisma so the
@@ -80,6 +84,12 @@ const sendResetPassword: SendResetPassword = async ({ user, url }) => {
     to: user.email,
     subject,
     html,
+  });
+  // The link went to the mailbox: spending it verifies the address, and it
+  // stays spendable once the account is active.
+  await resetLinks.afterResetMailSent((await auth.$context).internalAdapter, {
+    token,
+    email: user.email,
   });
 };
 
@@ -174,17 +184,11 @@ export const auth = betterAuth({
     minPasswordLength: PASSWORD_MIN_LENGTH,
     maxPasswordLength: PASSWORD_MAX_LENGTH,
     ...(emailConfigured ? { sendResetPassword } : {}),
-    // An emailed invite's set-password link proves the invitee controls the
-    // address, so using it verifies the email (./invite-verification.ts).
-    // This runs after the password is committed, so a failure here must not
-    // fail the reset: the invitee falls back to the normal verification email.
+    // The user just chose a password, so their other links die (one the
+    // admin was shown included). Runs after the password is committed, so a
+    // failure is logged, never surfaced (./invite-verification.ts).
     onPasswordReset: async ({ user }) => {
-      try {
-        await verifyInvitedEmailOnPasswordReset(user);
-      } catch (err) {
-        const errLabel = err instanceof Error ? `${err.name}: ${err.message}` : "unknown error";
-        console.error("[auth] marking an invited email verified failed:", errLabel);
-      }
+      await resetLinks.afterPasswordReset((await auth.$context).adapter, user.id);
     },
   },
   ...(emailConfigured ? { emailVerification } : {}),
@@ -246,11 +250,18 @@ export const auth = betterAuth({
           isSignupOpen,
         });
       }
+      // A link the admin was shown (not mailed) works only while the account
+      // is a pending invite, so one left over once the invitee activated the
+      // account another way is dead. Refused exactly like an expired token,
+      // which the reset page already handles (./invite-verification.ts).
+      await resetLinks.before(ctx);
     }),
     after: createAuthMiddleware(async (ctx) => {
       if (ctx.path === SIGN_UP_EMAIL_PATH) {
         return neutralizeSignUpResponse(ctx, { emailVerificationRequired: emailConfigured });
       }
+      // A spent mailed link verifies the address it went to.
+      await resetLinks.after(ctx);
     }),
   },
   plugins: [

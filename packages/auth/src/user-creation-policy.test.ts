@@ -6,6 +6,7 @@ import {
   FIRST_ACCOUNT_REQUIRES_BOOTSTRAP_MESSAGE,
   getAllowedUserCreationMode,
   getGrantedUserLocale,
+  refuseUnprovedUserCreation,
   runWithAllowedUserCreation,
   SIGNUP_DISABLED_MESSAGE,
   type UserCreationMode,
@@ -313,5 +314,43 @@ describe("bootstrap marker is re-checked", () => {
       bootstrapTokenValid: true,
     });
     expect(decision.allowed).toBe(false);
+  });
+});
+
+describe("unproved user creation", () => {
+  const code = (fn: () => void) => {
+    try {
+      fn();
+      return null;
+    } catch (err) {
+      return (err as { body?: { code?: string } }).body?.code ?? "unknown";
+    }
+  };
+
+  it("lets only the admin-invite grant reach /admin/create-user", async () => {
+    const ctx = { path: "/admin/create-user" };
+    expect(code(() => refuseUnprovedUserCreation({}, ctx))).toBe("ADMIN_CREATE_USER_UNSUPPORTED");
+    await runWithAllowedUserCreation("admin-bootstrap", () => {
+      expect(code(() => refuseUnprovedUserCreation({}, ctx))).toBe("ADMIN_CREATE_USER_UNSUPPORTED");
+    });
+    await runWithAllowedUserCreation("admin-invite", () => {
+      expect(code(() => refuseUnprovedUserCreation({ emailVerified: false }, ctx))).toBeNull();
+    });
+  });
+
+  it("accepts a verified row only from an IdP sign-in", async () => {
+    for (const path of ["/callback/sso", "/sign-in/social"]) {
+      expect(code(() => refuseUnprovedUserCreation({ emailVerified: true }, { path }))).toBeNull();
+    }
+    for (const context of [{ path: "/sign-up/email" }, { path: "/admin/create-user" }, null]) {
+      await runWithAllowedUserCreation("admin-invite", () => {
+        expect(code(() => refuseUnprovedUserCreation({ emailVerified: true }, context))).toBe(
+          "EMAIL_VERIFICATION_BY_MAIL_ONLY",
+        );
+      });
+    }
+    expect(
+      code(() => refuseUnprovedUserCreation({ emailVerified: false }, { path: "/sign-up/email" })),
+    ).toBeNull();
   });
 });

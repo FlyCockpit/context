@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Locale } from "@cockpit-context/config/locales";
+import { APIError } from "better-auth/api";
 
 export type UserCreationMode = "admin-bootstrap" | "admin-invite";
 
@@ -149,6 +150,53 @@ export function runWithAllowedUserCreation<T>(
  */
 export function getGrantedUserLocale(): Locale | undefined {
   return userCreationModeStorage.getStore()?.locale;
+}
+
+/** Better-Auth's admin route that creates a user (`auth.api.createUser`). */
+export const ADMIN_CREATE_USER_PATH = "/admin/create-user";
+
+/**
+ * Better-Auth routes where an IdP signs the user in: the OAuth/OIDC callback
+ * (`/callback/<providerId>`, which the genericOAuth SSO provider uses) and an
+ * ID-token sign-in (`/sign-in/social`). Their `emailVerified` is the IdP's
+ * `email_verified` claim, which Cockpit Context trusts (docs/access-matrix.md).
+ */
+function isIdpSignInPath(path: string | undefined): boolean {
+  return path === "/sign-in/social" || (path?.startsWith("/callback/") ?? false);
+}
+
+/**
+ * Two rules for every user row Better-Auth creates, checked first in the
+ * `user.create.before` hook (./user-create-hook.ts):
+ *
+ * - `/admin/create-user` runs only under the `admin-invite` grant, that is only
+ *   from `users.invite` on the server, which never lets anyone choose the
+ *   password or the verification state. An admin session can reach Better-Auth's
+ *   own route over HTTP (`/api/auth/admin/*`); that call is refused, open signup
+ *   or not. Otherwise an admin could create an account with a password they
+ *   chose and `data: { emailVerified: true }`.
+ * - A new row may arrive verified only from an IdP sign-in. Everywhere else
+ *   (sign-up forces `false` itself) the address is unproved until a link mailed
+ *   to it is used. The hook itself still creates every row verified when SMTP
+ *   is off (`forceEmailVerified`), where no address can be proved at all.
+ */
+export function refuseUnprovedUserCreation(
+  user: { emailVerified?: unknown },
+  context: { path?: string } | null | undefined,
+): void {
+  const path = context?.path;
+  if (path === ADMIN_CREATE_USER_PATH && getAllowedUserCreationMode() !== "admin-invite") {
+    throw new APIError("FORBIDDEN", {
+      message: "Invite users from the admin dashboard.",
+      code: "ADMIN_CREATE_USER_UNSUPPORTED",
+    });
+  }
+  if (user.emailVerified === true && !isIdpSignInPath(path)) {
+    throw new APIError("BAD_REQUEST", {
+      message: "An email address is verified only through the link mailed to it.",
+      code: "EMAIL_VERIFICATION_BY_MAIL_ONLY",
+    });
+  }
 }
 
 export { cleanupBeforeUserDeletion, registerUserDeletionCleanup } from "./user-deletion-hooks.js";
