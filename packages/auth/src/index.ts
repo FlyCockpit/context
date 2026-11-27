@@ -8,11 +8,15 @@ import {
   renderVerifyEmail,
   sendEmail,
 } from "@cockpit-context/mailer";
-import { type BetterAuthOptions, betterAuth } from "better-auth";
-import { prismaAdapter } from "better-auth/adapters/prisma";
+import { BASE_ERROR_CODES, type BetterAuthOptions, betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSession } from "better-auth/api";
 import { deleteSessionCookie } from "better-auth/cookies";
 import { admin, genericOAuth, twoFactor } from "better-auth/plugins";
+import {
+  afterAccountCreate,
+  afterUserUpdate,
+  noteVerificationWrite,
+} from "./account-activation.js";
 import { adminPluginAccess } from "./admin-access.js";
 import { announceIfUserBanned, announceUserSessionsRevoked } from "./ban.js";
 import { bannedSessionGuard } from "./banned-session-guard.js";
@@ -23,11 +27,15 @@ import {
   revokeCredentialsAfterPasswordReset,
   revokeCredentialsBeforePasswordReset,
 } from "./credential-revocation.js";
-import { createResetLinkHooks } from "./invite-verification.js";
+import { createCredentialSetupAdapter } from "./credential-setup-adapter.js";
 import { resolveMcpPlugins } from "./mcp-plugins.js";
 import { createPasswordPepper } from "./password-pepper.js";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password-policy.js";
-import { deleteResetLinks, withCredentialSetupLock } from "./password-reset-links.js";
+import {
+  isResetLinkRedeemable,
+  recordResetLinkMailed,
+  resetTokenOf,
+} from "./password-reset-links.js";
 import {
   fencePasswordSessionAfter,
   fencePasswordSessionBefore,
@@ -67,14 +75,6 @@ const isCrossOrigin = !!env.CORS_ORIGIN;
 // verification flow applies unchanged.
 const emailConfigured = isEmailConfigured();
 
-// Which set-password links verify an address and who may spend them: only a
-// link mailed to the address proves it (./invite-verification.ts).
-const resetLinks = createResetLinkHooks({ emailConfigured });
-// Better Auth runs after-hooks for APIError, but skips them for other thrown
-// errors. Carry a failed post-sweep through that path so mailed-link verification
-// still finishes before the original revocation error reaches the caller.
-const resetRevocationFailures = new WeakMap<APIError, { error: unknown }>();
-
 // Better-Auth emits "user input failed validation" cases (wrong password, unknown
 // email, unverified email, etc.) at level=error. Those are normal end-user mistakes,
 // not server faults — downgrade them to warn so production error dashboards stay
@@ -110,10 +110,14 @@ const sendResetPassword: SendResetPassword = async ({ user, url, token }) => {
   });
   // The link went to the mailbox: spending it verifies the address, and it
   // stays spendable once the account is active.
-  await resetLinks.afterResetMailSent((await auth.$context).internalAdapter, {
-    token,
-    email: user.email,
-  });
+  try {
+    await recordResetLinkMailed({ token, userId: user.id, email: user.email });
+  } catch (error) {
+    console.error(
+      "[auth] recording a mailed reset link failed:",
+      error instanceof Error ? error.name : typeof error,
+    );
+  }
 };
 
 const emailVerification: BetterAuthOptions["emailVerification"] = {
@@ -161,18 +165,9 @@ export const passwordPepper = createPasswordPepper({
 });
 
 export const auth = betterAuth({
-  // Adapter transactions intentionally stay OFF (Better Auth's default).
-  // Sign-up awaits verification mail: its global Prisma locale lookup cannot
-  // see a user created inside an uncommitted adapter transaction, and the
-  // mailer's 40-second total delivery budget exceeds Prisma's default 5 seconds.
-  // Resets therefore commit step by step: a failed password write leaves the
-  // token spent and existing sessions deleted, but the old password still works.
-  // An in-flight sign-in may finish on that unchanged hash; no post-sweep runs.
-  // Request a fresh Forgot password link. Do not enable adapter transactions
-  // without redesigning these callbacks and the failure contract tests.
-  database: prismaAdapter(prisma, {
-    provider: "postgresql",
-  }),
+  // Reset consumption, mailbox proof and password commit share one transaction.
+  // Signup locale reads and SMTP retain Better Auth's nontransactional behavior.
+  database: createCredentialSetupAdapter({ emailConfigured }),
 
   logger: {
     log(level, message, ...args) {
@@ -234,28 +229,7 @@ export const auth = betterAuth({
         // Still tear down existing exchanges if every revocation attempt failed.
         announceUserSessionsRevoked(user.id);
       }
-      // Upstream cleanup is best-effort after the password is committed, even
-      // when the post-sweep failed. Mailed-link verification runs in hooks.after.
-      for (let attempt = 1; ; attempt += 1) {
-        try {
-          await withCredentialSetupLock(user.id, (tx) => deleteResetLinks(tx, user.id));
-          break;
-        } catch (error) {
-          if (attempt < 3) continue;
-          console.error(
-            "[auth] deleting the user's other reset links failed:",
-            error instanceof Error ? `${error.name}: ${error.message}` : "unknown error",
-          );
-          break;
-        }
-      }
-      if (revocationFailure) {
-        const pending = new APIError("INTERNAL_SERVER_ERROR", {
-          message: "Password-reset credential revocation failed",
-        });
-        resetRevocationFailures.set(pending, revocationFailure);
-        throw pending;
-      }
+      if (revocationFailure) throw revocationFailure.error;
     },
   },
   ...(emailConfigured ? { emailVerification } : {}),
@@ -387,14 +361,15 @@ export const auth = betterAuth({
 
       if (ctx.path === "/reset-password") {
         // Mirror 1.7.18's body/query token fallback and expiry comparison.
-        const token = ctx.body?.token || ctx.query?.token;
-        if (typeof token === "string" && token) {
+        const token = resetTokenOf(ctx);
+        if (token) {
           try {
             // Judge invite activation before the pre-sweep deletes live sessions:
             // a shown link must not become redeemable because we signed its owner out.
-            await resetLinks.before(ctx);
-            // A failed write may spend its link and delete existing sessions,
-            // leaving the old password intact. Successful resets fence old proof.
+            if (!(await isResetLinkRedeemable(token, { emailConfigured }))) {
+              throw APIError.from("BAD_REQUEST", BASE_ERROR_CODES.INVALID_TOKEN);
+            }
+            // The early sweep is independent; reset token/proof/password writes roll back together.
             await revokeCredentialsBeforePasswordReset(ctx);
           } catch (error) {
             if (error instanceof APIError) throw error;
@@ -441,19 +416,6 @@ export const auth = betterAuth({
 
       if (ctx.path === SIGN_UP_EMAIL_PATH) {
         return neutralizeSignUpResponse(ctx, { emailVerificationRequired: emailConfigured });
-      }
-      const pending = ctx.context.returned;
-      const revocationFailure =
-        pending instanceof APIError ? resetRevocationFailures.get(pending) : undefined;
-      // The callback ran only after the password committed. Even if its sweep
-      // failed, finish upstream's per-token, mailbox-bound verification first.
-      await resetLinks.after(
-        revocationFailure
-          ? { ...ctx, context: { ...ctx.context, returned: { status: true } } }
-          : ctx,
-      );
-      if (revocationFailure) {
-        throw revocationFailure.error;
       }
     }),
   },
@@ -544,7 +506,10 @@ export const auth = betterAuth({
           guardPasswordAccountCreate(account, context);
           recordSignUpCredential(account, context);
         },
-        after: async () => confirmPasswordWriteLocked({ hash: passwordPepper.hash }),
+        after: async (account) => {
+          await confirmPasswordWriteLocked({ hash: passwordPepper.hash });
+          await afterAccountCreate(account);
+        },
       },
       update: {
         before: async (data) => guardPasswordAccountUpdate(data),
@@ -570,7 +535,9 @@ export const auth = betterAuth({
         },
       },
       update: {
-        after: async (user) => {
+        before: async (data, context) => noteVerificationWrite(data, context),
+        after: async (user, context) => {
+          await afterUserUpdate(user, context);
           invalidateSignupAvailabilityCache();
           // The admin plugin's `/admin/ban-user` and `/admin/update-user`
           // ban through here. Better-Auth runs this hook after the write

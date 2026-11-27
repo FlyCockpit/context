@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import prisma from "@cockpit-context/db";
 import { APIError } from "better-auth/api";
 import { quarantineUntrustedPasswordWrite } from "./credential-revocation.js";
-import { RESET_PASSWORD_IDENTIFIER_PREFIX } from "./invite-verification.js";
 import { LockSlotTimeoutError, withLockSlot } from "./lock-slots.js";
+import { RESET_PASSWORD_IDENTIFIER_PREFIX } from "./password-reset-links.js";
 import { readBodyFields } from "./request-body-field.js";
 import { ADMIN_CREATE_USER_PATH, getAllowedUserCreationMode } from "./user-creation-policy.js";
 
@@ -73,6 +73,7 @@ const PASSWORD_WRITE_WAIT_MS = 10_000;
 const POLL_MS = 50;
 
 type HeldLock = {
+  path: string;
   userId: string;
   held: boolean;
   expiresAt: number;
@@ -152,6 +153,7 @@ export async function withPasswordWriteLock(
   return withLockSlot(
     async () => {
       const lock: HeldLock = {
+        path,
         userId: target.userId,
         held: false,
         expiresAt: performance.now() + HELD_FOR_MS,
@@ -301,4 +303,9 @@ export async function confirmPasswordWriteLocked({
     message:
       "This password change could not be confirmed, so the account's password was disabled for safety. Use Forgot password to set a new one.",
   });
+}
+
+/** Request identity survives a lapsed lock for BA's rollback/after-hook decision. */
+export function isResetPasswordWrite(): boolean {
+  return heldFor.getStore()?.path === RESET_PASSWORD_PATH;
 }

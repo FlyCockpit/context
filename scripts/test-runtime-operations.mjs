@@ -1,8 +1,9 @@
 /** Explicit operations smoke; owns disposable services and never loads the root .env. */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -133,10 +134,536 @@ async function runtimeCheck() {
   }
 }
 
+/**
+ * Actual pinned Better Auth, production password mount/hooks/selective adapter,
+ * and migrated PostgreSQL at the minimum pool size. SMTP is configured but no
+ * mail/provider endpoint is invoked: token delivery proof is a fixture fact.
+ */
+async function inviteRaceCheck() {
+  assert.equal(process.env.DATABASE_POOL_MAX, "3");
+  const [
+    { auth },
+    { handlePasswordAuthRequest },
+    links,
+    { createSetPasswordToken },
+    { withPasswordSignInFence },
+    { default: prisma },
+    { loadPg },
+  ] = await Promise.all([
+    import("../packages/auth/src/index.ts"),
+    import("../packages/auth/src/password-auth-handler.ts"),
+    import("../packages/auth/src/password-reset-links.ts"),
+    import("../packages/auth/src/invite-verification.ts"),
+    import("../packages/auth/src/password-sign-in-fence.ts"),
+    import("../packages/db/src/index.ts"),
+    import("./db/lib/prisma.mjs"),
+  ]);
+  // Resolve the pinned API from its owning workspace, not root hoisting.
+  const authApi = createRequire(new URL("../packages/auth/package.json", import.meta.url)).resolve(
+    "better-auth/api",
+  );
+  const { createEmailVerificationToken } = await import(authApi);
+  const context = await auth.$context;
+  assert.equal(context.options.emailAndPassword.requireEmailVerification, true);
+  const pg = loadPg();
+  const observer = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  const created = [];
+  const minted = [];
+  const origin = process.env.BETTER_AUTH_URL;
+  const originalPassword = "fixture-original-password-12345";
+  const invitee = async (label, { credential = true } = {}) => {
+    const id = `invite-${label}-${randomUUID()}`;
+    const email = `${id}@example.test`;
+    created.push(id);
+    await prisma.user.create({ data: { id, name: "Invitee", email, emailVerified: false } });
+    if (credential) {
+      await prisma.account.create({
+        data: {
+          userId: id,
+          accountId: id,
+          providerId: "credential",
+          password: await context.password.hash(originalPassword),
+        },
+      });
+    }
+    return { id, email };
+  };
+  const mint = async (user, { mailed }) => {
+    // users.mintSetPasswordLink is private. Use its existing token primitive
+    // with its real setup lock and transaction-bound writer; no API authority.
+    const token = await links.withCredentialSetupLock(user.id, (tx) =>
+      createSetPasswordToken(
+        {
+          createVerificationValue: (data) => tx.verification.create({ data, select: { id: true } }),
+        },
+        user.id,
+        new Date(Date.now() + 60 * 60 * 1000),
+      ),
+    );
+    minted.push(token);
+    if (mailed) {
+      assert.equal(
+        await links.recordResetLinkMailed({ token, userId: user.id, email: user.email }),
+        true,
+      );
+    }
+    return token;
+  };
+  const handleAuth = (request) => handlePasswordAuthRequest(auth, request);
+  const spend = (token, newPassword = "fixture-reset-password-12345") =>
+    handleAuth(
+      new Request(`${origin}/api/auth/reset-password`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin },
+        body: JSON.stringify({ token, newPassword }),
+      }),
+    );
+  const verified = async (user) =>
+    (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).emailVerified;
+  const credentialOf = (user) =>
+    prisma.account.findFirst({ where: { userId: user.id, providerId: "credential" } });
+  const passwordWorks = async (user, password) => {
+    const credential = await credentialOf(user);
+    return (
+      !!credential?.password && context.password.verify({ hash: credential.password, password })
+    );
+  };
+  const resetLinks = (user) =>
+    prisma.verification.count({
+      where: { value: user.id, identifier: { startsWith: links.RESET_PASSWORD_IDENTIFIER_PREFIX } },
+    });
+  const proofIdentifier = (token) =>
+    `reset-password-mailed:${createHash("sha256").update(token).digest("base64url")}`;
+  const deadLinks = async (user, tokens) => {
+    assert.equal(await resetLinks(user), 0, "no surviving sibling reset links");
+    for (const token of tokens) assert.equal((await spend(token)).status, 400);
+  };
+  const verificationRequest = async (user) => {
+    const token = await createEmailVerificationToken(context.secret, user.email);
+    return () =>
+      handleAuth(new Request(`${origin}/api/auth/verify-email?token=${encodeURIComponent(token)}`));
+  };
+  const linkIdp = (user) =>
+    context.internalAdapter.createAccount({
+      userId: user.id,
+      providerId: "sso",
+      accountId: randomUUID(),
+    });
+
+  // A separate holder and observer do not borrow slots from the app's pool.
+  // Match this exact held advisory key (including objsubid), so the numeric
+  // two-key credential lock cannot accidentally satisfy the setup barrier.
+  const waitAtSetup = async (holderPid) => {
+    const deadline = Date.now() + 4_000;
+    while (Date.now() < deadline) {
+      const { rows } = await observer.query(
+        `SELECT waiting.pid FROM pg_locks waiting JOIN pg_locks held
+           ON waiting.database = held.database AND waiting.classid = held.classid
+          AND waiting.objid = held.objid AND waiting.objsubid = held.objsubid
+         WHERE held.pid = $1 AND held.locktype = 'advisory' AND held.granted
+           AND waiting.locktype = 'advisory' AND NOT waiting.granted`,
+        [holderPid],
+      );
+      if (rows.length > 0) return;
+      await delay(10);
+    }
+    throw new Error("First writer did not reach the real credential-setup lock.");
+  };
+  const withSetupHolder = async (user, run) => {
+    const holder = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await holder.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        `set-password-link:${user.id}`,
+      ]);
+      const { rows } = await holder.query("SELECT pg_backend_pid() AS pid");
+      return await run(holder, rows[0].pid);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      await holder.end();
+    }
+  };
+  const orderedAtSetup = (user, first, second) =>
+    withSetupHolder(user, async (holder, pid) => {
+      const pending = [];
+      // Reflect immediately: a failed barrier must release the holder and drain
+      // all started work, without unhandled rejections or another case's waiter.
+      const start = (run) => {
+        const result = Promise.resolve()
+          .then(run)
+          .then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+          );
+        pending.push(result);
+        return result;
+      };
+      try {
+        const winning = start(first);
+        await waitAtSetup(pid);
+        const losing = start(second);
+        // At pool 3 the second writer can wait in the slot reservation FIFO.
+        // Requiring a second PostgreSQL waiter here would deadlock the fixture.
+        await holder.query("COMMIT");
+        const results = await Promise.all([winning, losing]);
+        return results.map((result) => {
+          if ("error" in result) throw result.error;
+          return result.value;
+        });
+      } finally {
+        await holder.query("ROLLBACK").catch(() => {});
+        await Promise.all(pending);
+      }
+    });
+
+  await observer.connect();
+  try {
+    // Mailed-only mailbox proof, and every sibling is dead after either spend.
+    for (const mailed of [false, true]) {
+      const user = await invitee(mailed ? "mailed" : "shown");
+      const sibling = await mint(user, { mailed: false });
+      const token = await mint(user, { mailed });
+      assert.equal((await spend(token)).status, 200);
+      assert.equal(await verified(user), mailed, "only a mailed token proves the mailbox");
+      assert.equal(await passwordWorks(user, "fixture-reset-password-12345"), true);
+      await deadLinks(user, [token, sibling]);
+      if (!mailed) {
+        // Setting a password with a shown link leaves the invite pending.
+        const delivered = await mint(user, { mailed: true });
+        assert.equal((await spend(delivered)).status, 200);
+        assert.equal(await verified(user), true);
+        await deadLinks(user, [delivered]);
+      } else {
+        // A mailed forgot-password token still works after activation.
+        const forgot = await mint(user, { mailed: true });
+        assert.equal((await spend(forgot, "fixture-active-reset-password-12345")).status, 200);
+        assert.equal(await passwordWorks(user, "fixture-active-reset-password-12345"), true);
+        assert.equal(await verified(user), true);
+        await deadLinks(user, [forgot]);
+      }
+    }
+
+    for (const first of ["shown", "mailed"]) {
+      const user = await invitee(`spends-${first}`);
+      const shown = await mint(user, { mailed: false });
+      const mailed = await mint(user, { mailed: true });
+      const winningPassword = `${first}-winning-password-12345`;
+      const losingPassword = "fixture-losing-password-12345";
+      const [winner, loser] = await orderedAtSetup(
+        user,
+        () => spend(first === "shown" ? shown : mailed, winningPassword),
+        () => spend(first === "shown" ? mailed : shown, losingPassword),
+      );
+      assert.equal(winner.status, 200);
+      assert.equal(loser.status, 400);
+      assert.equal(await verified(user), first === "mailed");
+      assert.equal(await passwordWorks(user, winningPassword), true);
+      assert.equal(await passwordWorks(user, losingPassword), false);
+      await deadLinks(user, [shown, mailed]);
+    }
+
+    // Both orders use the real verify-email handler and activation adapter write.
+    for (const first of ["shown", "verify"]) {
+      const user = await invitee(`verification-${first}`);
+      const token = await mint(user, { mailed: false });
+      const sibling = await mint(user, { mailed: false });
+      const verify = await verificationRequest(user);
+      const shownPassword = "fixture-shown-before-verification-12345";
+      const refusedPassword = "fixture-refused-after-verification-12345";
+      const [winner, loser] = await orderedAtSetup(
+        user,
+        first === "shown" ? () => spend(token, shownPassword) : verify,
+        first === "shown" ? verify : () => spend(token, refusedPassword),
+      );
+      assert.equal(winner.status, 200);
+      assert.equal(loser.status, first === "shown" ? 200 : 400);
+      assert.equal(await verified(user), true);
+      assert.equal(await passwordWorks(user, shownPassword), first === "shown");
+      assert.equal(await passwordWorks(user, refusedPassword), false);
+      assert.equal(await passwordWorks(user, originalPassword), first === "verify");
+      await deadLinks(user, [token, sibling]);
+    }
+
+    // Admission itself must re-read a committed activation after waiting. This
+    // independent transaction intentionally bypasses HTTP preflight, not policy.
+    const recheck = await invitee("consume-recheck");
+    const recheckToken = await mint(recheck, { mailed: false });
+    assert.equal(await links.isResetLinkRedeemable(recheckToken, { emailConfigured: true }), true);
+    await withSetupHolder(recheck, async (holder, pid) => {
+      await holder.query('UPDATE "user" SET "emailVerified" = true WHERE id = $1', [recheck.id]);
+      const decision = prisma
+        .$transaction((tx) => links.admitResetSpend(tx, recheckToken, { emailConfigured: true }), {
+          isolationLevel: "ReadCommitted",
+          timeout: 15_000,
+        })
+        .then(
+          (value) => ({ value }),
+          (error) => ({ error }),
+        );
+      try {
+        await waitAtSetup(pid);
+        await holder.query("COMMIT");
+        const result = await decision;
+        if ("error" in result) throw result.error;
+        assert.equal(result.value, false, "consume admission sees the newly activated state");
+      } finally {
+        await holder.query("ROLLBACK").catch(() => {});
+        await decision;
+      }
+    });
+    assert.equal(await verified(recheck), true);
+    assert.equal((await spend(recheckToken)).status, 400);
+    await deadLinks(recheck, [recheckToken]);
+
+    // The already-authorized internal account seam exercises pending IdP
+    // cleanup without a provider callback or changing default linking trust.
+    const pending = await invitee("pending-idp");
+    const shownPassword = "fixture-admin-shown-password-12345";
+    assert.equal((await spend(await mint(pending, { mailed: false }), shownPassword)).status, 200);
+    const sibling = await mint(pending, { mailed: false });
+    const agentToken = await prisma.mcpAgentToken.create({
+      data: {
+        userId: pending.id,
+        name: "disposable activation fixture",
+        lookupPrefix: randomUUID(),
+        secretDigest: randomBytes(32).toString("hex"),
+      },
+    });
+    const grant = await prisma.mcpGrant.create({
+      data: { userId: pending.id, clientId: randomUUID(), referenceId: randomUUID() },
+    });
+    await linkIdp(pending);
+    assert.equal((await credentialOf(pending)).password, null);
+    assert.equal(await passwordWorks(pending, shownPassword), false);
+    assert.equal(await verified(pending), false, "the internal link seam proves no mailbox");
+    assert.ok(
+      (await prisma.mcpAgentToken.findUniqueOrThrow({ where: { id: agentToken.id } })).revokedAt,
+      "MCP token remains a revoked tombstone",
+    );
+    assert.ok(
+      (await prisma.mcpGrant.findUniqueOrThrow({ where: { id: grant.id } })).revokedAt,
+      "MCP grant remains a revoked tombstone",
+    );
+    await context.internalAdapter.updateUser(pending.id, { emailVerified: true });
+    assert.equal(await verified(pending), true);
+    await deadLinks(pending, [sibling]);
+
+    for (const first of ["shown", "sso"]) {
+      const user = await invitee(`idp-race-${first}`);
+      const token = await mint(user, { mailed: false });
+      const sibling = await mint(user, { mailed: false });
+      const [winner, loser] = await orderedAtSetup(
+        user,
+        first === "shown" ? () => spend(token, shownPassword) : () => linkIdp(user),
+        first === "shown" ? () => linkIdp(user) : () => spend(token, shownPassword),
+      );
+      assert.equal(first === "shown" ? winner.status : loser.status, first === "shown" ? 200 : 400);
+      assert.equal((await credentialOf(user)).password, null);
+      assert.equal(await passwordWorks(user, shownPassword), false);
+      assert.equal(await verified(user), false);
+      assert.equal(
+        await prisma.account.count({ where: { userId: user.id, providerId: "sso" } }),
+        1,
+      );
+      await deadLinks(user, [token, sibling]);
+    }
+
+    const normalSso = await invitee("active-idp");
+    await context.internalAdapter.updateUser(normalSso.id, { emailVerified: true });
+    const oldCredential = await credentialOf(normalSso);
+    await linkIdp(normalSso);
+    assert.ok(
+      (await credentialOf(normalSso)).password === oldCredential.password,
+      "active verified SSO preserves the existing password",
+    );
+    // A normal post-link session uses the actual password handler, with the
+    // user's preserved password and verified mailbox. No SSO trust is added.
+    const signedIn = await handleAuth(
+      new Request(`${origin}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin },
+        body: JSON.stringify({ email: normalSso.email, password: originalPassword }),
+      }),
+    );
+    assert.equal(signedIn.status, 200);
+    assert.equal(await prisma.session.count({ where: { userId: normalSso.id } }), 1);
+    assert.equal(
+      (await prisma.user.findUniqueOrThrow({ where: { id: normalSso.id } })).role,
+      "user",
+    );
+    assert.equal(await prisma.mcpAgentToken.count({ where: { userId: normalSso.id } }), 0);
+    assert.equal(await prisma.mcpGrant.count({ where: { userId: normalSso.id } }), 0);
+
+    const zero = await invitee("zero-accounts", { credential: false });
+    assert.equal((await spend(await mint(zero, { mailed: false }), shownPassword)).status, 200);
+    assert.equal(await verified(zero), false);
+    assert.equal(await passwordWorks(zero, shownPassword), true);
+    await linkIdp(zero);
+    assert.equal((await credentialOf(zero)).password, null);
+    const third = await invitee("third-noncredential");
+    // Two credential rows precede a third identity: a take:2 account projection
+    // must never accidentally classify this existing IdP user as pending.
+    await prisma.account.create({
+      data: {
+        userId: third.id,
+        accountId: randomUUID(),
+        providerId: "credential",
+        password: await context.password.hash(originalPassword),
+      },
+    });
+    await prisma.account.create({
+      data: { userId: third.id, accountId: randomUUID(), providerId: "existing-idp" },
+    });
+    const existingCredential = await credentialOf(third);
+    const thirdToken = await mint(third, { mailed: false });
+    assert.equal((await spend(thirdToken, shownPassword)).status, 400);
+    await linkIdp(third);
+    assert.ok(
+      (await prisma.account.findUniqueOrThrow({ where: { id: existingCredential.id } }))
+        .password === existingCredential.password,
+      "an existing noncredential identity is not a pending invite",
+    );
+    await deadLinks(third, [thirdToken]);
+
+    // The injected failure is the pinned internal writer seam. Real PostgreSQL
+    // must roll back the consumed token, mailed proof, sibling and email flag.
+    const rollback = await invitee("rollback");
+    const rollbackSibling = await mint(rollback, { mailed: false });
+    const rollbackToken = await mint(rollback, { mailed: true });
+    const proofWhere = { identifier: proofIdentifier(rollbackToken) };
+    const beforeProof = await prisma.verification.findFirstOrThrow({ where: proofWhere });
+    const beforeCredential = await credentialOf(rollback);
+    const updatePassword = context.internalAdapter.updatePassword;
+    let failureCalls = 0;
+    try {
+      context.internalAdapter.updatePassword = async () => {
+        failureCalls++;
+        throw new Error("fixture credential-write failure");
+      };
+      assert.equal((await spend(rollbackToken)).status, 500);
+      assert.equal(failureCalls, 1, "the real reset reached the failing credential writer");
+    } finally {
+      context.internalAdapter.updatePassword = updatePassword;
+    }
+    assert.equal(await verified(rollback), false);
+    assert.equal(await resetLinks(rollback), 2);
+    assert.deepEqual(
+      await prisma.verification.findFirstOrThrow({ where: proofWhere }),
+      beforeProof,
+    );
+    assert.ok(
+      (await credentialOf(rollback)).password === beforeCredential.password,
+      "a failed spend leaves the existing password unchanged",
+    );
+    assert.equal((await spend(rollbackToken)).status, 200);
+    assert.equal(await verified(rollback), true);
+    assert.equal(await prisma.verification.count({ where: proofWhere }), 0);
+    await deadLinks(rollback, [rollbackToken, rollbackSibling]);
+
+    // Actual BEFORE passes while the old credential is live. Promise latches
+    // delay INSERT until IdP clearing and sweeps commit; actual AFTER registers
+    // the late row and the production fingerprint fence must remove it.
+    for (const kind of ["session", "challenge"]) {
+      const user = await invitee(`late-${kind}`);
+      let enter;
+      let release;
+      const entered = new Promise((resolve) => {
+        enter = resolve;
+      });
+      const released = new Promise((resolve) => {
+        release = resolve;
+      });
+      const delayed = withPasswordSignInFence(
+        new Request(`${origin}/api/auth/sign-in/email`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin },
+          body: JSON.stringify({ email: user.email, password: originalPassword }),
+        }),
+        async () => {
+          const hooks = context.options.databaseHooks;
+          await hooks.session.create.before({ userId: user.id }, { path: "/sign-in/email" });
+          enter();
+          await released;
+          if (kind === "session") {
+            const session = await prisma.session.create({
+              data: {
+                userId: user.id,
+                token: randomUUID(),
+                expiresAt: new Date(Date.now() + 60_000),
+              },
+            });
+            await hooks.session.create.after(session, { path: "/sign-in/email" });
+          } else {
+            const challenge = await prisma.verification.create({
+              data: {
+                identifier: `2fa-${randomUUID()}`,
+                value: user.id,
+                expiresAt: new Date(Date.now() + 60_000),
+              },
+            });
+            await hooks.verification.create.after(challenge);
+          }
+          return new Response("fixture session/challenge");
+        },
+      ).then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      );
+      try {
+        await Promise.race([
+          entered,
+          delayed.then(() => {
+            throw new Error("Old proof did not reach the actual BEFORE hook latch.");
+          }),
+        ]);
+        await linkIdp(user);
+        assert.equal((await credentialOf(user)).password, null);
+      } finally {
+        release();
+        await delayed;
+      }
+      const result = await delayed;
+      if ("error" in result) throw result.error;
+      assert.equal(result.value.status, 401);
+      assert.equal(result.value.headers.get("set-cookie"), null);
+      assert.equal(await prisma.session.count({ where: { userId: user.id } }), 0);
+      assert.equal(
+        await prisma.verification.count({
+          where: { value: user.id, identifier: { startsWith: "2fa-" } },
+        }),
+        0,
+      );
+    }
+    console.log(
+      "invites: real Postgres (pool max 3) passed mailed-only proof, ordered spends/verification/IdP activation, consume recheck, rollback/retry, MCP tombstones, and late session/challenge fences.",
+    );
+  } finally {
+    try {
+      // Verification has no user FK; mailed proof values are JSON. Clean both
+      // by bounded fixture identifiers, then use DB cascades for fixture users.
+      await prisma.verification.deleteMany({
+        where: {
+          OR: [{ value: { in: created } }, { identifier: { in: minted.map(proofIdentifier) } }],
+        },
+      });
+      await prisma.user.deleteMany({ where: { id: { in: created } } });
+    } finally {
+      await observer.end();
+      await prisma.$disconnect();
+    }
+  }
+}
+
 async function main() {
   if (process.argv[2] === "--runtime-child") {
     assert.equal(process.env.RUNTIME_OPERATIONS_CHILD, "owned-disposable-services");
     await runtimeCheck();
+    return;
+  }
+  if (process.argv[2] === "--auth-child") {
+    assert.equal(process.env.RUNTIME_OPERATIONS_CHILD, "owned-disposable-services");
+    await inviteRaceCheck();
     return;
   }
   if (process.argv[2] !== "--disposable-services") {
@@ -244,6 +771,25 @@ async function main() {
       encoding: "utf8",
     });
     process.stdout.write(result);
+    const authResult = execFileSync(process.execPath, ["--import", "tsx", file, "--auth-child"], {
+      cwd: root,
+      env: {
+        ...fixtureEnv,
+        RUNTIME_OPERATIONS_CHILD: "owned-disposable-services",
+        DATABASE_POOL_MAX: "3",
+        BETTER_AUTH_URL: "https://app.example.test",
+        BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
+        ADMIN_EMAILS: "ops-admin@example.test",
+        COCKPIT_CONTEXT_DATA_DIR: resolve(temporary, "data"),
+        COCKPIT_CONTEXT_ENCRYPTION_KEYS: `v1:${randomBytes(32).toString("base64")}`,
+        SMTP_HOST: "smtp.invalid",
+        SMTP_FROM: "ops@example.test",
+      },
+      timeout: 180_000,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    process.stdout.write(authResult);
   } finally {
     const cleanupErrors = [];
     for (const id of containers.reverse()) {

@@ -140,7 +140,7 @@ const db = prisma as unknown as {
   conversation: { findMany: MockInstance };
   repository: { findMany: MockInstance };
   session: { deleteMany: MockInstance };
-  verification: { create: MockInstance; deleteMany: MockInstance };
+  verification: { create: MockInstance; deleteMany: MockInstance; findFirst: MockInstance };
   account: { findFirst: MockInstance };
   mcpAgentToken: { updateMany: MockInstance };
   mcpGrant: { updateMany: MockInstance };
@@ -265,6 +265,16 @@ describe("usersRouter", () => {
           .map((call) => call[0] as { identifier: string })
           .find((row) => row.identifier === identifier) ?? null,
     );
+    db.verification.findFirst.mockImplementation(async ({ where }) => {
+      const row = createVerificationValue.mock.calls
+        .map((call) => call[0] as { identifier: string; value: string; expiresAt: Date })
+        .find((candidate) => candidate.identifier === where.identifier);
+      return row &&
+        (!where.value || row.value === where.value) &&
+        (!where.expiresAt || row.expiresAt > where.expiresAt.gt)
+        ? row
+        : null;
+    });
     authApi.__authContext.options.emailAndPassword = {};
     mutableEnv.CORS_ORIGIN = undefined;
   });

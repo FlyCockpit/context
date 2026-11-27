@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { auth } from "@cockpit-context/auth";
 import { announceUserBanned, onUserBanned } from "@cockpit-context/auth/ban";
-import {
-  createSetPasswordToken,
-  recordResetLinkMailed,
-} from "@cockpit-context/auth/invite-verification";
+import { createSetPasswordToken } from "@cockpit-context/auth/invite-verification";
 import { oauthRevocationWrites } from "@cockpit-context/auth/oauth-revocation";
-import { withCredentialSetupLock } from "@cockpit-context/auth/password-reset-links";
+import {
+  recordResetLinkMailed,
+  withCredentialSetupLock,
+} from "@cockpit-context/auth/password-reset-links";
 import { isAdminRole } from "@cockpit-context/auth/roles";
 import { invalidateSignupAvailabilityCache } from "@cockpit-context/auth/signup-availability";
 import {
@@ -92,7 +92,8 @@ const INVITE_LINK_TTL_MS = INVITE_LINK_TTL_DAYS * 24 * 60 * 60 * 1000;
  * *requests* a reset, and its `/reset-password` callback and `resetPassword`
  * endpoint check the stored row's `expiresAt` alone. `resetPassword` consumes
  * the row once (`consumeVerificationValue`) before writing the password.
- * Adapter transactions are off, so a failed password write can spend the link.
+ * Reset writes use a selective adapter transaction: a pre-commit password-write
+ * failure rolls back token/proof changes, so the same link can be retried.
  * Consuming it needs no SMTP: Better-Auth requires `sendResetPassword` only
  * to request a token, which is why this mints it server-side instead. The
  * `reap-expired-auth-tokens` job deletes the row once `expiresAt` passes.
@@ -129,14 +130,18 @@ async function mintSetPasswordLink(
  * Records that the link for `token` was mailed, after the mail was accepted.
  * Only a mailed link verifies the address when spent, and only a mailed link
  * stays spendable once the account is active
- * (@cockpit-context/auth/invite-verification). The mail is already out, so a
+ * (@cockpit-context/auth/password-reset-links). The mail is already out, so a
  * failed record is logged, not surfaced: the link then counts as shown (it
  * still works for a pending invitee, who verifies by email at first sign-in).
  */
-async function recordMailed(token: string, email: string, source: string): Promise<void> {
+async function recordMailed(
+  token: string,
+  userId: string,
+  email: string,
+  source: string,
+): Promise<void> {
   try {
-    const ctx = await auth.$context;
-    await recordResetLinkMailed(ctx.internalAdapter, { token, email });
+    await recordResetLinkMailed({ token, userId, email });
   } catch (err) {
     const errLabel = err instanceof Error ? `${err.name}: ${err.message}` : "unknown error";
     console.warn(`[${source}] recording the mailed link failed:`, errLabel);
@@ -283,7 +288,7 @@ export const usersRouter = {
       // createUser sends no verification mail, and sign-in's resend
       // (`sendOnSignIn`) needs the correct password, which nobody has. Using
       // the emailed link proves the inbox and verifies the address then
-      // (@cockpit-context/auth/invite-verification), so an invite to a
+      // (@cockpit-context/auth/password-reset-links), so an invite to a
       // mistyped address never yields a verified account.
       const initialPassword = generateUnusablePassword();
 
@@ -379,7 +384,7 @@ export const usersRouter = {
       // then does using it verify the email. A link the admin is shown sets the
       // password and verifies nothing: the invitee confirms their address by
       // email at first sign-in, and the link dies once the account is active.
-      if (emailSent) await recordMailed(link.token, input.email, "users.invite");
+      if (emailSent) await recordMailed(link.token, userId, input.email, "users.invite");
 
       if (emailSent) {
         return { userId, emailSent: true as const, setPasswordExpiresAt: link.expiresAt };
@@ -582,7 +587,7 @@ export const usersRouter = {
       }
       // As with an invite: only an emailed link proves the user controls the
       // address, and only it stays spendable for an active account.
-      await recordMailed(link.token, target.email, "users.passwordLink");
+      await recordMailed(link.token, target.id, target.email, "users.passwordLink");
       recordAdminAudit({
         action: "users.passwordLink",
         actorUserId: context.session.user.id,
