@@ -69,6 +69,7 @@ vi.mock("@tanstack/react-query", () => ({
     data: fixture.config,
     isPending: false,
     isError: fixture.configError,
+    isLoadingError: fixture.configError && fixture.config === undefined,
     refetch: vi.fn(),
   }),
 }));
@@ -262,6 +263,7 @@ describe("one h1 per auth page: the card's title", () => {
   });
 
   it("unable to connect", async () => {
+    fixture.config = undefined;
     fixture.configError = true;
     expect(h1s(await render(LoginRoute))).toEqual([enAuth.login.unableToConnect]);
   });

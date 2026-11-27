@@ -3,6 +3,7 @@ import prisma from "@cockpit-context/db";
 import { deleteRepository, REQUEST_LOCK_WAIT_MS, RepoError } from "@cockpit-context/repos";
 import { getRunEngine } from "@cockpit-context/runs";
 import { invalidateAnswersForOwner } from "@cockpit-context/runs/answer-reuse";
+import { withAdminRemovalGuard } from "./admin-presence";
 import { forEachPage, keysetWhere } from "./pagination";
 import { cancelSnapshotSyncs } from "./snapshot-tasks";
 
@@ -37,10 +38,10 @@ export async function prepareUserDeletion(userId: string): Promise<void> {
   // The ban and the session deletion commit together, and the ban is announced
   // (closing open live streams and MCP exchanges) right after the commit: a
   // failing deletion can no longer leave a committed ban unannounced.
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { banned: true, banExpires: null } }),
-    prisma.session.deleteMany({ where: { userId } }),
-  ]);
+  await withAdminRemovalGuard(userId, async (tx) => {
+    await tx.user.update({ where: { id: userId }, data: { banned: true, banExpires: null } });
+    await tx.session.deleteMany({ where: { userId } });
+  });
   announceUserBanned(userId);
   await stopUserRuns(userId);
   const deadline = Date.now() + USER_DELETION_LOCK_BUDGET_MS;

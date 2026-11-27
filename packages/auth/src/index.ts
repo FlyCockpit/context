@@ -10,7 +10,7 @@ import {
 } from "@cockpit-context/mailer";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSession } from "better-auth/api";
 import { deleteSessionCookie } from "better-auth/cookies";
 import { admin, genericOAuth, twoFactor } from "better-auth/plugins";
 import { adminPluginAccess } from "./admin-access.js";
@@ -309,6 +309,38 @@ export const auth = betterAuth({
             );
           }
           ctx.context.session = live;
+        }
+      }
+
+      // Compare before ban/policy plugin hooks or any recovery side effects.
+      // Reuse the authoritative live session above when it was resolved.
+      const expected = ["/get-session", "/sign-out"].includes(ctx.path)
+        ? null
+        : ctx.headers?.get("X-Expected-User");
+      if (expected) {
+        // The underlying resolver propagates lookup failures; the convenience
+        // getSessionFromCtx helper would swallow them as anonymity.
+        const session =
+          ctx.context.session ??
+          (await getSession()({
+            ...ctx,
+            headers: ctx.headers ?? ctx.request?.headers ?? new Headers(),
+            method: "GET",
+            asResponse: false,
+            returnHeaders: false,
+            returnStatus: false,
+            query: {},
+          }).catch(() => {
+            throw new APIError("SERVICE_UNAVAILABLE", {
+              code: "SESSION_UNAVAILABLE",
+              message: "Session verification unavailable",
+            });
+          }));
+        if (session?.user.id && session.user.id !== expected) {
+          throw new APIError("CONFLICT", {
+            code: "IDENTITY_CHANGED",
+            message: "Document identity changed",
+          });
         }
       }
 

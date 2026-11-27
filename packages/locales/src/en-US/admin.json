@@ -309,7 +309,20 @@
     "deleteTitle": "Delete this user?",
     "deleteDescription": "This permanently deletes the account, its sessions, packages, conversations, SSH keys, tokens and OAuth connections. This cannot be undone. Archive the account to preserve its data.",
     "typeEmailToConfirm": "Type the user's email to confirm",
-    "copyEmailAriaLabel": "Copy user email"
+    "copyEmailAriaLabel": "Copy user email",
+    "promoteTitle": "Make this user an admin?",
+    "demoteTitle": "Remove admin access?",
+    "promoteDescription": "{{name}} ({{email}}) will be able to manage users, roles, and app settings, and use the other admin features in this app.",
+    "demoteDescription": "{{name}} ({{email}}) will lose access to the admin dashboard and its user, role, and app settings controls.",
+    "confirmPromote": "Make {{name}} an admin",
+    "confirmDemote": "Remove admin access",
+    "roleUpdating": "Updating role…",
+    "roleErrors": {
+      "selfDemotion": "You cannot remove your own admin role.",
+      "lastActiveAdmin": "You cannot remove the last active admin. Make another verified, active user an admin first.",
+      "userNotFound": "This user was not found. Refresh the list and try again.",
+      "conflict": "Another user change happened at the same time. Review the users and try again."
+    }
   },
   "storage": {
     "title": "Storage",

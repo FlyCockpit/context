@@ -21,6 +21,7 @@ import {
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { APP_HOME, appHomeHref } from "@/lib/app-home";
 import { authClient } from "@/lib/auth-client";
+import { markAnonymousOnlyRoute } from "@/lib/document-identity";
 import { clearServerFieldError, setServerFieldError } from "@/lib/form-server-error";
 import { resolveRouteSession } from "@/lib/route-session";
 import { decideAnonymousOnlyRouteAccess } from "@/lib/route-session-access";
@@ -45,6 +46,7 @@ export const Route = createFileRoute("/$lang/_app/login")({
 });
 
 function LoginPage() {
+  markAnonymousOnlyRoute();
   const { lang } = Route.useParams();
   const { redirectTo } = Route.useSearch();
   const [twoFactor, setTwoFactor] = useState(initialTwoFactorState);
@@ -52,7 +54,9 @@ function LoginPage() {
   const {
     data: configData,
     isPending: configPending,
-    isError: configError,
+    // Only a first load that failed: a failed background refetch (refocus,
+    // reconnect) keeps the loaded config and the form with what was typed.
+    isLoadingError: configError,
     refetch: refetchConfig,
   } = useQuery(orpc.appConfig.queryOptions());
   const { t } = useTranslation(["auth", "common"]);

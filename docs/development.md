@@ -89,7 +89,7 @@ The chrome shows no account before a guard has admitted one. `_app`'s pending co
 | Explicit sign-out (account menu, the MCP login page's "use another account") | `signOutAndLeave()` (`apps/web/src/lib/explicit-sign-out.ts`): marks the sign-out, then on success `leaveDocument()` to a fresh document with an empty cache (login, or the MCP login page with its signed query). A failure, returned or thrown, undoes the mark and is shown. Add any new sign-out button through it. |
 | Signed out elsewhere (another tab, expiry, revocation, ban) | The document reloads in place; the guards send the visitor to login. |
 | Another account (same tab or another tab) | The document reloads in place; the guards admit the new account and its queries load fresh. |
-| Anonymous → signed in | Nothing: an anonymous cache holds only public data, so sign-in keeps its navigation. |
+| Anonymous → signed in | Public pages update. Peer sign-in on login/signup/forgot/reset replaces the anonymous-only document; local sign-in keeps its navigation. |
 | `pending` / `error` | Never acted on: a flaky session check must not reload a signed-in page. |
 
 Three observers feed it, and none can be skipped:
@@ -104,3 +104,34 @@ Anonymous stays anonymous across refetches. Better Auth marks every request of a
 The router also covers the back/forward cache: a document that ever held a signed-in user's state is hidden as it enters the cache and reloaded when restored, so Back never shows a frozen page nobody re-checked. Anonymous pages are cached as usual.
 
 Why a full load, not `queryClient.clear()` or a fresh `QueryClient`: clearing the cache under mounted observers can leave a page stuck on a skeleton, `resetQueries()` refetches active queries as the wrong identity, and neither stops an in-flight mutation whose late `onSuccess` writes the old identity's data back; a swapped client still leaves Zustand stores and module state behind. A full load drops all of it. Persisted browser storage survives a load, so it holds no private data: the sidebar state and the device locale are not personal, and the getting-started "hidden" flag is keyed by user id (`lib/getting-started.ts`). Keep it that way, or scope new persisted state to the user.
+
+### Expected identity and session availability
+
+Document-owned requests carry `X-Expected-User` from the document baseline. oRPC
+uses `fetchWithExpectedIdentity`; use that same transport for future raw cookie
+writes. The app has no upload surface. The `/rpc/*` middleware compares the raw
+cookie owner after rate limiting; Better Auth compares it in `hooks.before`,
+reusing the existing authoritative live-session check before policy filtering or
+password-reset side effects. A mismatch returns `409 {code:"IDENTITY_CHANGED"}`.
+The client quarantines and replaces the document before any toast or form callback.
+Get-session and explicit sign-out are exempt. This consistency check grants no access.
+
+The header offers Account unavailable, Retry and Sign out on a failed session
+check. `session-retry.ts` shares one coordinator across mounted consumers and
+native Better Auth refreshes: 2–60 second exponential backoff, honoring
+`Retry-After` (exposed through CORS), paused hidden/offline. Native focus refresh
+is disabled; the watcher owns focus, visibility and reconnect checks. A failed
+sign-out while offline says the session remains signed in and to retry online.
+Peer confirmations carry `{kind:"identity", id}`: matching identities cost no
+check, conflicting confirmations and session-change hints coalesce. Only a fresh
+server answer settles the identity; delayed announcements cannot establish it.
+
+Admin role promotions and demotions require a named confirmation. Role demotion,
+archive and deletion's initial access-removing ban use `withAdminRemovalGuard`:
+target read, verified active admin count and write share a Serializable transaction.
+Expired bans count as active; pending unverified invites do not. Conflicts require
+manual retry. Repository cleanup follows the committed ban, outside the transaction,
+so a cleanup failure leaves access blocked and deletion retryable. Successful role
+changes use the existing structured admin audit log; same-role requests emit none.
+Better Auth's parallel role/ban/remove and access-field update paths are blocked;
+the UI uses oRPC. Ordinary profile updates retain the existing strict admin gate.

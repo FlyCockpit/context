@@ -1,5 +1,6 @@
 import enAuth from "@cockpit-context/locales/src/en-US/auth.json";
 import enCommon from "@cockpit-context/locales/src/en-US/common.json";
+import enErrors from "@cockpit-context/locales/src/en-US/errors.json";
 import enNav from "@cockpit-context/locales/src/en-US/nav.json";
 import esAuth from "@cockpit-context/locales/src/es-MX/auth.json";
 import esCommon from "@cockpit-context/locales/src/es-MX/common.json";
@@ -34,6 +35,8 @@ type Snapshot = {
 };
 
 const fixture = vi.hoisted(() => ({
+  online: true,
+  configState: "success" as "success" | "refetch-error" | "load-error",
   lang: "en-US",
   resetPassword: vi.fn(),
   navigate: vi.fn(),
@@ -84,7 +87,14 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
-  useQuery: () => ({ data: fixture.config, isPending: false, isError: false, refetch: vi.fn() }),
+  useQuery: () => ({
+    data: fixture.configState === "load-error" ? undefined : fixture.config,
+    isPending: false,
+    isError: fixture.configState !== "success",
+    isLoadingError: fixture.configState === "load-error",
+    isRefetchError: fixture.configState === "refetch-error",
+    refetch: vi.fn(),
+  }),
   useMutation: () => ({ mutateAsync: vi.fn() }),
 }));
 vi.mock("@/utils/orpc", () => ({
@@ -92,13 +102,19 @@ vi.mock("@/utils/orpc", () => ({
     appConfig: { queryOptions: () => ({}), queryKey: () => ["appConfig"], call: async () => ({}) },
   },
 }));
+const signUpEmail = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("@cockpit-context/ui/components/sileo", () => ({
+  toast: { error: toastError, success: vi.fn() },
+}));
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
     useSession: () => ({ ...fixture.snapshot, refetch: vi.fn() }),
     resetPassword: fixture.resetPassword,
+    signUp: { email: signUpEmail },
   },
 }));
-vi.mock("@/hooks/use-network-status", () => ({ useNetworkStatus: () => true }));
+vi.mock("@/hooks/use-network-status", () => ({ useNetworkStatus: () => fixture.online }));
 vi.mock("@cockpit-context/env/web", () => ({ env: { VITE_APP_NAME: "Northwind" } }));
 vi.mock("@/server/auth-session", () => ({
   getRouteSession: vi.fn(async () => ({ status: "resolved", session: null })),
@@ -116,7 +132,7 @@ beforeAll(async () => {
   await i18n.init({
     lng: "en-US",
     resources: {
-      "en-US": { auth: enAuth, common: enCommon, nav: enNav },
+      "en-US": { auth: enAuth, common: enCommon, nav: enNav, errors: enErrors },
       "es-MX": { auth: esAuth, common: esCommon },
     },
     interpolation: { escapeValue: false },
@@ -136,6 +152,8 @@ beforeEach(() => {
   // The hook only remembers browser snapshots (the server's never settle).
   vi.stubGlobal("window", {});
   resetAuthSessionMemoryForTests();
+  fixture.online = true;
+  fixture.configState = "success";
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -192,6 +210,14 @@ describe("header account control across a refocus refetch", () => {
     const settled = await render(UserMenu, ANONYMOUS);
     expect(settled).toContain('data-to="/$lang/login"');
     expect(await render(UserMenu, REFETCH)).toBe(settled);
+  });
+
+  it("offers session Retry after a previously anonymous session check fails", async () => {
+    await render(UserMenu, ANONYMOUS);
+    const unavailable = await render(UserMenu, FAILED_REFETCH);
+    expect(unavailable).toContain(enNav.userMenu.accountUnavailable);
+    expect(unavailable).toContain(`aria-label="${enNav.userMenu.signOut}"`);
+    expect(unavailable).not.toContain('data-slot="skeleton"');
   });
 
   it("a sign-in in another tab still replaces the anonymous state", async () => {
@@ -368,7 +394,10 @@ function findInput(node: FakeNode, type: string): FakeElement | undefined {
   return undefined;
 }
 
-type FormApi = { setFieldValue: (name: string, value: string) => void };
+type FormApi = {
+  setFieldValue: (name: string, value: string) => void;
+  handleSubmit: () => Promise<void>;
+};
 
 describe.each([
   ["sign-in", page(LoginRoute).component],
@@ -399,8 +428,9 @@ describe.each([
     act(() => root.unmount());
   });
 
-  async function show(snapshot: Snapshot) {
+  async function show(snapshot: Snapshot, online = true) {
     fixture.snapshot = snapshot;
+    fixture.online = online;
     await act(async () => {
       root.render(
         <I18nextProvider i18n={i18n}>
@@ -441,6 +471,30 @@ describe.each([
     expect(formApis.size).toBe(1);
   });
 
+  it("keeps the typed values when the connection drops and comes back", async () => {
+    await show(FIRST_LOAD);
+    await show(ANONYMOUS);
+    await type("ada@example.com", "correct horse");
+    const email = findInput(container, "email");
+    const password = findInput(container, "password");
+
+    for (const [snapshot, online] of [
+      [ANONYMOUS, false],
+      [REFETCH, true],
+      [FAILED_REFETCH, true],
+      [REFETCH, true],
+      [ANONYMOUS, true],
+    ] as const) {
+      fixture.configState = snapshot === FAILED_REFETCH ? "refetch-error" : "success";
+      await show(snapshot, online);
+      expect(findInput(container, "email")).toBe(email);
+      expect(findInput(container, "password")).toBe(password);
+      expect(email?.value).toBe("ada@example.com");
+      expect(password?.value).toBe("correct horse");
+    }
+    expect(formApis.size).toBe(1);
+  });
+
   it("detects a remount: a forgotten anonymity drops the form and its values", async () => {
     await show(ANONYMOUS);
     await type("ada@example.com", "correct horse");
@@ -457,6 +511,112 @@ describe.each([
     expect(remounted).not.toBe(email);
     expect(remounted?.value).toBe("");
     expect(formApis.size).toBe(2);
+  });
+});
+
+describe("sign-up page mounted in React DOM when the request cannot be sent", () => {
+  let container: FakeElement;
+  let root: Root;
+
+  beforeEach(() => {
+    const doc = new FakeDocument();
+    const classes = {
+      Node: FakeNode,
+      Element: FakeElement,
+      HTMLElement: FakeElement,
+      HTMLIFrameElement: class {},
+    };
+    const win = { ...classes, document: doc, addEventListener() {}, removeEventListener() {} };
+    doc.defaultView = win;
+    vi.stubGlobal("window", win);
+    vi.stubGlobal("document", doc);
+    for (const [name, value] of Object.entries(classes)) vi.stubGlobal(name, value);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    container = doc.body.appendChild(doc.createElement("div"));
+    root = createRoot(container as unknown as Element);
+    formApis.clear();
+    signUpEmail.mockReset();
+    toastError.mockReset();
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+  });
+
+  it("says the server could not be reached and keeps the details for a resend", async () => {
+    fixture.snapshot = ANONYMOUS;
+    const SignupPage = page(SignupRoute).component;
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <SignupPage />
+        </I18nextProvider>,
+      );
+    });
+    const [form] = [...formApis] as FormApi[];
+    await act(async () => {
+      form?.setFieldValue("name", "Ada");
+      form?.setFieldValue("email", "ada@example.com");
+      form?.setFieldValue("password", "correct horse battery");
+    });
+    signUpEmail.mockRejectedValue(new TypeError("Failed to fetch"));
+    await act(async () => {
+      await form?.handleSubmit();
+    });
+    expect(signUpEmail).toHaveBeenCalledTimes(1);
+    expect(toastError).toHaveBeenCalledWith(enErrors.unreachable);
+    expect(findInput(container, "email")?.value).toBe("ada@example.com");
+    expect(findInput(container, "password")?.value).toBe("correct horse battery");
+    expect(formApis.size).toBe(1);
+  });
+  it("a mounted signup form never receives an unannounced cookie-switch 409", async () => {
+    const identity = await import("@/lib/document-identity");
+    identity.resetDocumentIdentityForTests(() => undefined);
+    const reload = vi.fn();
+    Object.assign(window, { location: { pathname: "/en-US/signup", reload } });
+    const hide = vi.spyOn(document.documentElement.style, "setProperty");
+    identity.observeDocumentIdentity("a");
+    fixture.snapshot = ANONYMOUS;
+    const SignupPage = page(SignupRoute).component;
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <SignupPage />
+        </I18nextProvider>,
+      );
+    });
+    const [form] = [...formApis] as FormApi[];
+    await act(async () => {
+      form?.setFieldValue("name", "Ada");
+      form?.setFieldValue("email", "ada@example.com");
+      form?.setFieldValue("password", "correct horse battery");
+    });
+    signUpEmail.mockImplementation(async () => {
+      const response = await identity.guardIdentityResponse(
+        Response.json({ code: "IDENTITY_CHANGED" }, { status: 409 }),
+      );
+      return { error: { status: response.status, ...(await response.json()) } };
+    });
+    const rejected = vi.fn();
+    let settled = false;
+    try {
+      await act(async () => {
+        void form?.handleSubmit().then(() => {
+          settled = true;
+        }, rejected);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(reload).toHaveBeenCalledOnce();
+      expect(hide).toHaveBeenCalledWith("display", "none", "important");
+      expect(identity.isDocumentReplaced()).toBe(true);
+      expect(settled).toBe(false);
+      expect(rejected).not.toHaveBeenCalled();
+      expect(toastError).not.toHaveBeenCalled();
+      expect(findInput(container, "email")?.value).toBe("ada@example.com");
+      expect(container.textContent).not.toContain(enAuth.errors.couldNotCreateAccount);
+    } finally {
+      identity.resetDocumentIdentityForTests(() => undefined);
+      hide.mockRestore();
+    }
   });
 });
 

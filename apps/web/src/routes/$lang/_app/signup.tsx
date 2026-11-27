@@ -16,6 +16,7 @@ import { AuthCard } from "@/components/auth/auth-screen";
 import { ResendVerification } from "@/components/auth/resend-verification";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { authClient } from "@/lib/auth-client";
+import { markAnonymousOnlyRoute } from "@/lib/document-identity";
 import { setServerFieldError } from "@/lib/form-server-error";
 import { newPasswordSchema, PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { ensureRouteQuery } from "@/lib/route-query";
@@ -50,13 +51,14 @@ export const Route = createFileRoute("/$lang/_app/signup")({
 });
 
 function SignupPage() {
+  markAnonymousOnlyRoute();
   const { lang } = Route.useParams();
   const { redirectTo } = Route.useSearch();
   const authSession = useAuthSession();
   const {
     data: configData,
     isPending: configPending,
-    isError: configError,
+    isLoadingError: configError,
     refetch: refetchConfig,
   } = useQuery(orpc.appConfig.queryOptions());
   const { t } = useTranslation(["auth", "common", "privacy"]);

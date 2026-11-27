@@ -29,6 +29,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { adminOr404Procedure } from "../index";
 import { recordAdminAudit } from "../lib/admin-audit";
+import { withAdminRemovalGuard } from "../lib/admin-presence";
 import { reasonError, withDomainErrors } from "../lib/domain-errors";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
 import { prepareUserDeletion, stopUserRuns } from "../lib/user-deletion";
@@ -364,24 +365,27 @@ export const usersRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
-      // Don't let an admin demote themselves — if they're the only admin
-      // they'd lock themselves (and everyone) out of /admin.
       if (input.userId === context.session.user.id && input.role !== "admin") {
-        throw new ORPCError("FORBIDDEN", {
-          message: "You cannot remove your own admin role.",
+        throw reasonError("FORBIDDEN", "SELF_DEMOTION", "You cannot remove your own admin role.");
+      }
+      const change = await withAdminRemovalGuard(
+        input.userId,
+        async (tx, target) => {
+          if (target.role === input.role) return null;
+          await tx.user.update({ where: { id: input.userId }, data: { role: input.role } });
+          return { oldRole: target.role, newRole: input.role };
+        },
+        input.role,
+      );
+      if (change) {
+        invalidateSignupAvailabilityCache();
+        recordAdminAudit({
+          action: "users.role_changed",
+          actorUserId: context.session.user.id,
+          targetUserId: input.userId,
+          details: change,
         });
       }
-      const target = await prisma.user.findUnique({
-        where: { id: input.userId },
-        select: { id: true },
-      });
-      if (!target) throw new ORPCError("NOT_FOUND", { message: "User not found" });
-
-      await prisma.user.update({
-        where: { id: input.userId },
-        data: { role: input.role },
-      });
-      invalidateSignupAvailabilityCache();
       return { success: true };
     }),
 
@@ -398,42 +402,21 @@ export const usersRouter = {
           message: "You cannot archive your own account.",
         });
       }
-      const target = await prisma.user.findUnique({
-        where: { id: input.userId },
-        select: { id: true },
-      });
-      if (!target) throw new ORPCError("NOT_FOUND", { message: "User not found" });
-
-      // Set banned=true so better-auth treats the user as locked, and revoke
-      // every active session so the next page-load signs them out. We mirror
-      // what the admin plugin's banUser endpoint does internally — no expiry
-      // (banExpires=null), no auto-unban.
-      //
-      // Standing credentials that authenticate from their own row are
-      // revoked in the same transaction, because deleting sessions does not
-      // touch them and they would otherwise outlive the ban everywhere a
-      // per-surface ban re-check does not reach: every MCP API token, and
-      // every OAuth MCP connection (grant tombstoned; access tokens, refresh
-      // tokens and consent deleted, as `mcpConnections.revoke` does).
-      // `unarchive` does not restore any of them. If you add another such
-      // credential (an API key, a personal access token), revoke it here too.
+      // Revoke the app's MCP tokens and OAuth grants with the archive, under
+      // the same last-active-admin transaction as role changes and deletion.
       const now = new Date();
-      await prisma.$transaction([
-        prisma.user.update({
+      await withAdminRemovalGuard(input.userId, async (tx) => {
+        await tx.user.update({
           where: { id: input.userId },
-          data: {
-            banned: true,
-            banReason: input.reason ?? null,
-            banExpires: null,
-          },
-        }),
-        prisma.session.deleteMany({ where: { userId: input.userId } }),
-        prisma.mcpAgentToken.updateMany({
+          data: { banned: true, banReason: input.reason ?? null, banExpires: null },
+        });
+        await tx.session.deleteMany({ where: { userId: input.userId } });
+        await tx.mcpAgentToken.updateMany({
           where: { userId: input.userId, revokedAt: null },
           data: { revokedAt: now },
-        }),
-        ...oauthRevocationWrites({ userId: input.userId }, now),
-      ]);
+        });
+        for (const write of oauthRevocationWrites({ userId: input.userId }, now, tx)) await write;
+      });
       // After the commit: closes their open live streams (watch/activity),
       // which were admitted once and are not re-checked (lib/live-streams.ts).
       announceUserBanned(input.userId);
@@ -582,16 +565,16 @@ export const usersRouter = {
         message: "You cannot delete your own account.",
       });
     }
-    const target = await prisma.user.findUnique({
-      where: { id: input.userId },
-      select: { id: true },
-    });
-    if (!target) throw new ORPCError("NOT_FOUND", { message: "User not found" });
-
+    // prepareUserDeletion guards and commits the access-removing ban before
+    // repository cleanup, which can wait on external locks outside the transaction.
     // REPOSITORY_BUSY (a clone or fetch of theirs outlasted the bounded lock
     // wait) reaches the admin as "try again": the account stays banned.
     await withDomainErrors(() => prepareUserDeletion(input.userId));
-    await prisma.user.delete({ where: { id: input.userId } });
+    // Recheck after cleanup too: another admin may have restored this user
+    // while external repository locks were being drained.
+    await withAdminRemovalGuard(input.userId, async (tx) => {
+      await tx.user.delete({ where: { id: input.userId } });
+    });
     invalidateSignupAvailabilityCache();
     return { success: true };
   }),

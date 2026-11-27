@@ -53,7 +53,10 @@ vi.mock("@/lib/auth-client", () => ({
 vi.mock("@/hooks/use-auth-session", () => ({
   useAuthSession: () => ({ state: harness.session }),
 }));
-vi.mock("@/lib/explicit-sign-out", () => ({ signOutAndLeave: harness.signOutAndLeave }));
+vi.mock("@/lib/explicit-sign-out", () => ({
+  signOutAndLeave: harness.signOutAndLeave,
+  signOutFailureKey: () => "userMenu.signOutFailed",
+}));
 vi.mock("@/components/auth/auth-screen", () => ({ AuthCard: () => null, AuthScreen: () => null }));
 vi.mock("@/lib/mcp-oauth-search", () => ({
   parseMcpOAuthSearch: () => ({ usable: true, clientId: "c1" }),

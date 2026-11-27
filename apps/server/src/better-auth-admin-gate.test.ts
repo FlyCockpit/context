@@ -43,6 +43,7 @@ describe("betterAuthAdminGate", () => {
     app = new Hono();
     app.use("/api/auth/admin/*", betterAuthAdminGate);
     app.all("/api/auth/admin/set-role", downstream);
+    app.all("/api/auth/admin/update-user", downstream);
     app.all("/api/auth/admin/impersonate-user", downstream);
   });
 
@@ -124,7 +125,7 @@ describe("betterAuthAdminGate", () => {
         createdAt: new Date(Date.now() - 60_000),
       },
     });
-    const res = await app.request("/api/auth/admin/set-role", { method: "POST" });
+    const res = await app.request("/api/auth/admin/update-user", { method: "POST" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     expect(downstream).toHaveBeenCalledTimes(1);
@@ -135,7 +136,7 @@ describe("betterAuthAdminGate", () => {
       user: { id: "a1", role: "admin", emailVerified: true, twoFactorEnabled: false },
     });
     db.appSetting.findMany.mockResolvedValue([{ key: "force2faInternalUsers", value: "false" }]);
-    const res = await app.request("/api/auth/admin/set-role", { method: "POST" });
+    const res = await app.request("/api/auth/admin/update-user", { method: "POST" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     expect(downstream).toHaveBeenCalledTimes(1);
@@ -150,4 +151,31 @@ describe("betterAuthAdminGate", () => {
     expect(res.status).toBe(200);
     expect(downstream).toHaveBeenCalledTimes(1);
   });
+  it.each(["set-role", "ban-user", "remove-user"])(
+    "blocks the parallel %s write for verified admins",
+    async (path) => {
+      getSession.mockResolvedValue({
+        user: { id: "a1", role: "admin", emailVerified: true, twoFactorEnabled: true },
+      });
+      const res = await app.request(`/api/auth/admin/${path}`, { method: "POST" });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "USE_ORPC_USER_MANAGEMENT" });
+      expect(downstream).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["role", "banned", "banExpires", "banReason", "emailVerified"])(
+    "blocks update-user access field %s",
+    async (field) => {
+      getSession.mockResolvedValue({
+        user: { id: "a1", role: "admin", emailVerified: true, twoFactorEnabled: true },
+      });
+      const res = await app.request("/api/auth/admin/update-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: "b", data: { [field]: true } }),
+      });
+      expect(res.status).toBe(403);
+      expect(downstream).not.toHaveBeenCalled();
+    },
+  );
 });

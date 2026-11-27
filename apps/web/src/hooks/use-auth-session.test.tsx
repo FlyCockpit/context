@@ -2,6 +2,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 const atom = vi.hoisted(() => ({
+  viewError: null as { status: number } | null,
+  pending: false,
+  refetch: vi.fn(),
   snapshot: undefined as
     | {
         data: { user: { id: string } } | null;
@@ -17,11 +20,11 @@ vi.mock("@/lib/auth-client", () => ({
     $store: { atoms: { session: { get: () => atom.snapshot } } },
     // The atom still holds the previous account (another tab switched).
     useSession: () => ({
-      data: { user: { id: "a", name: "Previous Account" } },
-      isPending: false,
-      isRefetching: false,
-      error: null,
-      refetch: async () => {},
+      data: atom.viewError || atom.pending ? null : { user: { id: "a", name: "Previous Account" } },
+      isPending: atom.pending,
+      isRefetching: atom.pending,
+      error: atom.viewError,
+      refetch: atom.refetch,
     }),
   },
 }));
@@ -91,5 +94,94 @@ describe("useAuthSession", () => {
     expect(snap({ isPending: true })).toBeUndefined();
     atom.snapshot = undefined;
     expect(readSessionIdentity()).toBeUndefined();
+  });
+});
+
+let retrySession: (() => Promise<void>) | undefined;
+function RetrySession() {
+  retrySession = useAuthSession().actions.retry;
+  return null;
+}
+
+describe("failed initial session", () => {
+  it("retains Retry's error state while a retry is pending", async () => {
+    const { resetAuthSessionMemoryForTests } = await import("./use-auth-session");
+    resetAuthSessionMemoryForTests();
+    vi.stubGlobal("window", {});
+    try {
+      atom.viewError = { status: 429 };
+      expect(renderToStaticMarkup(<Who />)).toContain("error");
+      atom.viewError = null;
+      atom.pending = true;
+      expect(renderToStaticMarkup(<Who />)).toContain("error");
+      atom.pending = false;
+      expect(renderToStaticMarkup(<Who />)).toContain("Previous Account");
+    } finally {
+      atom.viewError = null;
+      atom.pending = false;
+      resetAuthSessionMemoryForTests();
+      vi.unstubAllGlobals();
+    }
+  });
+  it("a successful retry verifies a previously masked identity", async () => {
+    const identity = await import("@/lib/document-identity");
+    const postMessage = vi.fn();
+    identity.resetDocumentIdentityForTests(() => ({ postMessage, onmessage: null }));
+    vi.stubGlobal("window", {});
+    atom.refetch.mockResolvedValue(undefined);
+    atom.snapshot = {
+      data: { user: { id: "a" } },
+      error: null,
+      isPending: false,
+      isRefetching: false,
+    };
+    try {
+      identity.observeDocumentIdentity("a");
+      identity.reportSessionRejected();
+      renderToStaticMarkup(<RetrySession />);
+      expect(identity.isDocumentIdentityUnverified()).toBe(true);
+      await retrySession?.();
+      expect(identity.isDocumentIdentityUnverified()).toBe(false);
+      expect(postMessage).toHaveBeenCalledWith({ kind: "identity", id: "a" });
+    } finally {
+      atom.snapshot = undefined;
+      identity.resetDocumentIdentityForTests(() => undefined);
+      vi.unstubAllGlobals();
+    }
+  });
+  it("a retry superseded by an invalidation never confirms or announces its retained account", async () => {
+    const identity = await import("@/lib/document-identity");
+    const postMessage = vi.fn();
+    identity.resetDocumentIdentityForTests(() => ({ postMessage, onmessage: null }));
+    vi.stubGlobal("window", {});
+    let finish!: () => void;
+    atom.refetch.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    atom.snapshot = {
+      data: { user: { id: "a" } },
+      error: null,
+      isPending: false,
+      isRefetching: false,
+    };
+    try {
+      identity.observeDocumentIdentity(null);
+      identity.reportSessionRejected();
+      renderToStaticMarkup(<RetrySession />);
+      const retry = retrySession?.();
+      identity.reportSessionRejected();
+      finish();
+      await retry;
+      expect(identity.isDocumentIdentityUnverified()).toBe(true);
+      expect(postMessage).not.toHaveBeenCalled();
+      expect(identity.withExpectedIdentity().has("X-Expected-User")).toBe(false);
+    } finally {
+      atom.snapshot = undefined;
+      identity.resetDocumentIdentityForTests(() => undefined);
+      vi.unstubAllGlobals();
+    }
   });
 });

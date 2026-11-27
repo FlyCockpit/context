@@ -44,7 +44,8 @@ import { Archive, ArchiveRestore, KeyRound, MoreVertical, Plus, Shield, Trash } 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
-
+import { RoleChangeDialog, type RoleChangeTarget } from "@/components/admin/role-change-dialog";
+import { userChangeErrorKey } from "@/components/admin/user-change-error";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { LoadMore } from "@/components/load-more";
@@ -58,6 +59,7 @@ import { announceArchivedWithUndo } from "@/hooks/archive-undo";
 import { useEntityMutation } from "@/hooks/use-entity-mutation";
 import { DEFAULT_LOCALE, isSupportedLocale, type Locale, SUPPORTED_LOCALES } from "@/i18n/config";
 import { LOCALE_LABELS } from "@/i18n/labels";
+import { friendly } from "@/utils/friendly-error";
 import { orpc } from "@/utils/orpc";
 import { formatRelativeTime } from "@/utils/relative-time";
 
@@ -110,6 +112,7 @@ function AdminUsers() {
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
+  const [roleTarget, setRoleTarget] = useState<RoleChangeTarget | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [reveal, setReveal] = useState<InviteReveal | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -131,11 +134,18 @@ function AdminUsers() {
 
   const setRole = useEntityMutation(
     {
-      ...orpc.users.setRole.mutationOptions(),
-      meta: { errorFallbackKey: "admin:users.roleUpdateFailed" },
+      ...orpc.users.setRole.mutationOptions({ onSuccess: () => setRoleTarget(null) }),
+      meta: { skipGlobalErrorToast: true },
     },
     { invalidateKey: orpc.users.key(), successMessage: t("admin:users.roleUpdated") },
   );
+
+  const roleErrorKey = userChangeErrorKey(setRole.error);
+  const roleError = setRole.error
+    ? roleErrorKey
+      ? t(roleErrorKey)
+      : friendly(setRole.error, t("admin:users.roleUpdateFailed"))
+    : undefined;
 
   const unarchive = useEntityMutation(
     {
@@ -160,7 +170,11 @@ function AdminUsers() {
           });
         },
       }),
-      meta: { errorFallbackKey: "admin:users.archiveFailed" },
+      onError: (error) => {
+        const key = userChangeErrorKey(error);
+        toast.error(key ? t(key) : friendly(error, t("admin:users.archiveFailed")));
+      },
+      meta: { skipGlobalErrorToast: true },
     },
     { invalidateKey: orpc.users.key() },
   );
@@ -172,7 +186,11 @@ function AdminUsers() {
           setDeleteId(null);
         },
       }),
-      meta: { errorFallbackKey: "admin:users.deleteFailed" },
+      onError: (error) => {
+        const key = userChangeErrorKey(error);
+        toast.error(key ? t(key) : friendly(error, t("admin:users.deleteFailed")));
+      },
+      meta: { skipGlobalErrorToast: true },
     },
     { invalidateKey: orpc.users.key(), successMessage: t("admin:users.userDeleted") },
   );
@@ -318,7 +336,13 @@ function AdminUsers() {
                           isAdmin={isAdmin}
                           isArchived={isArchived}
                           onSetRole={(role) => {
-                            setRole.mutate({ userId: user.id, role });
+                            setRole.reset();
+                            setRoleTarget({
+                              id: user.id,
+                              name: user.name,
+                              email: user.email,
+                              role,
+                            });
                           }}
                           onArchive={() => {
                             archive.mutate({ userId: user.id });
@@ -348,6 +372,20 @@ function AdminUsers() {
         </CardContent>
       </Card>
 
+      <RoleChangeDialog
+        target={roleTarget}
+        isPending={setRole.isPending}
+        error={roleError}
+        onClose={() => {
+          if (!setRole.isPending) {
+            setRoleTarget(null);
+            setRole.reset();
+          }
+        }}
+        onConfirm={() => {
+          if (roleTarget) setRole.mutate({ userId: roleTarget.id, role: roleTarget.role });
+        }}
+      />
       <InviteUserDialog
         open={inviteOpen}
         onOpenChange={setInviteOpen}

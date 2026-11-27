@@ -309,7 +309,20 @@
     "deleteTitle": "¿Eliminar este usuario?",
     "deleteDescription": "Esto elimina de forma permanente la cuenta, sus sesiones, paquetes, conversaciones, llaves SSH, tokens y conexiones OAuth. No se puede deshacer. Archiva la cuenta para conservar sus datos.",
     "typeEmailToConfirm": "Escribe el correo del usuario para confirmar",
-    "copyEmailAriaLabel": "Copiar correo del usuario"
+    "copyEmailAriaLabel": "Copiar correo del usuario",
+    "promoteTitle": "¿Convertir a esta persona en administradora?",
+    "demoteTitle": "¿Quitar el acceso de administrador?",
+    "promoteDescription": "{{name}} ({{email}}) podrá gestionar usuarios, roles y la configuración de la aplicación, y usar las demás funciones de administración.",
+    "demoteDescription": "{{name}} ({{email}}) perderá el acceso al panel de administración y a sus controles de usuarios, roles y configuración de la aplicación.",
+    "confirmPromote": "Dar acceso de administrador a {{name}}",
+    "confirmDemote": "Quitar el acceso de administrador",
+    "roleUpdating": "Actualizando rol…",
+    "roleErrors": {
+      "selfDemotion": "No puedes quitarte tu propio acceso de administrador.",
+      "lastActiveAdmin": "No puedes quitar al último administrador activo. Primero dale acceso de administrador a otra persona con correo verificado y cuenta activa.",
+      "userNotFound": "No se encontró a esta persona. Actualiza la lista e intenta de nuevo.",
+      "conflict": "Otra persona modificó una cuenta al mismo tiempo. Revisa la lista e intenta de nuevo."
+    }
   },
   "storage": {
     "title": "Almacenamiento",

@@ -47,7 +47,9 @@
     "open": "Open account menu",
     "openFor": "{{name}}, account menu",
     "openApp": "Open app",
-    "signOutFailed": "Couldn't sign you out. Try again."
+    "signOutFailed": "Couldn't sign you out. Try again.",
+    "accountUnavailable": "Account unavailable — Retry",
+    "signOutOffline": "You're offline. You're still signed in — sign out again when you're back online."
   },
   "skipToContent": "Skip to content"
 }

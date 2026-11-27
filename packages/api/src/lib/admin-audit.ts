@@ -8,7 +8,7 @@
  * their credentials, in the same format with `audit: "credential"`. It never carries a secret: a
  * set-password link, token or password must not be passed in `details`.
  */
-type AdminAuditAction = "users.passwordLink";
+type AdminAuditAction = "users.passwordLink" | "users.role_changed";
 
 export interface AdminAuditEntry {
   action: AdminAuditAction;

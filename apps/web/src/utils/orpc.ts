@@ -11,6 +11,8 @@ import {
 } from "@orpc/client/plugins";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 
+import { fetchWithExpectedIdentity } from "@/lib/document-identity";
+
 /**
  * Event-iterator procedures: one long-lived streamed response each. A batch
  * would hold them (and every query batched with them) until the stream
@@ -39,10 +41,7 @@ const link = new RPCLink({
     new ClientRetryPlugin(),
   ],
   fetch(url, options) {
-    return fetch(url, {
-      ...options,
-      credentials: "include",
-    });
+    return fetchWithExpectedIdentity(url, { ...options, credentials: "include" });
   },
 });
 

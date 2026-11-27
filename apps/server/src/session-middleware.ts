@@ -22,11 +22,14 @@ import type { Context, Next } from "hono";
 // label its own credential rather than relax this.
 export async function sessionMiddleware(c: Context, next: Next) {
   let session: Session | null = null;
+  c.set("sessionLookupFailed", false);
   try {
     const cookieOnly = new Headers(c.req.raw.headers);
     cookieOnly.delete("authorization");
     session = (await auth.api.getSession({ headers: cookieOnly })) as Session | null;
+    c.set("sessionCookieOwner", session?.user.id ?? null);
   } catch (err) {
+    c.set("sessionLookupFailed", true);
     console.warn("[session-middleware] getSession failed, treating as anonymous:", err);
     session = null;
   }

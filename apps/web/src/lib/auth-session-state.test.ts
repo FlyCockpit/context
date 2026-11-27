@@ -128,7 +128,7 @@ describe("getAuthSessionState", () => {
     );
 
     expect(result.state).toEqual({ status: "anonymous" });
-    expect(result.meta.isDegraded).toBe(false);
+    expect(result.meta.isDegraded).toBe(true);
   });
 
   it("lets a confirmed session replace remembered anonymity", () => {

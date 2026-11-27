@@ -28,13 +28,18 @@ vi.mock("@cockpit-context/runs/answer-reuse", () => ({ invalidateAnswersForOwner
 const { default: prisma } = await import("@cockpit-context/db");
 const db = prisma as unknown as {
   repository: { findMany: MockInstance };
-  user: { update: MockInstance; delete: MockInstance };
+  user: { findUnique: MockInstance; update: MockInstance; delete: MockInstance };
+  $transaction: MockInstance;
 };
 const { prepareUserDeletion, stopUserRuns } = await import("./user-deletion");
 const { onUserBanned } = await import("@cockpit-context/auth/ban");
 beforeEach(() => {
   vi.clearAllMocks();
   db.repository.findMany.mockResolvedValue([]);
+  db.user.findUnique.mockResolvedValue({ id: "u", role: "user" });
+  db.$transaction.mockImplementation(async (run: (tx: typeof prisma) => Promise<unknown>) =>
+    run(prisma),
+  );
 });
 it("stops all the user's runs before removing only their private repository files", async () => {
   db.repository.findMany.mockResolvedValue([{ id: "repo-1" }]);
@@ -130,9 +135,12 @@ it("commits the ban and the session deletion together; a failed commit announces
     await expect(prepareUserDeletion("u")).rejects.toThrow("deadlock");
     expect(announced).not.toHaveBeenCalled();
     expect(stopAll).not.toHaveBeenCalled();
-    // The ban and the deletion are one batch, not two independent writes.
-    expect(transaction).toHaveBeenCalledOnce();
-    expect(transaction.mock.calls[0]?.[0]).toHaveLength(2);
+    // Neither write can escape the guarded transaction.
+    expect(transaction).toHaveBeenCalledExactlyOnceWith(expect.any(Function), {
+      isolationLevel: "Serializable",
+    });
+    expect(db.user.update).not.toHaveBeenCalled();
+    expect(prisma.session.deleteMany).not.toHaveBeenCalled();
   } finally {
     stop();
   }

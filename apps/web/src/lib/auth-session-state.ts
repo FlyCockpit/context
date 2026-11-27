@@ -64,7 +64,10 @@ export function getAuthSessionState<TSession>(
   const meta = {
     isRefetching: input.isRefetching,
     isOffline,
-    isDegraded: hasConfirmedIdentity && (input.error !== null || isOffline),
+    isDegraded:
+      (hasConfirmedIdentity && (input.error !== null || isOffline)) ||
+      // Keep anonymous forms mounted while the header offers session Retry.
+      (input.confirmedAnonymous && input.error !== null && !isUnauthorizedError(input.error)),
   };
 
   if (input.data !== null) {

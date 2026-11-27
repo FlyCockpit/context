@@ -25,9 +25,13 @@ import { APP_LOCALE_HEADER } from "@cockpit-context/config/locales";
  * asserts the preflight actually echoes each one.
  */
 export const CORS_ALLOW_HEADERS = [
+  "X-Expected-User",
   "Content-Type",
   "Authorization",
   "x-csrf-token",
   APP_LOCALE_HEADER,
   BOOTSTRAP_TOKEN_HEADER,
 ] as const;
+
+/** Response metadata available to credentialed split-origin clients. */
+export const CORS_EXPOSE_HEADERS = ["Retry-After"] as const;

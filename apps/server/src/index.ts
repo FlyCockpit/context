@@ -27,7 +27,7 @@ import { apiReferenceAdminGate } from "./api-reference-admin-gate.js";
 import { betterAuthAdminGate } from "./better-auth-admin-gate.js";
 import { readBuildCommit } from "./build-commit.js";
 import { resolveClientIp } from "./client-ip.js";
-import { CORS_ALLOW_HEADERS } from "./cors-headers.js";
+import { CORS_ALLOW_HEADERS, CORS_EXPOSE_HEADERS } from "./cors-headers.js";
 import {
   EMAIL_RECIPIENT_PATHS,
   emailRecipientLimit,
@@ -36,6 +36,7 @@ import {
   SIGNUP_RECIPIENT_PATH,
   signinSentMail,
 } from "./email-recipient-limit.js";
+import { expectedIdentity } from "./expected-identity.js";
 import { createServerLifecycle, withTimeout } from "./lifecycle.js";
 import {
   LOCALE_MODULEPRELOAD_HEADER,
@@ -201,6 +202,7 @@ if (env.CORS_ORIGIN) {
       // the preflight fails and the request never leaves the browser — a
       // failure mode invisible in local dev. See cors-headers.ts.
       allowHeaders: [...CORS_ALLOW_HEADERS],
+      exposeHeaders: [...CORS_EXPOSE_HEADERS],
       credentials: true,
     }),
   );
@@ -440,6 +442,7 @@ app.use("/rpc/*", sessionMiddleware);
 
 // Rate limit RPC endpoint — general API traffic (in-memory, fail-open).
 app.use("/rpc/*", createRateLimiterMiddleware(rpcLimiter));
+app.use("/rpc/*", expectedIdentity);
 app.use("/api-reference/*", createRateLimiterMiddleware(rpcLimiter));
 
 // In production the OpenAPI reference is admin-only: it documents every
@@ -512,6 +515,7 @@ app.use("/rpc/*", async (c, next) => {
   await next();
 });
 
+// The expected-identity guard deliberately excludes this raw API tool: hand-composed requests use the signed-in cookie and hold no cached app identity state.
 app.use("/api-reference/*", async (c, next) => {
   const context = await createContext({ context: c, clientIp: resolveClientIp(c) });
   const result = await apiHandler.handle(c.req.raw, { prefix: "/api-reference", context });

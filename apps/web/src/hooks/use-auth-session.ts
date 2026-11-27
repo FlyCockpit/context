@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
 import { authClient } from "@/lib/auth-client";
 import {
   type AuthSessionState,
@@ -7,9 +7,15 @@ import {
 } from "@/lib/auth-session-state";
 
 import {
+  announceDocumentIdentity,
+  confirmDocumentIdentityFresh,
+  identityVerificationGeneration,
   isDocumentIdentityUnverified,
+  observeDocumentIdentity,
+  replaceDocument,
   subscribeIdentityVerification,
 } from "@/lib/document-identity";
+import { connectSessionRetry, observeSessionRetry } from "@/lib/session-retry";
 import { useSessionUnconfirmed } from "@/lib/session-unconfirmed";
 
 import { useNetworkStatus } from "./use-network-status";
@@ -22,6 +28,34 @@ import { useNetworkStatus } from "./use-network-status";
  * snapshots write it; the server's are always the unresolved initial state.
  */
 let confirmedAnonymous = false;
+// Availability only, never session data. Keep Retry visible during its request
+// instead of alternating the account control with a first-load skeleton.
+let unavailableError: unknown | null = null;
+
+// The adapter supplies one stable refetch action to every consumer. A retry
+// also settles the neutral identity mask when a previous peer probe failed.
+type Refetch = ReturnType<typeof authClient.useSession>["refetch"];
+const refetches = new WeakMap<Refetch, Refetch>();
+function verifiedRefetch(raw: Refetch): Refetch {
+  let wrapped = refetches.get(raw);
+  if (!wrapped) {
+    wrapped = async (...args) => {
+      const since = identityVerificationGeneration();
+      const result = await raw(...args);
+      const checked = readSessionIdentity();
+      if (since === identityVerificationGeneration() && checked !== undefined) {
+        if (observeDocumentIdentity(checked)) replaceDocument();
+        else {
+          confirmDocumentIdentityFresh(since);
+          announceDocumentIdentity(checked);
+        }
+      }
+      return result;
+    };
+    refetches.set(raw, wrapped);
+  }
+  return wrapped;
+}
 
 /**
  * The sole application adapter for Better Auth's reactive session atom.
@@ -36,6 +70,17 @@ export function useAuthSession({
 } = {}): AuthSessionState {
   const session = authClient.useSession();
   const isOnline = useNetworkStatus();
+  if (typeof window !== "undefined") {
+    if (session.error) unavailableError = session.error;
+    else if (!session.isPending && !session.isRefetching) unavailableError = null;
+  }
+  const error =
+    session.error ?? (session.isPending || session.isRefetching ? unavailableError : null);
+  const refetch = verifiedRefetch(session.refetch);
+  useLayoutEffect(() => connectSessionRetry(refetch), [refetch]);
+  useLayoutEffect(() => {
+    observeSessionRetry(session.error, session.isPending || session.isRefetching);
+  }, [session.error, session.isPending, session.isRefetching]);
   // Under `SessionUnconfirmed` (the app shell's pending state), or while
   // another tab's identity change is unchecked here: nobody yet.
   const unconfirmed = useSessionUnconfirmed();
@@ -47,11 +92,11 @@ export function useAuthSession({
   if (!unmasked && (unconfirmed || unverified)) {
     return getAuthSessionState<NonNullable<typeof session.data>>({
       data: null,
-      isPending: true,
+      isPending: unconfirmed || error == null,
       isRefetching: session.isRefetching,
-      error: null,
+      error: unconfirmed ? null : error,
       isOnline,
-      refetch: session.refetch,
+      refetch,
       confirmedAnonymous: false,
     });
   }
@@ -60,9 +105,9 @@ export function useAuthSession({
     data: session.data,
     isPending: session.isPending,
     isRefetching: session.isRefetching,
-    error: session.error,
+    error,
     isOnline,
-    refetch: session.refetch,
+    refetch,
     confirmedAnonymous,
   });
   // A fact about the shared atom, not about this render: idempotent, and the
@@ -98,4 +143,5 @@ export function isSessionFetchInFlight(): boolean {
 /** Forget the settled state, as a new document would. Tests only. */
 export function resetAuthSessionMemoryForTests(): void {
   confirmedAnonymous = false;
+  unavailableError = null;
 }

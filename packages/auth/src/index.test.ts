@@ -1120,3 +1120,94 @@ describe("shared OAuth revocation writes", () => {
     },
   );
 });
+
+describe("expected document identity with production before hook", () => {
+  async function request(
+    fixture: Awaited<ReturnType<typeof resetFixture>>,
+    path: string,
+    expected: string,
+    body: object = {},
+  ) {
+    return fixture.current.handler(
+      new Request(`http://localhost:3000/api/auth/${path}`, {
+        method: path === "get-session" ? "GET" : "POST",
+        headers: {
+          cookie: fixture.other.headers.get("cookie") ?? "",
+          origin: "http://localhost:3000",
+          "content-type": "application/json",
+          "X-Expected-User": expected,
+        },
+        ...(path === "get-session" ? {} : { body: JSON.stringify(body) }),
+      }),
+    );
+  }
+  it.each(["update-user", "reset-password", "sign-up/email"])(
+    "rejects switched cookie on %s before writes or reset revocation",
+    async (path) => {
+      const fixture = await resetFixture();
+      const before = structuredClone(fixture.memory);
+      const response = await request(fixture, path, fixture.userId, {
+        name: "Changed",
+        email: "new@example.com",
+        password: "some-password-123",
+        token: "reset-token",
+        newPassword: "replacement-password-456",
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "IDENTITY_CHANGED" });
+      expect(fixture.memory).toEqual(before);
+      for (const write of revocationWrites()) expect(write).not.toHaveBeenCalled();
+    },
+  );
+  it("compares a banned raw cookie owner before policy filtering", async () => {
+    const fixture = await resetFixture();
+    const user = fixture.memory.user?.find((row) => row.id === fixture.other.userId);
+    if (!user) throw new Error("Missing user");
+    user.banned = true;
+    const response = await request(fixture, "update-user", fixture.userId, { name: "Changed" });
+    expect(response.status).toBe(409);
+    expect(user.name).not.toBe("Changed");
+  });
+  it("allows matching writes with one authoritative lookup shared by the endpoint", async () => {
+    const fixture = await resetFixture();
+    const context = await fixture.current.$context;
+    const lookup = vi.spyOn(context.internalAdapter, "findSession");
+    expect(
+      (await request(fixture, "update-user", fixture.other.userId, { name: "Changed" })).status,
+    ).toBe(200);
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(fixture.memory.user?.find((row) => row.id === fixture.other.userId)?.name).toBe(
+      "Changed",
+    );
+  });
+  it.each(["get-session", "sign-out"])(
+    "exempts %s so revalidation and explicit sign-out can finish",
+    async (path) => {
+      const fixture = await resetFixture();
+      expect((await request(fixture, path, fixture.userId)).status).toBe(200);
+    },
+  );
+  it("fails closed when the raw owner lookup is unavailable on a recovery request", async () => {
+    const fixture = await resetFixture();
+    const context = await fixture.current.$context;
+    const before = structuredClone(fixture.memory);
+    vi.spyOn(context.internalAdapter, "findSession").mockRejectedValueOnce(
+      new Error("Unavailable"),
+    );
+    // Use just the session token so the read cannot succeed from cookie cache.
+    fixture.other.headers.set(
+      "cookie",
+      (fixture.other.headers.get("cookie") ?? "")
+        .split("; ")
+        .filter((part) => !part.startsWith("better-auth.session_data="))
+        .join("; "),
+    );
+    const response = await request(fixture, "reset-password", fixture.userId, {
+      token: "reset-token",
+      newPassword: "replacement-password-456",
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "SESSION_UNAVAILABLE" });
+    expect(fixture.memory).toEqual(before);
+  });
+});

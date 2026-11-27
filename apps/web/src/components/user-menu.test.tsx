@@ -40,6 +40,8 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 vi.mock("@/hooks/use-auth-session", () => ({
   useAuthSession: () => ({
+    meta: {},
+    actions: {},
     state:
       fixture.session === "authenticated"
         ? {
@@ -138,8 +140,8 @@ describe("signed-in account control", () => {
     expect(html).toContain('class="hidden truncate md:block">Ada Lovelace<');
   });
 
-  it("shows a skeleton while the session loads, and on an error before any identity", () => {
-    for (const session of ["pending", "error"] as const) {
+  it("shows a skeleton only while the first session loads", () => {
+    for (const session of ["pending"] as const) {
       fixture.session = session;
       const html = render();
       expect(html).toContain('data-slot="skeleton"');

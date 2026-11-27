@@ -13,7 +13,7 @@ import { ONE_TIME_CODE_LENGTH, OneTimeCodeField } from "@/components/auth/plain-
 import { ClientTile } from "@/components/mcp/client-tile";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import { authClient } from "@/lib/auth-client";
-import { signOutAndLeave } from "@/lib/explicit-sign-out";
+import { signOutAndLeave, signOutFailureKey } from "@/lib/explicit-sign-out";
 import { clearServerFieldError, setServerFieldError } from "@/lib/form-server-error";
 import {
   mcpPageHref,
@@ -47,7 +47,7 @@ export function McpLoginPage({ lang, rawSearch }: { lang: string; rawSearch: str
   // the next account signs in. Still signed in after a failure: say so.
   const switchAccount = async () => {
     const result = await signOutAndLeave(mcpPageHref(lang, "mcp-login", rawSearch));
-    if (!result.ok) toast.error(friendly(result.error, t("nav:userMenu.signOutFailed")));
+    if (!result.ok) toast.error(t(`nav:${signOutFailureKey(result.error)}`));
   };
 
   if (!info.usable) return <InvalidRequestCard />;

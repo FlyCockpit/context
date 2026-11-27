@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
 import { APP_LOCALE_HEADER } from "@cockpit-context/config/locales";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { describe, expect, it } from "vitest";
 
-import { CORS_ALLOW_HEADERS } from "./cors-headers";
+import { CORS_ALLOW_HEADERS, CORS_EXPOSE_HEADERS } from "./cors-headers";
 
 const APP_ORIGIN = "https://app.example.com";
 
@@ -19,10 +20,15 @@ function buildApp() {
       origin: APP_ORIGIN,
       allowMethods: ["GET", "POST", "OPTIONS"],
       allowHeaders: [...CORS_ALLOW_HEADERS],
+      exposeHeaders: [...CORS_EXPOSE_HEADERS],
       credentials: true,
     }),
   );
   app.post("/api/auth/sign-in/email", (c) => c.json({ ok: true }));
+  app.get("/api/auth/get-session", (c) => {
+    c.header("Retry-After", "12");
+    return c.json({ code: "TOO_MANY_REQUESTS" }, 429);
+  });
   return app;
 }
 
@@ -61,5 +67,26 @@ describe("CORS_ALLOW_HEADERS", () => {
     const res = await preflight("x-csrf-token");
     const allowed = (res.headers.get("access-control-allow-headers") ?? "").toLowerCase();
     expect(allowed).toContain("x-csrf-token");
+  });
+});
+
+describe("CORS_EXPOSE_HEADERS", () => {
+  it("lets credentialed split-origin session clients read Retry-After on a 429", async () => {
+    const response = await buildApp().request("/api/auth/get-session", {
+      headers: { Origin: APP_ORIGIN, Cookie: "better-auth.session_token=test" },
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
+    expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+    const exposed = (response.headers.get("Access-Control-Expose-Headers") ?? "")
+      .toLowerCase()
+      .split(/\s*,\s*/);
+    expect(exposed).toContain("retry-after");
+    expect(response.headers.get("Retry-After")).toBe("12");
+  });
+
+  it("wires the response-header contract into the server CORS middleware", () => {
+    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    expect(source.includes("exposeHeaders: [...CORS_EXPOSE_HEADERS]")).toBe(true);
   });
 });

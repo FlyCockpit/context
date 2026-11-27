@@ -47,7 +47,9 @@
     "open": "Abrir el menú de la cuenta",
     "openFor": "{{name}}, menú de la cuenta",
     "openApp": "Abrir app",
-    "signOutFailed": "No se pudo cerrar la sesión. Inténtalo de nuevo."
+    "signOutFailed": "No se pudo cerrar la sesión. Inténtalo de nuevo.",
+    "accountUnavailable": "Cuenta no disponible — Reintentar",
+    "signOutOffline": "No tienes conexión. Tu sesión sigue abierta. Vuelve a cerrarla cuando tengas conexión."
   },
   "skipToContent": "Saltar al contenido"
 }
