@@ -384,6 +384,7 @@ export const ENV_VARS: EnvVar[] = [
       "Max connections in this process's Postgres pool (node-postgres `max`).",
       "Default 10 matches the driver default — raise it only against the",
       "database's connection budget; the app and each standalone script hold their own pool.",
+      "At least 3: auth locks reserve a nested slot and leave a work connection free.",
     ],
   },
 

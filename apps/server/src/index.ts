@@ -7,6 +7,7 @@ import { type CredentialKind, createContext } from "@cockpit-context/api/context
 import { appRouter } from "@cockpit-context/api/routers/index";
 import { auth, passwordPepper, type Session } from "@cockpit-context/auth";
 import { issueBootstrapTokenIfNeeded } from "@cockpit-context/auth/bootstrap-token";
+import { handlePasswordAuthRequest } from "@cockpit-context/auth/password-auth-handler";
 import { syncPasswordPepper } from "@cockpit-context/auth/password-pepper-store";
 import { getSignupAvailability } from "@cockpit-context/auth/signup-availability";
 import { ORPC_BATCH_MAX_SIZE } from "@cockpit-context/config/orpc-batch";
@@ -424,14 +425,14 @@ app.use("/api/auth/admin/*", betterAuthAdminGate);
 // (client_secret_basic) on the token, revoke and introspect endpoints, which
 // authenticates a registered OAuth client, never a user.
 app.on(["POST", "GET"], "/api/auth/*", (c) => {
-  if (!c.req.raw.headers.has("authorization")) return auth.handler(c.req.raw);
+  if (!c.req.raw.headers.has("authorization")) return handlePasswordAuthRequest(auth, c.req.raw);
   const clientAuth = /^basic\s/i.test(c.req.raw.headers.get("authorization") ?? "");
   if (clientAuth && MCP_OAUTH_CLIENT_AUTH_PATHS.has(new URL(c.req.raw.url).pathname)) {
-    return auth.handler(c.req.raw);
+    return handlePasswordAuthRequest(auth, c.req.raw);
   }
   const headers = new Headers(c.req.raw.headers);
   headers.delete("authorization");
-  return auth.handler(new Request(c.req.raw, { headers }));
+  return handlePasswordAuthRequest(auth, new Request(c.req.raw, { headers }));
 });
 
 // Resolve the Better-Auth session once per request on paths that need it.

@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import { RepoError } from "@cockpit-context/repos/errors";
 import type { RunSnapshot } from "@cockpit-context/runs";
 import { RunEngineError } from "@cockpit-context/runs/errors";

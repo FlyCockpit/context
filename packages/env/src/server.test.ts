@@ -120,10 +120,16 @@ describe("shared env — DATABASE_POOL_MAX", () => {
     expect(mod.env.DATABASE_POOL_MAX).toBe(10);
   });
 
-  it("accepts a positive integer", async () => {
+  it("accepts a configured pool above the auth-lock minimum", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await importServerEnv({ DATABASE_POOL_MAX: "25" });
     expect(mod.env.DATABASE_POOL_MAX).toBe(25);
+  });
+
+  it("rejects a pool of 2 or 1 because nested auth locks need a work connection", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(importServerEnv({ DATABASE_POOL_MAX: "2" })).rejects.toThrow();
+    await expect(importServerEnv({ DATABASE_POOL_MAX: "1" })).rejects.toThrow();
   });
 
   it("rejects zero, negative, and non-numeric values", async () => {

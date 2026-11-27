@@ -36,7 +36,7 @@ export const sharedVars = {
   // Default 10 matches the driver default — raise it only against the
   // database's connection budget; the app process holds one pool and the
   // standalone scripts each open their own.
-  DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+  DATABASE_POOL_MAX: z.coerce.number().int().min(3).default(10),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   // ---- Backups. BACKUP_ENABLED (strict true|false, default false) is the
   // backup switch: the migration runner (scripts/db/migrate-runtime.mjs) takes

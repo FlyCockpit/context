@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import type { Prisma } from "@cockpit-context/db";
 import { createRouterClient } from "@orpc/server";
 import type { MockInstance } from "vitest";
@@ -256,6 +258,48 @@ describe("credential recovery races", () => {
         secret: SECRET,
       }),
     ).rejects.toMatchObject({ reason: "tombstone" });
+  });
+
+  it("a refresh admitted before reset can finish serialization but its generation is unusable", async () => {
+    await exchange();
+    const admitted = deferred();
+    const serialize = deferred();
+    const refreshing = (async () => {
+      // The real provider may serialize/sign its response after the claims
+      // extension has released the issuance lock. A reset must still win.
+      const claims = await issueMcpGrantClaims({
+        grantType: "refresh_token",
+        userId: "user-a",
+        clientId: "c",
+        referenceId: "r",
+        secret: SECRET,
+      });
+      admitted.resolve();
+      await serialize.promise;
+      return claims;
+    })();
+    await admitted.promise;
+    sessionRow = undefined;
+    await revokeUserCredentials("user-a", { revokeSessions: true });
+    serialize.resolve();
+    const claims = await refreshing;
+    expect(
+      await resolveOauthClaims(
+        { ...claims, sub: "user-a", client_id: "c" },
+        { prisma, now: new Date() },
+      ),
+    ).toMatchObject({ ok: false });
+    await expect(
+      issueMcpGrantClaims({
+        grantType: "refresh_token",
+        userId: "user-a",
+        clientId: "c",
+        referenceId: "r",
+        secret: SECRET,
+      }),
+    ).rejects.toMatchObject({ reason: "tombstone" });
+    expect(grants).toHaveLength(1);
+    expect(grants[0]?.revokedAt).toBeInstanceOf(Date);
   });
 
   it.each(["consent", "authorization_code"])(

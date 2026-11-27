@@ -6,6 +6,7 @@ import {
   recordResetLinkMailed,
 } from "@cockpit-context/auth/invite-verification";
 import { oauthRevocationWrites } from "@cockpit-context/auth/oauth-revocation";
+import { withCredentialSetupLock } from "@cockpit-context/auth/password-reset-links";
 import { isAdminRole } from "@cockpit-context/auth/roles";
 import { invalidateSignupAvailabilityCache } from "@cockpit-context/auth/signup-availability";
 import {
@@ -32,6 +33,7 @@ import { recordAdminAudit } from "../lib/admin-audit";
 import { withAdminRemovalGuard } from "../lib/admin-presence";
 import { reasonError, withDomainErrors } from "../lib/domain-errors";
 import { cursorPage, cursorPageInput, pageTake, withCursor } from "../lib/pagination";
+import { createProcedureBudget } from "../lib/procedure-budget";
 import { prepareUserDeletion, stopUserRuns } from "../lib/user-deletion";
 
 // Wire Better-Auth admin/remove-user through the same cleanup as users.remove.
@@ -89,8 +91,8 @@ const INVITE_LINK_TTL_MS = INVITE_LINK_TTL_DAYS * 24 * 60 * 60 * 1000;
  * `resetPasswordTokenExpiresIn`): Better-Auth reads that setting only when it
  * *requests* a reset, and its `/reset-password` callback and `resetPassword`
  * endpoint check the stored row's `expiresAt` alone. `resetPassword` consumes
- * the row atomically (`consumeVerificationValue`) in the transaction that
- * writes the password, so the link works once and then never again.
+ * the row once (`consumeVerificationValue`) before writing the password.
+ * Adapter transactions are off, so a failed password write can spend the link.
  * Consuming it needs no SMTP: Better-Auth requires `sendResetPassword` only
  * to request a token, which is why this mints it server-side instead. The
  * `reap-expired-auth-tokens` job deletes the row once `expiresAt` passes.
@@ -103,9 +105,18 @@ async function mintSetPasswordLink(
   locale: string,
   options: { invite: boolean },
 ): Promise<{ url: string; token: string; expiresAt: Date }> {
-  const ctx = await auth.$context;
   const expiresAt = new Date(Date.now() + INVITE_LINK_TTL_MS);
-  const token = await createSetPasswordToken(ctx.internalAdapter, userId, expiresAt);
+  const token = await withCredentialSetupLock(userId, async (tx) => {
+    if (!options.invite)
+      await tx.verification.deleteMany({
+        where: { identifier: { startsWith: "reset-password:" }, value: userId },
+      });
+    return createSetPasswordToken(
+      { createVerificationValue: (data) => tx.verification.create({ data, select: { id: true } }) },
+      userId,
+      expiresAt,
+    );
+  });
   // The web app lives on CORS_ORIGIN when it is split from this API.
   const lang = isSupportedLocale(locale) ? locale : DEFAULT_LOCALE;
   const url = new URL(`/${lang}/reset-password`, env.CORS_ORIGIN ?? env.BETTER_AUTH_URL);
@@ -132,28 +143,51 @@ async function recordMailed(token: string, email: string, source: string): Promi
   }
 }
 
-// Per-user issuance gate for `users.passwordLink`. In-process is enough:
+// No-queue delivery admission for `users.passwordLink` (not a DB setup lock).
+// Reset never takes this gate; mint/cleanup serialize on lockCredentialSetup.
+// In-process delivery admission is enough:
 // Cockpit Context runs exactly one app replica (docs/hosting.md). A second
 // request while one is in flight is refused at once rather than queued: each
 // holds the request open for up to the mail budget, so a queue would add
 // those waits up past a reverse proxy's idle limit (docs/deploy.md).
-const passwordLinksInFlight = new Set<string>();
+const passwordLinkDeliveriesInFlight = new Set<string>();
 
-async function withPasswordLinkLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
-  if (passwordLinksInFlight.has(userId)) {
+async function withPasswordLinkDelivery<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  if (passwordLinkDeliveriesInFlight.has(userId)) {
     throw reasonError(
       "CONFLICT",
       "PASSWORD_LINK_BUSY",
       "A password link for this user is still being sent. Try again in a moment.",
     );
   }
-  passwordLinksInFlight.add(userId);
+  passwordLinkDeliveriesInFlight.add(userId);
   try {
     return await fn();
   } finally {
-    passwordLinksInFlight.delete(userId);
+    passwordLinkDeliveriesInFlight.delete(userId);
   }
 }
+
+// Per-procedure budgets: a batch can contain many mail actions. Charge before writes.
+const consumeInviteMailBudget = createProcedureBudget({
+  keyPrefix: "rl:users-invite-mail",
+  points: 30,
+  durationSeconds: 3600,
+  failClosed: true,
+  overBudgetMessage: (seconds) => `Too many invitations. Try again in ${seconds}s.`,
+  unavailableMessage: "Invitation delivery is temporarily unavailable.",
+  unavailableLog: "[users] invite mail limiter unavailable, failing closed:",
+});
+const consumeResendInviteBudget = createProcedureBudget({
+  keyPrefix: "rl:users-resend-invite",
+  points: 5,
+  durationSeconds: 3600,
+  failClosed: true,
+  overBudgetMessage: (seconds) =>
+    `Too many password links for this user. Try again in ${seconds}s.`,
+  unavailableMessage: "Password link delivery is temporarily unavailable.",
+  unavailableLog: "[users] password link limiter unavailable, failing closed:",
+});
 
 const USER_SELECT = {
   id: true,
@@ -243,7 +277,8 @@ export const usersRouter = {
         locale: z.enum(SUPPORTED_LOCALES),
       }),
     )
-    .handler(async ({ input }) => {
+    .handler(async ({ input, context }) => {
+      await consumeInviteMailBudget(context.session.user.id);
       // The account starts unverified, and the invite email is the only mail:
       // createUser sends no verification mail, and sign-in's resend
       // (`sendOnSignIn`) needs the correct password, which nobody has. Using
@@ -470,7 +505,9 @@ export const usersRouter = {
     // One issuance per user at a time: superseding older links, minting the
     // new one and the delivery bookkeeping must not interleave with a second
     // request for the same user, or both links would stay live.
-    return withPasswordLinkLock(input.userId, async () => {
+    await consumeInviteMailBudget(context.session.user.id);
+    await consumeResendInviteBudget(input.userId);
+    return withPasswordLinkDelivery(input.userId, async () => {
       const target = await prisma.user.findUnique({
         where: { id: input.userId },
         select: { id: true, email: true, locale: true, banned: true, role: true },
@@ -503,9 +540,6 @@ export const usersRouter = {
       // One live link per user: drop earlier reset links (the value of a
       // `reset-password:` row is the user id). Whether a link verifies the
       // address is recorded per token, so no earlier record can carry over.
-      await prisma.verification.deleteMany({
-        where: { identifier: { startsWith: "reset-password:" }, value: target.id },
-      });
       const link = await mintSetPasswordLink(target.id, target.locale, { invite: false });
 
       if (!isEmailConfigured()) {

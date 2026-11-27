@@ -42,7 +42,7 @@ vi.mock("@cockpit-context/env/server", () => ({
 // is empty — which is exactly CI, so importing the full router graph pulls it
 // in. Mock every import-time I/O boundary: see docs/development.md.
 vi.mock("@cockpit-context/env/shared", () => ({
-  env: {},
+  env: { DATABASE_POOL_MAX: 10 },
 }));
 
 // Mock @cockpit-context/db so importing the full appRouter graph never touches Postgres.

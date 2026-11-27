@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import type prisma from "@cockpit-context/db";
 import type { Prisma } from "@cockpit-context/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";

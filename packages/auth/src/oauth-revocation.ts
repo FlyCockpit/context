@@ -1,4 +1,5 @@
 import prisma, { type Prisma } from "@cockpit-context/db";
+import { withLockSlot } from "./lock-slots.js";
 
 /**
  * Which OAuth MCP access a revocation ends: one generation (the user, client
@@ -41,12 +42,14 @@ export function withUserCredentialTransaction<T>(
   userId: string,
   run: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
-  return prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(1936028274, hashtext(${userId}))`;
-      return run(tx);
-    },
-    { isolationLevel: "ReadCommitted" },
+  return withLockSlot(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(1936028274, hashtext(${userId}))`;
+        return run(tx);
+      },
+      { isolationLevel: "ReadCommitted" },
+    ),
   );
 }
 
@@ -68,7 +71,10 @@ export async function hasLiveSession(
 /** Idempotent; failed transactions roll back completely and are safe to retry. */
 export async function revokeUserCredentials(
   userId: string,
-  { revokeSessions = false }: { revokeSessions?: boolean } = {},
+  {
+    revokeSessions = false,
+    keepSessionToken,
+  }: { revokeSessions?: boolean; keepSessionToken?: string } = {},
 ): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -102,7 +108,10 @@ export async function revokeUserCredentials(
         // Delete every session before releasing the issuance lock, so even a
         // signed cookie-cache copy cannot mint in the password-reset gap.
         // Auth has no server-side session cache or secondary storage to purge.
-        if (revokeSessions) await tx.session.deleteMany({ where: { userId } });
+        if (revokeSessions)
+          await tx.session.deleteMany({
+            where: { userId, ...(keepSessionToken ? { token: { not: keepSessionToken } } : {}) },
+          });
       });
       return;
     } catch (error) {

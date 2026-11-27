@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { betterAuth } from "better-auth";
@@ -8,6 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The production `auth` instance, built with import IO mocked: this pins its
 // wiring (the copies in banned-session-guard.test.ts exercise the behavior).
+vi.mock("better-auth/adapters/prisma", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("better-auth/adapters/prisma")>();
+  return { ...actual, prismaAdapter: vi.fn(actual.prismaAdapter) };
+});
 vi.mock("@cockpit-context/db", async () => {
   // Reuse the workspace's mockDeep-backed Prisma fixture without adding a dependency.
   const { createMockContext } = await vi.importActual<{
@@ -20,6 +26,7 @@ vi.mock("@cockpit-context/env/server", () => ({
     BETTER_AUTH_SECRET: "test-secret-that-is-long-enough-for-better-auth-0123456789",
     BETTER_AUTH_URL: "http://localhost:3000",
     NODE_ENV: "test",
+    COCKPIT_CONTEXT_MAX_LIVE_STREAMS_PER_USER: 20,
   },
   SIGNUP_ENABLED: true,
   ADMIN_EMAILS: new Set<string>(),
@@ -38,8 +45,21 @@ vi.mock("@cockpit-context/mailer", () => ({
 const { default: prisma } = await import("@cockpit-context/db");
 const db = vi.mocked(prisma, { deep: true });
 const { oauthRevocationWrites } = await import("./oauth-revocation");
+const { prismaAdapter } = await import("better-auth/adapters/prisma");
 const { auth, passwordPepper } = await import("./index");
+const prismaAdapterConfig = vi.mocked(prismaAdapter).mock.calls[0]?.[1];
 const { onUserBanned } = await import("./ban");
+const { openLiveStream } = await vi.importActual<{
+  openLiveStream: (
+    userId: string,
+    sessionId: string,
+  ) => Promise<{
+    signal: AbortSignal;
+    assertOpen: () => void;
+    untilBanned: <T>(work: Promise<T>) => Promise<T>;
+    release: () => void;
+  }>;
+}>("../../api/src/lib/live-streams");
 const { recordResetLinkMailed } = await import("./invite-verification");
 
 const revocationWrites = () => [
@@ -76,6 +96,82 @@ afterEach(() => {
 });
 
 describe("production auth wiring", () => {
+  it.each(["reset", "quarantine"])(
+    "%s closes a stream admitted during the final session sweep before later output",
+    async (operation) => {
+      let finishSweep = () => {};
+      let sweepEntered = () => {};
+      const entered = new Promise<void>((resolve) => {
+        sweepEntered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        finishSweep = resolve;
+      });
+      const user = {
+        id: "u-gap",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        name: "Gap",
+        email: "gap@example.test",
+        emailVerified: true,
+        image: null,
+        role: "user",
+        locale: "en-US",
+        banned: false,
+        banReason: null,
+        banExpires: null,
+        twoFactorEnabled: false,
+        operationalAlerts: true,
+      };
+      const session = {
+        id: "gap-session",
+        userId: user.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+        token: "gap-token",
+        ipAddress: null,
+        userAgent: null,
+        impersonatedBy: null,
+      };
+      db.user.findUnique.mockResolvedValue(user);
+      db.session.findFirst.mockResolvedValue(session);
+      (db.session.deleteMany as MockInstance).mockImplementation(async () => {
+        sweepEntered();
+        await held;
+        db.session.findFirst.mockResolvedValue(null);
+        return { count: 1 };
+      });
+      db.account.updateMany.mockResolvedValue({ count: 1 });
+      const reset = auth.options.emailAndPassword?.onPasswordReset;
+      if (!reset) throw new Error("Missing password reset hook");
+      const recovery =
+        operation === "reset"
+          ? reset({ user })
+          : (await import("./credential-revocation")).quarantineUntrustedPasswordWrite("u-gap", {
+              hash: async () => "unusable-peppered-hash",
+            });
+      await entered;
+      const stream = await openLiveStream("u-gap", "gap-session");
+      try {
+        expect(stream.signal.aborted).toBe(false);
+        finishSweep();
+        await recovery;
+        expect(stream.signal.aborted).toBe(true);
+        expect(() => stream.assertOpen()).toThrow();
+        // A pending snapshot/output is refused as well as buffered yields.
+        await expect(stream.untilBanned(new Promise(() => {}))).rejects.toMatchObject({
+          code: "UNAUTHORIZED",
+        });
+        await expect(openLiveStream("u-gap", "gap-session")).rejects.toMatchObject({
+          code: "UNAUTHORIZED",
+        });
+      } finally {
+        finishSweep();
+        stream.release();
+      }
+    },
+  );
   it("uses the pepper for hashing and verifying passwords", () => {
     expect(auth.options.emailAndPassword?.password?.hash).toBe(passwordPepper.hash);
     expect(auth.options.emailAndPassword?.password?.verify).toBe(passwordPepper.verify);
@@ -120,25 +216,35 @@ describe("password reset link cleanup", () => {
   };
 
   it("deletes the user's other links through the upstream adapter", async () => {
-    const adapter = (await auth.$context).adapter;
-    const cleanup = vi.spyOn(adapter, "deleteMany").mockResolvedValue(0);
+    const cleanup = db.verification.deleteMany;
     const hook = auth.options.emailAndPassword?.onPasswordReset;
     if (!hook) throw new Error("Missing password reset hook");
     await hook({ user });
     expect(cleanup).toHaveBeenCalledExactlyOnceWith({
-      model: "verification",
-      where: [
-        { field: "identifier", operator: "starts_with", value: "reset-password:" },
-        { field: "value", value: user.id },
-      ],
+      where: { identifier: { startsWith: "reset-password:" }, value: user.id },
     });
-    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a failed reset-link cleanup without reannouncing recovery", async () => {
+    const cleanup = db.verification.deleteMany
+      .mockRejectedValueOnce(new Error("transient cleanup"))
+      .mockResolvedValue({ count: 0 });
+    const hook = auth.options.emailAndPassword?.onPasswordReset;
+    if (!hook) throw new Error("Missing reset hook");
+    const announced = vi.fn();
+    const stop = onUserBanned(announced);
+    try {
+      await hook({ user });
+      expect(cleanup).toHaveBeenCalledTimes(2);
+      expect(announced).toHaveBeenCalledExactlyOnceWith(user.id, "session-revocation");
+    } finally {
+      stop();
+    }
   });
 
   it("logs a cleanup failure without failing the completed reset", async () => {
-    vi.spyOn((await auth.$context).adapter, "deleteMany").mockRejectedValueOnce(
-      new Error("cleanup failed"),
-    );
+    db.verification.deleteMany.mockRejectedValue(new Error("cleanup failed"));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const hook = auth.options.emailAndPassword?.onPasswordReset;
     if (!hook) throw new Error("Missing password reset hook");
@@ -260,7 +366,9 @@ async function resetFixture(onResetHash: () => void | Promise<void> = () => {}) 
     expect(inCredentialTransaction).toBe(true);
     expect(db.$executeRaw).toHaveBeenCalled();
     const before = memory.session ?? [];
-    const remaining = before.filter((row) => row.userId !== where?.userId);
+    const remaining = before.filter(
+      (row) => row.userId !== where?.userId || (where?.token?.not && row.token === where.token.not),
+    );
     memory.session = remaining;
     return { count: before.length - remaining.length };
   });
@@ -276,10 +384,24 @@ async function resetFixture(onResetHash: () => void | Promise<void> = () => {}) 
   );
   const cookies = [headersOf(first.headers), headersOf(second.headers)];
   const context = await current.$context;
-  // The production callback closes over auth.$context. Route only its adapter
-  // IO to this fixture, keeping the real reset-link policy and cleanup intact.
-  vi.spyOn((await auth.$context).adapter, "deleteMany").mockImplementation((args) =>
-    context.adapter.deleteMany(args),
+  (db.verification.deleteMany as MockInstance).mockImplementation(
+    async ({
+      where,
+    }: {
+      where: { value?: string; identifier?: string | { startsWith: string } };
+    }) => {
+      const before = memory.verification ?? [];
+      memory.verification = before.filter((row) => {
+        const identifierMatches =
+          typeof where.identifier === "string"
+            ? row.identifier === where.identifier
+            : where.identifier
+              ? String(row.identifier).startsWith(where.identifier.startsWith)
+              : true;
+        return !(identifierMatches && (!where.value || row.value === where.value));
+      });
+      return { count: before.length - memory.verification.length };
+    },
   );
   const userId = memory.user?.find((row) => row.email === "reset@example.com")?.id;
   const otherUserId = memory.user?.find((row) => row.email === "other@example.com")?.id;
@@ -326,10 +448,124 @@ function expectCredentialRevocation(userId: string) {
   ]) {
     expect(write).toHaveBeenCalledWith({ where: { userId } });
   }
-  expect(db.$transaction).toHaveBeenCalledTimes(2);
+  expect(db.$transaction).toHaveBeenCalledTimes(3);
 }
 
-describe("password reset revocation", () => {
+describe("password reset revocation", { timeout: 30_000 }, () => {
+  it("refuses setPassword for an existing SSO user without a password-write lock", async () => {
+    const fixture = await resetFixture();
+    fixture.memory.account =
+      fixture.memory.account?.filter((row) => row.userId !== fixture.userId) ?? [];
+    fixture.memory.account.push({
+      id: "sso-account",
+      userId: fixture.userId,
+      accountId: "sso",
+      providerId: "sso",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const instance = betterAuth({
+      secret: "test-secret-that-is-long-enough-for-better-auth-0123456789",
+      baseURL: "http://localhost:3000",
+      database: memoryAdapter(fixture.memory),
+      logger: { disabled: true },
+      rateLimit: { enabled: false },
+      emailAndPassword: { enabled: true },
+      databaseHooks: { account: auth.options.databaseHooks?.account },
+    });
+    await expect(
+      instance.api.setPassword({
+        headers: fixture.cookies[0],
+        body: { newPassword: "a-new-sso-password-123" },
+      }),
+    ).rejects.toThrow(/password-write lock/);
+    expect(
+      fixture.memory.account?.filter(
+        (row) => row.userId === fixture.userId && row.providerId === "credential",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("preserves forbidden admin impersonation/password-setting and the banned-session answer", async () => {
+    const fixture = await resetFixture();
+    const { admin } = await import("better-auth/plugins");
+    const { adminPluginAccess } = await import("./admin-access");
+    const { bannedSessionGuard } = await import("./banned-session-guard");
+    const instance = betterAuth({
+      secret: "test-secret-that-is-long-enough-for-better-auth-0123456789",
+      baseURL: "http://localhost:3000",
+      database: memoryAdapter(fixture.memory),
+      logger: { disabled: true },
+      rateLimit: { enabled: false },
+      plugins: [bannedSessionGuard(), admin({ defaultRole: "user", ...adminPluginAccess })],
+      databaseHooks: {
+        account: auth.options.databaseHooks?.account,
+        session: auth.options.databaseHooks?.session,
+      },
+    });
+    const actor = fixture.memory.user?.find((row) => row.id === fixture.userId);
+    if (!actor) throw new Error("Missing admin");
+    actor.role = "admin";
+    const sessionsBefore = structuredClone(fixture.memory.session);
+    const accountsBefore = structuredClone(fixture.memory.account);
+    const call = (path: string) =>
+      instance.handler(
+        new Request(`http://localhost:3000/api/auth${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost:3000",
+            cookie: fixture.cookies[0]?.get("cookie") ?? "",
+          },
+          body: JSON.stringify({
+            userId: fixture.other.userId,
+            newPassword: "attempted-admin-password",
+          }),
+        }),
+      );
+    for (const path of ["/admin/impersonate-user", "/admin/set-user-password"])
+      expect((await call(path)).status).toBe(403);
+    expect(fixture.memory.session).toEqual(sessionsBefore);
+    actor.banned = true;
+    actor.banExpires = null;
+    for (const path of ["/admin/impersonate-user", "/admin/set-user-password"])
+      expect((await call(path)).status).toBe(401);
+    expect(fixture.memory.session?.filter((row) => row.userId === fixture.userId)).toHaveLength(0);
+    expect(
+      fixture.memory.session?.filter((row) => row.userId === fixture.other.userId),
+    ).toHaveLength(1);
+    expect(fixture.memory.account).toEqual(accountsBefore);
+  });
+
+  it("announces completed reset once while inside the password-write lock", async () => {
+    const fixture = await resetFixture();
+    const { handlePasswordAuthRequest } = await import("./password-auth-handler");
+    const { passwordWriteLockHeld } = await import("./password-write-lock");
+    (db.verification.findFirst as MockInstance).mockImplementation(
+      async ({ where }: { where: { identifier: string } }) =>
+        fixture.memory.verification?.find((row) => row.identifier === where.identifier) ?? null,
+    );
+    db.$queryRaw.mockResolvedValue([{ locked: true }]);
+    const announced = vi.fn(() => {
+      expect(passwordWriteLockHeld()).toBe(true);
+    });
+    const stop = onUserBanned(announced);
+    try {
+      const response = await handlePasswordAuthRequest(
+        fixture.current,
+        new Request("http://localhost:3000/api/auth/reset-password", {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+          body: JSON.stringify({ token: "reset-token", newPassword: "replacement-password-456" }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(announced).toHaveBeenCalledExactlyOnceWith(fixture.userId, "session-revocation");
+    } finally {
+      stop();
+    }
+  });
+
   it.each(["pre-sweep", "post-sweep"])(
     "the %s deletes real plugin challenges, OTPs, attempt counters and trusted devices",
     async (sweep) => {
@@ -577,10 +813,7 @@ describe("password reset revocation", () => {
         vi.spyOn(context.internalAdapter, "updateUser").mockRejectedValueOnce(
           new Error("verification failed"),
         );
-      else
-        vi.mocked((await auth.$context).adapter.deleteMany).mockRejectedValueOnce(
-          new Error("cleanup failed"),
-        );
+      else db.verification.deleteMany.mockRejectedValue(new Error("cleanup failed"));
       const failure = new RangeError("post-sweep unavailable");
       db.mcpAgentToken.updateMany.mockResolvedValueOnce({ count: 1 }).mockRejectedValue(failure);
       const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -594,12 +827,8 @@ describe("password reset revocation", () => {
       expect(await context.internalAdapter.findUserById(userId)).toMatchObject({
         emailVerified: step !== "verification",
       });
-      expect((await auth.$context).adapter.deleteMany).toHaveBeenCalledWith({
-        model: "verification",
-        where: [
-          { field: "identifier", operator: "starts_with", value: "reset-password:" },
-          { field: "value", value: userId },
-        ],
+      expect(db.verification.deleteMany).toHaveBeenCalledWith({
+        where: { identifier: { startsWith: "reset-password:" }, value: userId },
       });
       db.mcpAgentToken.updateMany.mockResolvedValue({ count: 1 });
     },
@@ -683,12 +912,8 @@ describe("password reset revocation", () => {
           },
         }),
       ).resolves.toBeDefined();
-      expect((await auth.$context).adapter.deleteMany).toHaveBeenCalledExactlyOnceWith({
-        model: "verification",
-        where: [
-          { field: "identifier", operator: "starts_with", value: "reset-password:" },
-          { field: "value", value: userId },
-        ],
+      expect(db.verification.deleteMany).toHaveBeenCalledExactlyOnceWith({
+        where: { identifier: { startsWith: "reset-password:" }, value: userId },
       });
       expect(
         await context.internalAdapter.findVerificationValue("reset-password:other-link"),
@@ -1210,4 +1435,199 @@ describe("expected document identity with production before hook", () => {
     expect(await response.json()).toMatchObject({ code: "SESSION_UNAVAILABLE" });
     expect(fixture.memory).toEqual(before);
   });
+});
+
+// The Prisma adapter runs without transactions (index.ts says why), so a
+// reset's steps commit one by one. Pin the config, and the failure direction
+// the comment promises: a failed password write leaves the token spent and the
+// existing sessions deleted, the old password in place, and no onPasswordReset.
+// A sign-in still verifying that unchanged password may complete afterward.
+describe("password reset without adapter transactions", { timeout: 20_000 }, () => {
+  it("creates the Prisma adapter with Better-Auth's default (no transactions)", () => {
+    expect(prismaAdapterConfig).toEqual({ provider: "postgresql" });
+  });
+
+  it.each([400, 500])(
+    "fails closed when the password write fails after the token was spent (%i)",
+    async (status) => {
+      const { APIError } = await import("better-auth/api");
+      const { betterAuth: realBetterAuth } =
+        await vi.importActual<typeof import("better-auth")>("better-auth");
+      const { memoryAdapter } = await import("better-auth/adapters/memory");
+      const now = new Date();
+      const db: Record<string, Record<string, unknown>[]> = {
+        user: [
+          {
+            id: "u1",
+            email: "reset@example.test",
+            name: "Reset",
+            emailVerified: true,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        account: [],
+        session: [
+          {
+            id: "s1",
+            userId: "u1",
+            token: "session-token",
+            expiresAt: new Date(now.getTime() + 3_600_000),
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        verification: [
+          {
+            id: "v1",
+            identifier: "reset-password:the-token",
+            value: "u1",
+            expiresAt: new Date(now.getTime() + 3_600_000),
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      };
+      const memory = memoryAdapter(db);
+      // Like chess's Prisma adapter: `transaction` just runs the work, so every
+      // write commits as it happens. The account (password) write fails.
+      const nonTransactional = ((adapterOptions: Parameters<typeof memory>[0]) => {
+        const inner = memory(adapterOptions);
+        const adapter: typeof inner = new Proxy(inner, {
+          get(target, key, receiver) {
+            if (key === "transaction")
+              return (work: (trx: typeof inner) => unknown) => work(adapter);
+            const value = Reflect.get(target, key, receiver);
+            if ((key === "update" || key === "updateMany") && typeof value === "function") {
+              return (args: { model: string }) => {
+                if (args.model === "account") {
+                  if (status === 400)
+                    throw new APIError("BAD_REQUEST", { message: "password write failed" });
+                  throw new Error("password write failed");
+                }
+                return Reflect.apply(value, target, [args]);
+              };
+            }
+            return value;
+          },
+        });
+        return adapter;
+      }) as typeof memory;
+      const afterReset = vi.fn();
+      const instance = realBetterAuth({
+        baseURL: "https://app.example.test",
+        secret: "disposable-unit-test-secret-with-no-external-use",
+        database: nonTransactional,
+        rateLimit: { enabled: false },
+
+        emailAndPassword: {
+          ...auth.options.emailAndPassword,
+          enabled: true,
+          onPasswordReset: afterReset,
+        },
+        logger: { disabled: true },
+      } as Parameters<typeof realBetterAuth>[0]);
+      const ctx = await instance.$context;
+      const oldHash = await ctx.password.hash("old-password-12345");
+      db.account?.push({
+        id: "a1",
+        userId: "u1",
+        accountId: "u1",
+        providerId: "credential",
+        password: oldHash,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const res = await instance.handler(
+        new Request("https://app.example.test/api/auth/reset-password", {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: "https://app.example.test" },
+          body: JSON.stringify({ token: "the-token", newPassword: "new-password-12345" }),
+        }),
+      );
+
+      expect(res.status).toBe(status);
+      expect(db.verification).toHaveLength(0); // the link is spent
+      expect(db.session).toHaveLength(0); // existing sessions were deleted
+      expect(db.account?.[0]?.password).toBe(oldHash); // the old password stays
+      expect(afterReset).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("production password account hooks", () => {
+  it.each(["create", "update"] as const)(
+    "%s waits for quarantine and uses the production pepper after lock lapse",
+    async (kind) => {
+      const { withPasswordWriteLock } = await import("./password-write-lock");
+      const revocation = await import("./credential-revocation");
+      let release = () => {};
+      let reached = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const quarantining = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const quarantine = vi
+        .spyOn(revocation, "quarantineUntrustedPasswordWrite")
+        .mockImplementation(async () => {
+          reached();
+          await pending;
+        });
+      db.verification.findFirst.mockResolvedValue({
+        id: "v",
+        identifier: "reset-password:t",
+        value: "u-locked",
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      db.$queryRaw.mockResolvedValue([{ locked: true }]);
+      const hooks = auth.options.databaseHooks?.account?.[kind];
+      if (!hooks?.before || !hooks.after) throw new Error("Missing production account hooks");
+      const before = hooks.before as unknown as (
+        data: { password: string },
+        context: null,
+      ) => Promise<unknown>;
+      const after = hooks.after as unknown as (
+        data: { userId: string; providerId: string; password: string },
+        context: null,
+      ) => Promise<unknown>;
+      vi.useFakeTimers();
+      let completed = false;
+      const request = new Request("http://localhost:3000/api/auth/reset-password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: "t" }),
+      });
+      const response = withPasswordWriteLock(
+        "/reset-password",
+        request,
+        async () => {
+          await before({ password: "a-hash" }, null);
+          await vi.advanceTimersByTimeAsync(26_000);
+          try {
+            await after({ userId: "u-locked", providerId: "credential", password: "a-hash" }, null);
+          } finally {
+            completed = true;
+          }
+          return new Response("unexpected");
+        },
+        { getSession: async () => null },
+      );
+      // Observe the rejection before releasing the asynchronous quarantine.
+      const rejected = expect(response).rejects.toMatchObject({
+        body: { code: "PASSWORD_WRITE_UNCONFIRMED" },
+      });
+      await quarantining;
+      expect(quarantine).toHaveBeenCalledExactlyOnceWith("u-locked", { hash: passwordPepper.hash });
+      await Promise.resolve();
+      expect(completed).toBe(false);
+      release();
+      await rejected;
+      expect(completed).toBe(true);
+    },
+  );
 });

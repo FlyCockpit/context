@@ -20,6 +20,7 @@ import type prisma from "@cockpit-context/db";
 import type { Prisma } from "@cockpit-context/db";
 import { hashPassword } from "better-auth/crypto";
 
+import { withLockSlot } from "./lock-slots.js";
 import type { PasswordPepper } from "./password-pepper.js";
 import { PasswordPepperKeyError } from "./password-pepper.js";
 
@@ -53,90 +54,94 @@ export async function syncPasswordPepper(
   pepper: PasswordPepper,
   log: Log = { info: console.log, warn: console.warn },
 ): Promise<PasswordPepperSyncResult> {
-  const result = await db.$transaction(
-    async (tx: Prisma.TransactionClient) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${LOCK_KEY}))`;
-      let sealed = 0;
-      let resealed = 0;
-      let malformed = 0;
-      let corrupt = 0;
-      const unknown = new Map<string, number>();
-      let after: string | undefined;
-      for (;;) {
-        // Validate current-key envelopes too: a matching fingerprint does not
-        // prove that the payload is intact or contains a password hash.
-        const rows = await tx.account.findMany({
-          where: {
-            password: { not: null },
-            ...(after ? { id: { gt: after } } : {}),
-          },
-          select: { id: true, password: true },
-          orderBy: { id: "asc" },
-          take: PAGE_SIZE,
-        });
-        for (const row of rows) {
-          const stored = row.password;
-          if (stored === null) continue;
-          const kind = pepper.classify(stored);
-          if (kind === "unknown-key") {
-            const fingerprint = stored.split(":")[1] ?? "?";
-            unknown.set(fingerprint, (unknown.get(fingerprint) ?? 0) + 1);
-            continue;
-          }
-          if (kind === "malformed") {
-            malformed += 1;
-            continue;
-          }
-          if (kind === "corrupt" || (kind !== "legacy" && !pepper.isAuthentic(stored))) {
-            corrupt += 1;
-            continue;
-          }
-          if (kind === "current") continue;
-          const next = pepper.reseal(stored);
-          if (next === null) {
-            // A previous-key value that fails authentication: corrupt.
-            corrupt += 1;
-            continue;
-          }
-          // Conditional on the value read, so a concurrent password change
-          // (an old replica still serving) is never overwritten.
-          const { count } = await tx.account.updateMany({
-            where: { id: row.id, password: stored },
-            data: { password: next },
+  const result = await withLockSlot(() =>
+    db.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${LOCK_KEY}))`;
+        let sealed = 0;
+        let resealed = 0;
+        let malformed = 0;
+        let corrupt = 0;
+        const unknown = new Map<string, number>();
+        let after: string | undefined;
+        for (;;) {
+          // Validate current-key envelopes too: a matching fingerprint does not
+          // prove that the payload is intact or contains a password hash.
+          const rows = await tx.account.findMany({
+            where: {
+              password: { not: null },
+              ...(after ? { id: { gt: after } } : {}),
+            },
+            select: { id: true, password: true },
+            orderBy: { id: "asc" },
+            take: PAGE_SIZE,
           });
-          if (count === 1) {
-            if (kind === "legacy") sealed += 1;
-            else resealed += 1;
+          for (const row of rows) {
+            const stored = row.password;
+            if (stored === null) continue;
+            const kind = pepper.classify(stored);
+            if (kind === "unknown-key") {
+              const fingerprint = stored.split(":")[1] ?? "?";
+              unknown.set(fingerprint, (unknown.get(fingerprint) ?? 0) + 1);
+              continue;
+            }
+            if (kind === "malformed") {
+              malformed += 1;
+              continue;
+            }
+            if (kind === "corrupt" || (kind !== "legacy" && !pepper.isAuthentic(stored))) {
+              corrupt += 1;
+              continue;
+            }
+            if (kind === "current") continue;
+            const next = pepper.reseal(stored);
+            if (next === null) {
+              // A previous-key value that fails authentication: corrupt.
+              corrupt += 1;
+              continue;
+            }
+            // Conditional on the value read, so a concurrent password change
+            // (an old replica still serving) is never overwritten.
+            const { count } = await tx.account.updateMany({
+              where: { id: row.id, password: stored },
+              data: { password: next },
+            });
+            if (count === 1) {
+              if (kind === "legacy") sealed += 1;
+              else resealed += 1;
+            }
           }
+          if (rows.length < PAGE_SIZE) break;
+          after = rows[rows.length - 1]?.id;
         }
-        if (rows.length < PAGE_SIZE) break;
-        after = rows[rows.length - 1]?.id;
-      }
-      if (unknown.size > 0) {
-        const configured = [
-          pepper.fingerprint,
-          ...(pepper.previousFingerprint ? [pepper.previousFingerprint] : []),
-        ];
-        const total = [...unknown.values()].reduce((a, b) => a + b, 0);
-        throw new PasswordPepperKeyError(total, [...unknown.keys()].sort(), configured);
-      }
-      const remainingPrevious = pepper.previousFingerprint
-        ? await tx.account.count({
-            where: { password: { startsWith: `${PEPPER_PREFIX}:${pepper.previousFingerprint}:` } },
-          })
-        : 0;
-      return {
-        fingerprint: pepper.fingerprint,
-        sealed,
-        resealed,
-        malformed,
-        corrupt,
-        remainingPrevious,
-      };
-    },
-    // A large conversion seals thousands of rows (AES only, no scrypt): allow
-    // it more than Prisma's 5 s default, and wait for a sibling replica.
-    { maxWait: 60_000, timeout: 600_000 },
+        if (unknown.size > 0) {
+          const configured = [
+            pepper.fingerprint,
+            ...(pepper.previousFingerprint ? [pepper.previousFingerprint] : []),
+          ];
+          const total = [...unknown.values()].reduce((a, b) => a + b, 0);
+          throw new PasswordPepperKeyError(total, [...unknown.keys()].sort(), configured);
+        }
+        const remainingPrevious = pepper.previousFingerprint
+          ? await tx.account.count({
+              where: {
+                password: { startsWith: `${PEPPER_PREFIX}:${pepper.previousFingerprint}:` },
+              },
+            })
+          : 0;
+        return {
+          fingerprint: pepper.fingerprint,
+          sealed,
+          resealed,
+          malformed,
+          corrupt,
+          remainingPrevious,
+        };
+      },
+      // A large conversion seals thousands of rows (AES only, no scrypt): allow
+      // it more than Prisma's 5 s default, and wait for a sibling replica.
+      { maxWait: 60_000, timeout: 600_000 },
+    ),
   );
 
   if (result.sealed > 0) {
@@ -173,49 +178,52 @@ export async function resetUnusablePasswords(
   pepper: PasswordPepper,
   { confirm }: { confirm?: number } = {},
 ): Promise<{ count: number; userIds: string[]; reset: number }> {
-  return db.$transaction(
-    async (tx: Prisma.TransactionClient) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${LOCK_KEY}))`;
-      const unusable: { id: string; userId: string; password: string }[] = [];
-      let after: string | undefined;
-      for (;;) {
-        const rows = await tx.account.findMany({
-          where: { password: { not: null }, ...(after ? { id: { gt: after } } : {}) },
-          select: { id: true, userId: true, password: true },
-          orderBy: { id: "asc" },
-          take: PAGE_SIZE,
-        });
-        for (const row of rows) {
-          if (row.password === null) continue;
-          if (pepper.classify(row.password) === "legacy" || pepper.isAuthentic(row.password))
-            continue;
-          unusable.push({ id: row.id, userId: row.userId, password: row.password });
-        }
-        if (rows.length < PAGE_SIZE) break;
-        after = rows[rows.length - 1]?.id;
-      }
-      let reset = 0;
-      if (confirm === unusable.length && unusable.length > 0) {
-        // One scrypt for the whole batch (an unusable password nobody knows),
-        // sealed per row with a fresh nonce, so recovery stays fast however
-        // many rows a lost key affected.
-        const inner = await hashPassword(randomBytes(32).toString("base64url"));
-        for (const row of unusable) {
-          const password = pepper.reseal(inner);
-          if (password === null) throw new Error("password pepper: could not seal the reset value");
-          const { count } = await tx.account.updateMany({
-            where: { id: row.id, password: row.password },
-            data: { password },
+  return withLockSlot(() =>
+    db.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${LOCK_KEY}))`;
+        const unusable: { id: string; userId: string; password: string }[] = [];
+        let after: string | undefined;
+        for (;;) {
+          const rows = await tx.account.findMany({
+            where: { password: { not: null }, ...(after ? { id: { gt: after } } : {}) },
+            select: { id: true, userId: true, password: true },
+            orderBy: { id: "asc" },
+            take: PAGE_SIZE,
           });
-          reset += count;
+          for (const row of rows) {
+            if (row.password === null) continue;
+            if (pepper.classify(row.password) === "legacy" || pepper.isAuthentic(row.password))
+              continue;
+            unusable.push({ id: row.id, userId: row.userId, password: row.password });
+          }
+          if (rows.length < PAGE_SIZE) break;
+          after = rows[rows.length - 1]?.id;
         }
-      }
-      return {
-        count: unusable.length,
-        userIds: [...new Set(unusable.map((row) => row.userId))],
-        reset,
-      };
-    },
-    { maxWait: 60_000, timeout: 600_000 },
+        let reset = 0;
+        if (confirm === unusable.length && unusable.length > 0) {
+          // One scrypt for the whole batch (an unusable password nobody knows),
+          // sealed per row with a fresh nonce, so recovery stays fast however
+          // many rows a lost key affected.
+          const inner = await hashPassword(randomBytes(32).toString("base64url"));
+          for (const row of unusable) {
+            const password = pepper.reseal(inner);
+            if (password === null)
+              throw new Error("password pepper: could not seal the reset value");
+            const { count } = await tx.account.updateMany({
+              where: { id: row.id, password: row.password },
+              data: { password },
+            });
+            reset += count;
+          }
+        }
+        return {
+          count: unusable.length,
+          userIds: [...new Set(unusable.map((row) => row.userId))],
+          reset,
+        };
+      },
+      { maxWait: 60_000, timeout: 600_000 },
+    ),
   );
 }

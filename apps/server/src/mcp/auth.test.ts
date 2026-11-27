@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import { createSign, generateKeyPairSync } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

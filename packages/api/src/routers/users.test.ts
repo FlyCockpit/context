@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import { createHash } from "node:crypto";
 import type { Session } from "@cockpit-context/auth";
 import { isUserBanned } from "@cockpit-context/auth/ban";
@@ -10,12 +12,34 @@ import { mockDeep } from "vitest-mock-extended";
 import type { Context } from "../context";
 import { usersRouter } from "./users";
 
+// Capture how each budget is declared and which key it is charged against,
+// and let a test make the next consume throw (`createProcedureBudget` has its
+// own tests).
+const budget = vi.hoisted(() => ({
+  options: [] as Array<Record<string, unknown>>,
+  charges: [] as Array<{ prefix: unknown; key: string }>,
+  errorQueue: [] as unknown[],
+}));
+vi.mock("../lib/procedure-budget", () => ({
+  createProcedureBudget: (options: Record<string, unknown>) => {
+    budget.options.push(options);
+    return async (key: string) => {
+      budget.charges.push({ prefix: options.keyPrefix, key });
+      const error = budget.errorQueue.shift();
+      if (error) throw error;
+    };
+  },
+}));
+
 // Mock @cockpit-context/db before importing the module so the router pulls the deep-
 // mocked Prisma client.
 vi.mock("@cockpit-context/db", async () => {
   const { mockDeep } = await import("vitest-mock-extended");
   const db = mockDeep();
   db.appSetting.findMany.mockResolvedValue([]);
+  db.$transaction.mockImplementation(async (work: unknown) =>
+    typeof work === "function" ? work(db) : Promise.all(work as Promise<unknown>[]),
+  );
   return { default: db };
 });
 
@@ -220,13 +244,20 @@ describe("usersRouter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db.$queryRaw.mockResolvedValue([{ count: 2 }]);
-    db.$transaction.mockImplementation(async (run: unknown) =>
-      typeof run === "function" ? run(prisma) : Promise.all(run as Promise<unknown>[]),
+    db.$transaction.mockImplementation(async (work: unknown) =>
+      typeof work === "function" ? work(prisma) : Promise.all(work as Promise<unknown>[]),
     );
+    budget.charges.length = 0;
+    budget.errorQueue.length = 0;
     db.conversation.findMany.mockResolvedValue([]);
     db.repository.findMany.mockResolvedValue([]);
     isEmailConfiguredMock.mockReturnValue(true);
     createVerificationValue.mockResolvedValue({});
+    // Production mints on the setup transaction's client; this forwards that
+    // stand-in write to the same in-memory verification table used by assertions.
+    db.verification.create.mockImplementation(async ({ data }: { data: unknown }) =>
+      createVerificationValue(data),
+    );
     // Reads back what the mint wrote (the mailed record takes user and expiry from the link).
     findVerificationValue.mockImplementation(
       async (identifier: string) =>
@@ -383,6 +414,49 @@ describe("usersRouter", () => {
   });
 
   describe("invite", () => {
+    it("charges the admin's invite-mail budget before creating anyone", async () => {
+      budget.errorQueue.push(new ORPCError("TOO_MANY_REQUESTS"));
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      await expect(
+        client.invite({ email: "new@example.com", name: "New", locale: "en-US" }),
+      ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+      expect(budget.charges).toEqual([{ prefix: "rl:users-invite-mail", key: "admin-user-id" }]);
+      expect(auth.api.createUser).not.toHaveBeenCalled();
+      expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+    });
+
+    it("charges nothing before the admin gate or input validation", async () => {
+      const user = createRouterClient(usersRouter, {
+        context: buildContext({ user: { role: "user" } }),
+      });
+      await expect(
+        user.invite({ email: "new@example.com", name: "New", locale: "en-US" }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(user.passwordLink({ userId: "u2" })).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+      const admin = createRouterClient(usersRouter, { context: buildContext() });
+      await expect(
+        admin.invite({ email: "bad", name: "New", locale: "en-US" }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await expect(admin.passwordLink({ userId: "" })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+      expect(budget.charges).toEqual([]);
+      expect(auth.api.createUser).not.toHaveBeenCalled();
+      expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+    });
+
+    it("declares the invite budgets fail-closed", () => {
+      const declared = budget.options.filter((o) => String(o.keyPrefix).startsWith("rl:users-"));
+      expect(declared.map((o) => [o.keyPrefix, o.points, o.durationSeconds, o.failClosed])).toEqual(
+        [
+          ["rl:users-invite-mail", 30, 3600, true],
+          ["rl:users-resend-invite", 5, 3600, true],
+        ],
+      );
+    });
+
     it("emails a one-time set-password link and returns no secret", async () => {
       authApi.api.createUser.mockResolvedValue({ user: { id: "new-user-id" } });
       sendEmailMock.mockResolvedValue(undefined);
@@ -502,7 +576,8 @@ describe("usersRouter", () => {
       expect(res.emailSent).toBe(false);
       expect(res.userId).toBe("new-user-id");
       expect(res).toHaveProperty("setPasswordUrl", expect.stringContaining(mintedToken()));
-      expect(db.verification.create).not.toHaveBeenCalled();
+      expect(db.verification.create).toHaveBeenCalledOnce();
+      expect(mailedRecordFor(mintedToken())).toBeUndefined();
     });
 
     it("links to the web origin and the invitee's locale", async () => {
@@ -1253,6 +1328,26 @@ describe("usersRouter", () => {
         .map((call) => String(call[0]))
         .filter((line) => line.startsWith("[audit] "))
         .map((line) => JSON.parse(line.slice("[audit] ".length)));
+
+    it("charges the admin's invite-mail budget and the target's resend budget first", async () => {
+      const client = createRouterClient(usersRouter, { context: buildContext() });
+      await client.passwordLink({ userId: target.id });
+      expect(budget.charges).toEqual([
+        { prefix: "rl:users-invite-mail", key: "admin-user-id" },
+        { prefix: "rl:users-resend-invite", key: target.id },
+      ]);
+    });
+    it.each(["TOO_MANY_REQUESTS", "SERVICE_UNAVAILABLE"] as const)(
+      "mints and mails nothing once a budget fails: %s",
+      async (code) => {
+        budget.errorQueue.push(undefined, new ORPCError(code));
+        const client = createRouterClient(usersRouter, { context: buildContext() });
+        await expect(client.passwordLink({ userId: target.id })).rejects.toMatchObject({ code });
+        expect(db.verification.deleteMany).not.toHaveBeenCalled();
+        expect(createVerificationValue).not.toHaveBeenCalled();
+        expect(sendEmailMock).not.toHaveBeenCalled();
+      },
+    );
 
     it("throws NOT_FOUND for a non-admin and mints nothing", async () => {
       const client = createRouterClient(usersRouter, {

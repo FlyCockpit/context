@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import { describe, expect, it, vi } from "vitest";
 
 // `/sign-up/email` must not tell a free address from a registered one. This
@@ -31,6 +33,12 @@ vi.mock("@cockpit-context/db", () => ({
       findUnique: async () => null,
       findFirst: async () => (state.db.user?.[0] ? { id: state.db.user[0].id } : null),
       findMany: async () => [],
+    },
+    account: {
+      findFirst: async ({ where }: { where: { userId: string; providerId: string } }) =>
+        state.db.account?.find(
+          (row) => row.userId === where.userId && row.providerId === where.providerId,
+        ) ?? null,
     },
     appSetting: {
       findUnique: async () => {
@@ -85,7 +93,18 @@ vi.mock("better-auth/adapters/prisma", async () => {
     });
   const memory = memoryAdapter(state.db);
   return {
-    prismaAdapter: () => (options: Parameters<typeof memory>[0]) => recording(memory(options)),
+    prismaAdapter: () => (options: Parameters<typeof memory>[0]) => {
+      const inner = memory(options);
+      // Match production's nontransactional Prisma adapter: global Prisma
+      // credential/locale reads see every write immediately.
+      const adapter: typeof inner = new Proxy(inner, {
+        get(target, key, receiver) {
+          if (key === "transaction") return (work: (tx: typeof inner) => unknown) => work(adapter);
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      return recording(adapter);
+    },
   };
 });
 

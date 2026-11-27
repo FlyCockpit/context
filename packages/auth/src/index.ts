@@ -17,11 +17,28 @@ import { adminPluginAccess } from "./admin-access.js";
 import { announceIfUserBanned, announceUserSessionsRevoked } from "./ban.js";
 import { bannedSessionGuard } from "./banned-session-guard.js";
 import { revokeBootstrapToken } from "./bootstrap-token.js";
+import {
+  passwordChangeRevocationTarget,
+  revokeCredentialsAfterPasswordChange,
+  revokeCredentialsAfterPasswordReset,
+  revokeCredentialsBeforePasswordReset,
+} from "./credential-revocation.js";
 import { createResetLinkHooks } from "./invite-verification.js";
 import { resolveMcpPlugins } from "./mcp-plugins.js";
-import { revokeUserCredentials } from "./oauth-revocation.js";
 import { createPasswordPepper } from "./password-pepper.js";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password-policy.js";
+import { deleteResetLinks, withCredentialSetupLock } from "./password-reset-links.js";
+import {
+  fencePasswordSessionAfter,
+  fencePasswordSessionBefore,
+  recordSignUpCredential,
+  recordTwoFactorChallenge,
+} from "./password-sign-in-fence.js";
+import {
+  confirmPasswordWriteLocked,
+  guardPasswordAccountCreate,
+  guardPasswordAccountUpdate,
+} from "./password-write-lock.js";
 import {
   hasAnyUser,
   invalidateSignupAvailabilityCache,
@@ -144,6 +161,15 @@ export const passwordPepper = createPasswordPepper({
 });
 
 export const auth = betterAuth({
+  // Adapter transactions intentionally stay OFF (Better Auth's default).
+  // Sign-up awaits verification mail: its global Prisma locale lookup cannot
+  // see a user created inside an uncommitted adapter transaction, and the
+  // mailer's 40-second total delivery budget exceeds Prisma's default 5 seconds.
+  // Resets therefore commit step by step: a failed password write leaves the
+  // token spent and existing sessions deleted, but the old password still works.
+  // An in-flight sign-in may finish on that unchanged hash; no post-sweep runs.
+  // Request a fresh Forgot password link. Do not enable adapter transactions
+  // without redesigning these callbacks and the failure contract tests.
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
@@ -193,10 +219,9 @@ export const auth = betterAuth({
     ...(emailConfigured ? { sendResetPassword } : {}),
     onPasswordReset: async ({ user }) => {
       // Defense in depth after Better Auth commits the password and session deletion.
-      announceUserSessionsRevoked(user.id);
       let revocationFailure: { error: unknown } | undefined;
       try {
-        await revokeUserCredentials(user.id);
+        await revokeCredentialsAfterPasswordReset(user.id);
       } catch (err) {
         console.error(
           "SECURITY password-reset after-sweep failed",
@@ -204,10 +229,26 @@ export const auth = betterAuth({
           err instanceof Error ? err.name : typeof err,
         );
         revocationFailure = { error: err };
+      } finally {
+        // Register-before-read streams admitted during the sweep must also close.
+        // Still tear down existing exchanges if every revocation attempt failed.
+        announceUserSessionsRevoked(user.id);
       }
       // Upstream cleanup is best-effort after the password is committed, even
       // when the post-sweep failed. Mailed-link verification runs in hooks.after.
-      await resetLinks.afterPasswordReset((await auth.$context).adapter, user.id);
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await withCredentialSetupLock(user.id, (tx) => deleteResetLinks(tx, user.id));
+          break;
+        } catch (error) {
+          if (attempt < 3) continue;
+          console.error(
+            "[auth] deleting the user's other reset links failed:",
+            error instanceof Error ? `${error.name}: ${error.message}` : "unknown error",
+          );
+          break;
+        }
+      }
       if (revocationFailure) {
         const pending = new APIError("INTERNAL_SERVER_ERROR", {
           message: "Password-reset credential revocation failed",
@@ -348,27 +389,18 @@ export const auth = betterAuth({
         // Mirror 1.7.18's body/query token fallback and expiry comparison.
         const token = ctx.body?.token || ctx.query?.token;
         if (typeof token === "string" && token) {
-          let userId: string | undefined;
           try {
             // Judge invite activation before the pre-sweep deletes live sessions:
             // a shown link must not become redeemable because we signed its owner out.
             await resetLinks.before(ctx);
-            const verification = await ctx.context.internalAdapter.findVerificationValue(
-              `reset-password:${token}`,
-            );
-            if (verification && !(verification.expiresAt < new Date())) {
-              userId = verification.value;
-              // Sessions and credentials are revoked under the same issuance lock.
-              // If reset fails before committing, the user is signed out
-              // everywhere with the password unchanged and reset link intact:
-              // the safe direction.
-              await revokeUserCredentials(userId, { revokeSessions: true });
-            }
+            // A failed write may spend its link and delete existing sessions,
+            // leaving the old password intact. Successful resets fence old proof.
+            await revokeCredentialsBeforePasswordReset(ctx);
           } catch (error) {
             if (error instanceof APIError) throw error;
             console.error(
               "SECURITY password-reset preflight failed",
-              userId ?? "unknown",
+              "unknown",
               error instanceof Error ? error.name : typeof error,
             );
             throw new APIError("SERVICE_UNAVAILABLE", {
@@ -387,28 +419,23 @@ export const auth = betterAuth({
       }
     }),
     after: createAuthMiddleware(async (ctx) => {
-      if (
-        ctx.path === "/change-password" &&
-        ctx.body?.revokeOtherSessions === true &&
-        !(ctx.context.returned instanceof APIError) &&
-        ctx.context.session &&
-        ctx.context.returned &&
-        typeof ctx.context.returned === "object" &&
-        "user" in ctx.context.returned
-      ) {
-        const userId = ctx.context.session.user.id;
-        announceUserSessionsRevoked(userId);
+      const target = passwordChangeRevocationTarget({
+        path: ctx.path,
+        body: ctx.body,
+        returned: ctx.context.returned,
+      });
+      if (target) {
         try {
-          // Better Auth preserves the caller via a replacement session. Only
-          // standing credentials are swept here; no session rows are deleted.
-          await revokeUserCredentials(userId);
+          await revokeCredentialsAfterPasswordChange(target);
         } catch (error) {
           console.error(
             "SECURITY change-password after-sweep failed",
-            userId,
+            target.userId,
             error instanceof Error ? error.name : typeof error,
           );
           throw error;
+        } finally {
+          announceUserSessionsRevoked(target.userId);
         }
       }
 
@@ -511,6 +538,28 @@ export const auth = betterAuth({
       : []),
   ],
   databaseHooks: {
+    account: {
+      create: {
+        before: async (account, context) => {
+          guardPasswordAccountCreate(account, context);
+          recordSignUpCredential(account, context);
+        },
+        after: async () => confirmPasswordWriteLocked({ hash: passwordPepper.hash }),
+      },
+      update: {
+        before: async (data) => guardPasswordAccountUpdate(data),
+        after: async () => confirmPasswordWriteLocked({ hash: passwordPepper.hash }),
+      },
+    },
+    session: {
+      create: {
+        before: async (session, context) => fencePasswordSessionBefore(session, context),
+        after: async (session, context) => fencePasswordSessionAfter(session, context),
+      },
+    },
+    verification: {
+      create: { after: async (verification) => recordTwoFactorChallenge(verification) },
+    },
     user: {
       delete: {
         before: async (user) => {

@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import { mintMcpAgentToken } from "@cockpit-context/db/mcp-agent-token";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

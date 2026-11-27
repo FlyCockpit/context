@@ -55,3 +55,11 @@ describe("backup scheduling controls", () => {
     expect(sharedVars.BACKUP_S3_PREFIX.parse(undefined)).toBe("cockpit-context/prod/database");
   });
 });
+
+describe("auth lock connection budget", () => {
+  it("rejects a pool of 2 or 1, reserving a connection for work under nested locks", () => {
+    for (const n of [1, 2]) expect(sharedVars.DATABASE_POOL_MAX.safeParse(n).success).toBe(false);
+    expect(sharedVars.DATABASE_POOL_MAX.parse(3)).toBe(3);
+    expect(sharedVars.DATABASE_POOL_MAX.parse(undefined)).toBe(10);
+  });
+});

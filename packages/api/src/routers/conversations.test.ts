@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import { createEventBus } from "@cockpit-context/jobs/event-bus";
 import type { LiveConversationState, RunActivityEvent, RunEvent } from "@cockpit-context/runs";
 import { createRouterClient, ORPCError } from "@orpc/server";

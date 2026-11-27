@@ -31,6 +31,12 @@
     "./password-pepper-store": {
       "default": "./src/password-pepper-store.ts"
     },
+    "./password-reset-links": {
+      "default": "./src/password-reset-links.ts"
+    },
+    "./password-auth-handler": {
+      "default": "./src/password-auth-handler.ts"
+    },
     "./password-policy": {
       "default": "./src/password-policy.ts"
     },

@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { anonymousContext, sessionContext } from "../test-support/context";
 
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 vi.mock("@cockpit-context/db", async () => {
   const { mockDeep } = await import("vitest-mock-extended");
   const db = mockDeep();

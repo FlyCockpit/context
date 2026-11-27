@@ -1,3 +1,5 @@
+vi.mock("@cockpit-context/env/shared", () => ({ env: { DATABASE_POOL_MAX: 10 } }));
+
 import type { MockInstance } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
