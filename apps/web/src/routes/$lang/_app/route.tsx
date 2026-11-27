@@ -18,6 +18,7 @@ import { useReloadOnIdentityChange } from "@/hooks/use-reload-on-identity-change
 import { useUserLocaleSync } from "@/hooks/use-user-locale-sync";
 import { markAppShellHydrated } from "@/lib/app-shell-hydration";
 import { MAIN_SCROLLER_ID } from "@/lib/main-scroller";
+import { SessionUnconfirmed } from "@/lib/session-unconfirmed";
 
 export const Route = createFileRoute("/$lang/_app")({
   // App/auth/admin surfaces depend on browser-only auth, PWA, viewport, and
@@ -55,13 +56,18 @@ function AppShellLayout() {
   // keep the current page on screen as usual.
   const firstLoadDone = useRouterState({ select: (state) => state.resolvedLocation !== undefined });
 
+  // Until that first load resolves, no guard has admitted anyone yet: the
+  // chrome shows no account (lib/session-unconfirmed.ts). The provider stays
+  // in place either way, so the frame never remounts.
   return (
     <>
-      <AppShellFrame>
-        <PullToRefresh onRefresh={handleRefresh}>
-          {firstLoadDone ? <Outlet /> : <RouteContentSkeleton />}
-        </PullToRefresh>
-      </AppShellFrame>
+      <SessionUnconfirmed active={!firstLoadDone}>
+        <AppShellFrame>
+          <PullToRefresh onRefresh={handleRefresh}>
+            {firstLoadDone ? <Outlet /> : <RouteContentSkeleton />}
+          </PullToRefresh>
+        </AppShellFrame>
+      </SessionUnconfirmed>
       {import.meta.env.DEV && (
         <>
           <TanStackRouterDevtools position="bottom-left" />
@@ -74,10 +80,14 @@ function AppShellLayout() {
 
 /** The shell around the loading page: same frame, content skeleton only. */
 function AppShellPending() {
+  // It paints before any session guard has admitted anyone: the chrome shows
+  // no account until one has (lib/session-unconfirmed.ts).
   return (
-    <AppShellFrame>
-      <RouteContentSkeleton />
-    </AppShellFrame>
+    <SessionUnconfirmed>
+      <AppShellFrame>
+        <RouteContentSkeleton />
+      </AppShellFrame>
+    </SessionUnconfirmed>
   );
 }
 

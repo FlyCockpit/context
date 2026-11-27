@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const server = vi.hoisted(() => ({ getRouteSession: vi.fn() }));
 vi.mock("@/server/auth-session", () => ({ getRouteSession: server.getRouteSession }));
 
-import { isDocumentReplaced, resetDocumentIdentityForTests } from "@/lib/document-identity";
+import {
+  isDocumentIdentityUnverified,
+  isDocumentReplaced,
+  reportSessionRejected,
+  resetDocumentIdentityForTests,
+} from "@/lib/document-identity";
 
 import { resolveRouteSession } from "./route-session";
 
@@ -21,7 +26,7 @@ beforeEach(() => {
   // No server-rendered app shell in this document: the hydration wait
   // (lib/app-shell-hydration.ts, tested there) resolves at once.
   vi.stubGlobal("document", {
-    documentElement: { style: { visibility: "" } },
+    documentElement: { style: { setProperty: () => {} } },
     querySelector: () => null,
   });
 });
@@ -70,11 +75,74 @@ describe("resolveRouteSession (every session guard: _auth, admin, the auth pages
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it("a probe for this document's own identity confirms an unverified identity", async () => {
+    server.getRouteSession.mockResolvedValueOnce(resolved("a"));
+    await resolveRouteSession();
+    reportSessionRejected(); // no watcher mounted: unverified
+    expect(isDocumentIdentityUnverified()).toBe(true);
+    server.getRouteSession.mockResolvedValueOnce(resolved("a"));
+    await resolveRouteSession();
+    expect(isDocumentIdentityUnverified()).toBe(false);
+  });
+
+  it("an answer that predates a newer invalidation admits nothing: the guard asks again", async () => {
+    server.getRouteSession.mockResolvedValueOnce(resolved("a"));
+    await resolveRouteSession();
+    let answer: (value: unknown) => void = () => {};
+    server.getRouteSession.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const probe = resolveRouteSession();
+    // Another tab signs out while the probe runs (no watcher mounted here).
+    reportSessionRejected();
+    server.getRouteSession.mockResolvedValueOnce(resolved(null));
+    answer(resolved("a"));
+    // The stale "A" answer is not admitted; the fresh one replaces the document.
+    expect(await settles(probe)).toBe(false);
+    expect(server.getRouteSession).toHaveBeenCalledTimes(3);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("a fresh re-probe for the same account admits and confirms it", async () => {
+    server.getRouteSession.mockResolvedValueOnce(resolved("a"));
+    await resolveRouteSession();
+    let answer: (value: unknown) => void = () => {};
+    server.getRouteSession.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const probe = resolveRouteSession();
+    reportSessionRejected();
+    server.getRouteSession.mockResolvedValueOnce(resolved("a"));
+    answer(resolved("a"));
+    await expect(probe).resolves.toEqual(resolved("a"));
+    expect(isDocumentIdentityUnverified()).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("a document invalidated on every probe stops asking, admits nothing and stays unverified", async () => {
+    server.getRouteSession.mockResolvedValueOnce(resolved("a"));
+    await resolveRouteSession();
+    server.getRouteSession.mockImplementation(async () => {
+      reportSessionRejected();
+      return resolved("a");
+    });
+    // The guards' retryable error state, never the stale answer.
+    await expect(resolveRouteSession()).resolves.toEqual({ status: "error" });
+    expect(server.getRouteSession).toHaveBeenCalledTimes(4);
+    expect(isDocumentIdentityUnverified()).toBe(true);
+  });
+
   it("a failed probe decides nothing", async () => {
     server.getRouteSession.mockResolvedValueOnce(resolved("a"));
     await resolveRouteSession();
     server.getRouteSession.mockResolvedValueOnce({ status: "error" });
+    reportSessionRejected();
     await expect(resolveRouteSession()).resolves.toEqual({ status: "error" });
     expect(reload).not.toHaveBeenCalled();
+    expect(isDocumentIdentityUnverified()).toBe(true);
   });
 });
